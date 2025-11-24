@@ -489,6 +489,7 @@ class ESM3(nn.Module, ESM3InferenceClient):
             function=function_tokens,
             residue_annotations=residue_annotation_tokens,
             coordinates=coordinates,
+            potential_sequence_of_concern=input.potential_sequence_of_concern,
         ).to(next(self.parameters()).device)
 
     def decode(self, input: ESMProteinTensor) -> ESMProtein:

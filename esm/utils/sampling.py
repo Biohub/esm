@@ -284,6 +284,9 @@ def sample_sasa_logits(
     sasa_value[max_prob_idx == 18] = float("inf")
     sasa_value[~sampling_mask] = float("inf")
 
+    # Set BOS and EOS tokens to 0
+    sasa_value[..., 0] = 0.0
+    sasa_value[..., -1] = 0.0
     return sasa_value
 
 

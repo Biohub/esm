@@ -178,9 +178,10 @@ class ESMC(nn.Module, ESMCInferenceClient):
 
         if input.sequence is not None:
             sequence_tokens = self._tokenize([input.sequence])[0]
-        return ESMProteinTensor(sequence=sequence_tokens).to(
-            next(self.parameters()).device
-        )
+        return ESMProteinTensor(
+            sequence=sequence_tokens,
+            potential_sequence_of_concern=input.potential_sequence_of_concern,
+        ).to(next(self.parameters()).device)
 
     def decode(self, input: ESMProteinTensor) -> ESMProtein:
         input = attr.evolve(input)  # Make a copy

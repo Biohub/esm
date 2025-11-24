@@ -118,7 +118,6 @@ def serialize_structure_prediction_input(all_atom_input: StructurePredictionInpu
 
     result: dict[str, Any] = {"sequences": sequences}
 
-    # Add covalent bonds if present
     if all_atom_input.covalent_bonds is not None:
         result["covalent_bonds"] = [
             {
@@ -130,6 +129,18 @@ def serialize_structure_prediction_input(all_atom_input: StructurePredictionInpu
                 "atom_idx2": bond.atom_idx2,
             }
             for bond in all_atom_input.covalent_bonds
+        ]
+
+    if all_atom_input.pocket is not None:
+        result["pocket"] = {
+            "binder_chain_id": all_atom_input.pocket.binder_chain_id,
+            "contacts": all_atom_input.pocket.contacts,
+        }
+
+    if all_atom_input.distogram_conditioning is not None:
+        result["distogram_conditioning"] = [
+            {"chain_id": disto.chain_id, "distogram": disto.distogram.tolist()}
+            for disto in all_atom_input.distogram_conditioning
         ]
 
     return result

@@ -38,6 +38,20 @@ msgpack_numpy.patch()
 CHAIN_ID_CONST = "A"
 
 
+def _str_key_to_int_key(dct: dict, ignore_keys: list[str] | None = None) -> dict:
+    new_dict = {}
+    for k, v in dct.items():
+        v_new = v
+        if k not in ignore_keys and isinstance(v, dict):
+            v_new = _str_key_to_int_key(v, ignore_keys=ignore_keys)
+        # Note assembly_composition is *supposed* to have string keys.
+        if isinstance(k, str) and k.isdigit():
+            new_dict[int(k)] = v_new
+        else:
+            new_dict[k] = v_new
+    return new_dict
+
+
 def _num_non_null_residues(seqres_to_structure_chain: Mapping[int, Residue]) -> int:
     return sum(
         residue.residue_number is not None
@@ -366,6 +380,9 @@ class ProteinChain:
 
     @classmethod
     def from_state_dict(cls, dct):
+        # Note: assembly_composition is *supposed* to have string keys.
+        dct = _str_key_to_int_key(dct, ignore_keys=["assembly_composition"])
+
         for k, v in dct.items():
             if isinstance(v, list):
                 dct[k] = np.array(v)
@@ -1121,7 +1138,9 @@ class ProteinChain:
 
     def infer_oxygen(self) -> ProteinChain:
         """Oxygen position is fixed given N, CA, C atoms. Infer it if not provided."""
-        O_missing_indices = np.argwhere(np.isnan(self.atoms["O"]).any(axis=1)).squeeze()
+        O_missing_indices = np.argwhere(
+            ~np.isfinite(self.atoms["O"]).all(axis=1)
+        ).squeeze()
 
         O_vector = torch.tensor([0.6240, -1.0613, 0.0103], dtype=torch.float32)
         N, CA, C = torch.from_numpy(self.atoms[["N", "CA", "C"]]).float().unbind(dim=1)

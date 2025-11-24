@@ -21,12 +21,16 @@ from esm.sdk.api import (
     InverseFoldingConfig,
     LogitsConfig,
     LogitsOutput,
-    ProteinChain,
+    ProteinComplex,
     ProteinType,
     SamplingConfig,
     SamplingTrackConfig,
 )
-from esm.sdk.base_forge_client import _BaseForgeInferenceClient
+from esm.sdk.base_forge_client import (
+    EndpointHandler,
+    _BaseForgeBatchClient,
+    _BaseForgeInferenceClient,
+)
 from esm.sdk.retry import retry_decorator
 from esm.utils.constants.api import MIMETYPE_ES_PICKLE
 from esm.utils.misc import deserialize_tensors, maybe_list, maybe_tensor
@@ -107,7 +111,7 @@ class SequenceStructureForgeInferenceClient(_BaseForgeInferenceClient):
         sequence: str,
         msa: MSA | Literal["auto"] | None,
         config: FoldingConfig,
-        target_structure: ProteinChain | None,
+        target_structure: ProteinComplex | None,
         model_name: str | None,
     ):
         request: dict[str, Any] = {"sequence": sequence}
@@ -211,7 +215,7 @@ class SequenceStructureForgeInferenceClient(_BaseForgeInferenceClient):
         model_name: str | None = None,
         msa: MSA | Literal["auto"] | None = None,
         config: FoldingConfig = FoldingConfig(),
-        target_structure: ProteinChain | None = None,
+        target_structure: ProteinComplex | None = None,
     ) -> ESMProtein | ESMProteinError:
         """Predict coordinates for a protein sequence.
 
@@ -253,7 +257,7 @@ class SequenceStructureForgeInferenceClient(_BaseForgeInferenceClient):
         model_name: str | None = None,
         msa: MSA | Literal["auto"] | None = None,
         config: FoldingConfig = FoldingConfig(),
-        target_structure: ProteinChain | None = None,
+        target_structure: ProteinComplex | None = None,
     ) -> ESMProtein | ESMProteinError:
         """Predict coordinates for a protein sequence.
 
@@ -693,6 +697,7 @@ class ESM3ForgeInferenceClient(ESM3InferenceClient, _BaseForgeInferenceClient):
             sasa=maybe_tensor(data["outputs"]["sasa"]),
             function=maybe_tensor(data["outputs"]["function"]),
             residue_annotations=maybe_tensor(data["outputs"]["residue_annotation"]),
+            potential_sequence_of_concern=data["potential_sequence_of_concern"],
         )
 
     @staticmethod
@@ -1174,7 +1179,10 @@ class ESMCForgeInferenceClient(ESMCInferenceClient, _BaseForgeInferenceClient):
         except ESMProteinError as e:
             return e
 
-        return ESMProteinTensor(sequence=maybe_tensor(data["outputs"]["sequence"]))
+        return ESMProteinTensor(
+            sequence=maybe_tensor(data["outputs"]["sequence"]),
+            potential_sequence_of_concern=data["potential_sequence_of_concern"],
+        )
 
     @retry_decorator
     def encode(self, input: ESMProtein) -> ESMProteinTensor | ESMProteinError:
@@ -1188,7 +1196,10 @@ class ESMCForgeInferenceClient(ESMCInferenceClient, _BaseForgeInferenceClient):
         except ESMProteinError as e:
             return e
 
-        return ESMProteinTensor(sequence=maybe_tensor(data["outputs"]["sequence"]))
+        return ESMProteinTensor(
+            sequence=maybe_tensor(data["outputs"]["sequence"]),
+            potential_sequence_of_concern=data["potential_sequence_of_concern"],
+        )
 
     @retry_decorator
     async def async_decode(
@@ -1277,3 +1288,146 @@ class ESMCForgeInferenceClient(ESMCInferenceClient, _BaseForgeInferenceClient):
         raise NotImplementedError(
             f"Can not get underlying remote model {self.model} from a Forge client."
         )
+
+
+class FoldHandler(EndpointHandler[MolecularComplexResult]):
+    def __init__(self, batch_client: _BaseForgeBatchClient, model: str | None = None):
+        super().__init__(batch_client)
+        self.model = model
+
+    @property
+    def endpoint_name(self) -> str:
+        return "fold"
+
+    def _prepare_request(
+        self,
+        sequence: str,
+        model_name: str | None = None,
+        config: FoldingConfig = FoldingConfig(),
+        msa: MSA | Literal["auto"] | None = None,
+        target_structure: ProteinComplex | None = None,
+    ) -> list[dict[str, Any]]:
+        assert (
+            config.include_distogram is False
+        ), "include_distogram is not supported for Forge right now"
+
+        seq_len = len(sequence)
+        if seq_len == 0:
+            raise ValueError(
+                "Input sequence length is 0. Please provide a valid input."
+            )
+
+        request = SequenceStructureForgeInferenceClient._process_fold_request(
+            sequence,
+            msa,
+            config,
+            target_structure,
+            model_name if model_name is not None else self.model,
+        )
+        # batch API expects a list of requests, and currently we only support one sequence at a time
+        return [request]
+
+    def _process_response(self, response: dict, **kwargs) -> ESMProtein:
+        s3_url = response["response"]
+        result = self._batch_client.get_result_from_s3(s3_url)
+        return SequenceStructureForgeInferenceClient._process_fold_response(
+            result, kwargs["sequence"]
+        )
+
+    async def _async_process_response(self, response: dict, **kwargs) -> ESMProtein:
+        s3_url = response["response"]
+        result = await self._batch_client.async_get_result_from_s3(s3_url)
+        return SequenceStructureForgeInferenceClient._process_fold_response(
+            result, kwargs["sequence"]
+        )
+
+
+class FoldAllAtomHandler(EndpointHandler[MolecularComplexResult]):
+    def __init__(self, batch_client: _BaseForgeBatchClient, model: str | None = None):
+        super().__init__(batch_client)
+        self.model = model
+
+    @property
+    def endpoint_name(self) -> str:
+        return "fold_all_atom"
+
+    def _prepare_request(
+        self,
+        all_atom_input: StructurePredictionInput,
+        model_name: str | None = None,
+        config: FoldingConfig = FoldingConfig(),
+    ) -> list[dict[str, Any]]:
+        assert (
+            config.include_distogram is False
+        ), "include_distogram is not supported for Forge right now"
+
+        if len(all_atom_input.sequences) == 0:
+            raise ValueError(
+                "Input sequence length is 0. Please provide a valid input."
+            )
+
+        request = SequenceStructureForgeInferenceClient._process_fold_all_atom_request(
+            all_atom_input, config, model_name if model_name is not None else self.model
+        )
+        # batch API expects a list of requests
+        return [request]
+
+    def _process_response(self, response: dict, **kwargs) -> MolecularComplexResult:
+        s3_url = response["response"]
+        result = self._batch_client.get_result_from_s3(s3_url)
+        # Use the same logic as _process_fold_all_atom_response
+        return SequenceStructureForgeInferenceClient._process_fold_all_atom_response(
+            result
+        )
+
+    async def _async_process_response(
+        self, response: dict, **kwargs
+    ) -> MolecularComplexResult:
+        s3_url = response["response"]
+        result = await self._batch_client.async_get_result_from_s3(s3_url)
+        # Use the same logic as _process_fold_all_atom_response
+        return SequenceStructureForgeInferenceClient._process_fold_all_atom_response(
+            result
+        )
+
+
+class ForgeBatchClient:
+    def __init__(
+        self,
+        url: str = "https://forge.evolutionaryscale.ai",
+        token: str = "",
+        request_timeout: int | None = None,
+        model: str | None = None,
+        poll_interval: int = 2,
+        min_retry_wait: int = 2,
+        max_retry_wait: int = 2,
+        max_retry_attempts: int = 5,
+    ):
+        self._batch_client = _BaseForgeBatchClient(
+            url,
+            token,
+            request_timeout,
+            min_retry_wait,
+            max_retry_wait,
+            max_retry_attempts,
+            poll_interval,
+        )
+        self.model = model
+
+        self._fold: FoldHandler | None = None
+        self._fold_all_atom: FoldAllAtomHandler | None = None
+        # Add other handlers here
+
+    @property
+    def fold(self) -> FoldHandler:
+        if self._fold is None:
+            self._fold = FoldHandler(self._batch_client, self.model)
+        return self._fold
+
+    @property
+    def fold_all_atom(self) -> FoldAllAtomHandler:
+        if self._fold_all_atom is None:
+            self._fold_all_atom = FoldAllAtomHandler(self._batch_client, self.model)
+        return self._fold_all_atom
+
+    # Add other handlers here

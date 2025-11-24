@@ -1726,13 +1726,13 @@ packages:
   requires_python: '>=3.8'
 - pypi: ./
   name: esm
-  version: 3.2.3
-  sha256: 7f3df1026fb23f4812615d3c4968f643f04d9cbf7735000615b011620ac83007
+  version: 3.2.4
+  sha256: fd772451bd64ae146f55638f65e42482fab780805d4fde3c81087a44c36620e3
   requires_dist:
   - torch>=2.2.0
   - torchvision
   - torchtext
-  - transformers<4.48.2
+  - transformers<4.53.0
   - ipython
   - einops
   - biotite>=1.0.0

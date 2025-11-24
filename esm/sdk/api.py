@@ -87,6 +87,7 @@ class ESMProtein(ProteinType):
                 sasa=protein_chain.sasa().tolist(),
                 function_annotations=None,
                 coordinates=torch.tensor(protein_chain.atom37_positions),
+                plddt=torch.tensor(protein_chain.confidence),
             )
         else:
             return ESMProtein(
@@ -95,6 +96,7 @@ class ESMProtein(ProteinType):
                 sasa=None,
                 function_annotations=None,
                 coordinates=torch.tensor(protein_chain.atom37_positions),
+                plddt=torch.tensor(protein_chain.confidence),
             )
 
     @classmethod
@@ -114,6 +116,7 @@ class ESMProtein(ProteinType):
             coordinates=torch.tensor(
                 protein_complex.atom37_positions, dtype=torch.float32
             ),
+            plddt=torch.tensor(protein_complex.confidence),
         )
 
     def to_pdb(self, pdb_path: PathOrBuffer) -> None:
@@ -194,6 +197,9 @@ class ESMProtein(ProteinType):
                 chain_id=gt_chains[i].chain_id
                 if gt_chains is not None
                 else SINGLE_LETTER_CHAIN_IDS[i],
+                residue_index=self.residue_index[start:end]
+                if self.residue_index is not None
+                else None,
                 entity_id=gt_chains[i].entity_id if gt_chains is not None else None,
                 confidence=plddt[start:end] if plddt is not None else None,
             )

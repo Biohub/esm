@@ -36,6 +36,7 @@ from esm.utils.structure.metrics import compute_gdt_ts, compute_lddt_ca
 from esm.utils.structure.mmcif_parsing import MmcifWrapper, NoProteinError
 from esm.utils.structure.protein_chain import (
     ProteinChain,
+    _str_key_to_int_key,
     chain_to_ndarray,
     index_by_atom_name,
     infer_CB,
@@ -410,6 +411,9 @@ class ProteinComplex:
 
     @classmethod
     def from_state_dict(cls, dct):
+        # Note: assembly_composition is *supposed* to have string keys.
+        dct = _str_key_to_int_key(dct, ignore_keys=["assembly_composition"])
+
         for k, v in dct.items():
             if isinstance(v, list):
                 dct[k] = np.array(v)
@@ -562,7 +566,9 @@ class ProteinComplex:
 
     def infer_oxygen(self) -> ProteinComplex:
         """Oxygen position is fixed given N, CA, C atoms. Infer it if not provided."""
-        O_missing_indices = np.argwhere(np.isnan(self.atoms["O"]).any(axis=1)).squeeze()
+        O_missing_indices = np.argwhere(
+            ~np.isfinite(self.atoms["O"]).all(axis=1)
+        ).squeeze()
 
         O_vector = torch.tensor([0.6240, -1.0613, 0.0103], dtype=torch.float32)
         N, CA, C = torch.from_numpy(self.atoms[["N", "CA", "C"]]).float().unbind(dim=1)
