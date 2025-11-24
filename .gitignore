@@ -3,3 +3,4 @@ esm.egg-info
 .pixi
 *.egg-info
 *.pyc
+*.env

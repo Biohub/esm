@@ -92,6 +92,8 @@ pytest-cov = "*"
 pytest-xdist = "*"
 seaborn = "*"
 pyright = "==1.1.399"
+kneed = ">=0.8.5,<0.9"
+python-dotenv = ">=1.2.1,<2"
 
 [tool.pixi.feature.dev.tasks]
 lint-all = "pre-commit run --all-files --show-diff-on-failure"

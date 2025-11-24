@@ -36,7 +36,14 @@ pip install esm
 
 ## Installation instructions for local development
 After cloning the repo, use pixi's official installation site (https://pixi.sh/dev/installation/) to install pixi package manager.
-In the root of the esm repo, run `pixi install`.
+In the root of the esm repo, run `pixi install`. This installs the `default` environment.
+
+To install the development environment which includes some additional dependencies, run `pixi install --environment dev`.
+To run tests locally, run `pixi run -e dev cov-test`.
+To run pre-commit checks on all files, run `pixi run -e dev lint-all`.
+
+To run the `kneedle.py` script, create a `.env` file in the root directory following the structure of `.env.example` (located in the root directory) with your Hugging Face API key. This allows you to download the ESM3 model weights locally. Add the `.fasta` file on which kneedle should be run to the `data` folder in the repo's root directory.
+
 
 ## Available Models <a name="available-models"></a>
 

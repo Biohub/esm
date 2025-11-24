@@ -87,8 +87,11 @@ class TransformerStack(nn.Module):
         *batch_dims, _ = x.shape
         if chain_id is None:
             chain_id = torch.ones(size=batch_dims, dtype=torch.int64, device=x.device)
-        hiddens = []
+        self.hiddens = []
         for block in self.blocks:
             x = block(x, sequence_id, affine, affine_mask, chain_id)
-            hiddens.append(x)
-        return self.norm(x), x, hiddens
+            self.hiddens.append(x)
+        return self.norm(x), x, self.hiddens
+
+    def get_hiddens(self) -> list[torch.Tensor]:
+        return self.hiddens
