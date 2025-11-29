@@ -9,13 +9,14 @@ from kneed import KneeLocator
 from dotenv import load_dotenv
 import os
 from pathlib import Path
+import matplotlib.pyplot as plt
 
 load_dotenv()
 HUGGING_FACE_API_KEY = os.getenv('HUGGING_FACE_API_KEY')
 login(token=HUGGING_FACE_API_KEY)
 
 project_root = Path(__file__).parent.parent.parent
-data_file = project_root / "data" / "kneedle_seqs.fasta"
+data_file = project_root / "data" / "uniref10k.fasta"
 
 # Initialize the ESM3InferenceClient with your API key
 model: ESM3InferenceClient = ESM3.from_pretrained("esm3-open").to("cuda")
@@ -68,7 +69,42 @@ print(final_distances.tolist())
 x = np.arange(len(final_distances))
 y = final_distances.float().numpy()
 rev_y = np.flip(y)
-kneedle_encoder = KneeLocator(x, y, curve="convex", direction="increasing", interp_method="polynomial", polynomial_degree=2, online=True)
-kneedle_decoder = KneeLocator(x, rev_y, curve="convex", direction="increasing", interp_method="polynomial", polynomial_degree=2, online=True)
+kneedle_encoder = KneeLocator(x, y, curve="convex", direction="decreasing", interp_method="polynomial", polynomial_degree=2, online=True)
+kneedle_decoder = KneeLocator(x, rev_y, curve="convex", direction="decreasing", interp_method="polynomial", polynomial_degree=2, online=True)
 print(f"Knee point found at layer: {kneedle_encoder.knee}")
 print(f"Knee point found at layer (reverse) from the end: {NUM_LAYERS - kneedle_decoder.knee if kneedle_decoder.knee else None}")
+
+# nerp these results into a plot
+enc_knee = kneedle_encoder.knee if kneedle_encoder.knee else 0
+dec_knee = NUM_LAYERS - 1 - kneedle_decoder.knee if kneedle_decoder.knee else NUM_LAYERS - 1
+
+fig, ax = plt.subplots(figsize=(10, 6))
+ax.plot(x, y, marker='o', label='ESM3 Base', linewidth=1.5, markersize=5)
+ax.axvspan(x[0], enc_knee, color='blue', alpha=1.0, zorder=0)
+ax.axvspan(enc_knee, dec_knee, color='green', alpha=1.0, zorder=0)    
+ax.axvspan(dec_knee, x[-1], color='red', alpha=1.0, zorder=0) 
+
+ax.axvline(enc_knee, color='gray', linestyle='--', alpha=0.8)
+ax.axvline(dec_knee, color='gray', linestyle='--', alpha=0.8)
+
+y_max = y.max()
+text_y = y_max * 0.95
+
+ax.text((1 + enc_knee)/2, text_y, "Latent\nEncoder", 
+        ha='center', va='top', fontsize=11, color='black')
+
+ax.text((enc_knee + dec_knee)/2, text_y, "Recursive\nBlock", 
+        ha='center', va='top', fontsize=11, color='black')
+
+ax.text((dec_knee + NUM_LAYERS)/2, text_y, "Latent\nDecoder", 
+        ha='center', va='bottom', fontsize=11, color='black', fontweight='bold')
+
+
+ax.set_ylabel("Angular Distances, $d$", fontsize=13)
+ax.set_xlabel("Layers, $l$", fontsize=13)
+ax.set_xticks(x)
+ax.set_xlim(0, 48) 
+ax.legend(loc='upper left')
+
+plt.tight_layout()
+plt.show()
