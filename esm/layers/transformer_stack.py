@@ -37,8 +37,10 @@ class TransformerStack(nn.Module):
         ffn_type: str = "swiglu",  # swiglu | gelu
         expansion_ratio: float = 8 / 3,
         use_flash_attn: bool = False,
+        return_hidden_states: bool = False,
     ):
         super().__init__()
+        self.return_hidden_states = return_hidden_states
         self.blocks = nn.ModuleList(
             [
                 UnifiedTransformerBlock(
@@ -90,5 +92,6 @@ class TransformerStack(nn.Module):
         hiddens = []
         for block in self.blocks:
             x = block(x, sequence_id, affine, affine_mask, chain_id)
-            hiddens.append(x)
+            if self.return_hidden_states:
+                hiddens.append(x)
         return self.norm(x), x, hiddens

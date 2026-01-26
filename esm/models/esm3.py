@@ -157,7 +157,8 @@ class OutputHeads(nn.Module):
         self.function_head = RegressionHead(d_model, 260 * 8)
         self.residue_head = RegressionHead(d_model, 1478)
 
-    def forward(self, x: torch.Tensor, embed: torch.Tensor) -> ESMOutput:
+    def forward(self, x: torch.Tensor, last_hidden_state: torch.Tensor) -> ESMOutput:
+        embeddings = x.clone()
         sequence_logits = self.sequence_head(x)
         structure_logits = self.structure_head(x)
         secondary_structure_logits = self.ss8_head(x)
@@ -174,7 +175,7 @@ class OutputHeads(nn.Module):
             sasa_logits=sasa_logits,
             function_logits=function_logits,
             residue_logits=residue_logits,
-            embeddings=embed,
+            embeddings=embeddings,
         )
 
 
@@ -368,10 +369,10 @@ class ESM3(nn.Module, ESM3InferenceClient):
             function_tokens,
             residue_annotation_tokens,
         )
-        x, embedding, _ = self.transformer(
+        x, last_hidden_states, _ = self.transformer(
             x, sequence_id, affine, affine_mask, chain_id
         )
-        return self.output_heads(x, embedding)
+        return self.output_heads(x, last_hidden_states)
 
     # The following methods are for the ESM3InferenceClient interface
     def generate(self, input: ProteinType, config: GenerationConfig) -> ProteinType:

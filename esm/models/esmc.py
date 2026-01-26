@@ -58,11 +58,13 @@ class ESMC(nn.Module, ESMCInferenceClient):
         n_layers: int,
         tokenizer: EsmSequenceTokenizer,
         use_flash_attn: bool = True,
+        return_hidden_states: bool = False,
     ):
         super().__init__()
         self.embed = nn.Embedding(64, d_model)
 
         self._use_flash_attn = is_flash_attn_available and use_flash_attn
+        self.return_hidden_states = return_hidden_states
         self.transformer = TransformerStack(
             d_model,
             n_heads,
@@ -70,6 +72,7 @@ class ESMC(nn.Module, ESMCInferenceClient):
             n_layers,
             n_layers_geom=0,
             use_flash_attn=self._use_flash_attn,
+            return_hidden_states=self.return_hidden_states
         )
 
         self.sequence_head = RegressionHead(d_model, 64)
@@ -164,7 +167,8 @@ class ESMC(nn.Module, ESMCInferenceClient):
             ]
 
         # Stack hidden states into a [n_layers, B, L, D] matrix.
-        hiddens = torch.stack(hiddens, dim=0)  # type: ignore
+        if len(hiddens):
+            hiddens = torch.stack(hiddens, dim=0)  # type: ignore
 
         sequence_logits = self.sequence_head(x)
         output = ESMCOutput(
