@@ -64,8 +64,7 @@ class MultiHeadAttention(nn.Module):
 
         if seq_id is not None:
             # Where True, enable participation in attention.
-            mask_BLL = seq_id.unsqueeze(-1) == seq_id.unsqueeze(-2)
-            mask_BHLL = mask_BLL.unsqueeze(1)
+            mask_BHLL = seq_id[:, None, :, None] & seq_id[:, None, None, :]
 
             context_BHLD = F.scaled_dot_product_attention(
                 query_BHLD, key_BHLD, value_BHLD, mask_BHLL
