@@ -320,29 +320,52 @@ class MolecularComplex:
         # Calculate final sequence length (includes chain breaks)
         sequence_length = len(single_letter_sequence)
 
-        # Convert flat atoms back to atom37 representation
+        # Convert flat atoms back to atom37 representation using atom names
         for res_idx, token_idx in enumerate(protein_indices):
             token = self.sequence[token_idx]
             start_atom, end_atom = self.token_to_atoms[token_idx]
 
-            # Get atom data for this residue
             res_atom_positions = self.atom_positions[start_atom:end_atom]
+            res_atom_names = (
+                np.array(self.atom_names[start_atom:end_atom], dtype=str)
+                if self.atom_names is not None
+                else np.array([], dtype=str)
+            )
 
-            # Reconstruct atom37 representation by exactly reversing the forward conversion logic
-            # In from_protein_complex, atoms are added in atom_types order if present in mask
-            # So we need to reconstruct the mask and positions in the same order
-            atom_count = 0
-            for atom_type_idx, atom_name in enumerate(residue_constants.atom_types):
-                # Check if this atom type exists for this residue and was present
-                residue_atoms = residue_constants.residue_atoms.get(token, [])
-                if atom_name in residue_atoms:
-                    # This atom type exists for this residue, so it should have been included
-                    if atom_count < len(res_atom_positions):
-                        atom37_positions[res_idx, atom_type_idx] = res_atom_positions[
-                            atom_count
-                        ]
-                        atom37_mask[res_idx, atom_type_idx] = True
-                        atom_count += 1
+            # Build a mapping from normalized atom name -> position for this residue
+            # Normalize to uppercase and strip whitespace for robust matching
+            name_to_pos: dict[str, np.ndarray] = {}
+            for i, nm in enumerate(res_atom_names):
+                key = nm.upper().strip()
+                # Prefer first occurrence; ignore duplicates/altlocs
+                if key not in name_to_pos:
+                    name_to_pos[key] = res_atom_positions[i]
+
+            canonical_atoms = residue_constants.residue_atoms.get(token, [])
+            swap_map = residue_constants.residue_atom_renaming_swaps.get(token, {})
+
+            # Place coordinates by canonical atom name into atom37 order
+            for cn in canonical_atoms:
+                # Normalize canonical name for lookup
+                cn_key = cn.upper()
+                idx37 = residue_constants.atom_order.get(cn_key)
+                if idx37 is None:
+                    continue
+                # Try direct name, otherwise use renaming swap (normalized)
+                present_name = (
+                    cn_key
+                    if cn_key in name_to_pos
+                    else (
+                        swap_map.get(cn) if isinstance(swap_map.get(cn), str) else None
+                    )
+                )
+                if present_name:
+                    present_key = present_name.upper()
+                else:
+                    present_key = None
+                if present_key and present_key in name_to_pos:
+                    atom37_positions[res_idx, idx37] = name_to_pos[present_key]
+                    atom37_mask[res_idx, idx37] = True
 
         # Create arrays that match sequence length (including chain breaks)
         # Initialize arrays with proper size
@@ -703,9 +726,10 @@ class MolecularComplex:
             atom_names[start:end] = names
 
         # Set all AtomArray attributes at once (convert object arrays to proper string arrays)
+        # Note: res_name uses U8 to accommodate CCD codes up to 5 characters (e.g., A1AZ2)
         atom_array.res_id = atom_res_ids
         atom_array.chain_id = np.array(atom_chain_ids, dtype="U4")
-        atom_array.res_name = np.array(atom_res_names, dtype="U4")
+        atom_array.res_name = np.array(atom_res_names, dtype="U8")
         atom_array.hetero = atom_hetero
         atom_array.atom_name = np.array(atom_names, dtype="U4")
         atom_array.add_annotation("b_factor", dtype=float)

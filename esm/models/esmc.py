@@ -77,13 +77,18 @@ class ESMC(nn.Module, ESMCInferenceClient):
 
     @classmethod
     def from_pretrained(
-        cls, model_name: str = ESMC_600M, device: torch.device | None = None
+        cls,
+        model_name: str = ESMC_600M,
+        device: torch.device | None = None,
+        use_flash_attn: bool = True,
     ) -> ESMC:
         from esm.pretrained import load_local_model
 
         if device is None:
             device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-        model = load_local_model(model_name, device=device)
+        model = load_local_model(
+            model_name, device=device, use_flash_attn=use_flash_attn
+        )
         if device.type != "cpu":
             model = model.to(torch.bfloat16)
         assert isinstance(model, ESMC)
@@ -208,7 +213,7 @@ class ESMC(nn.Module, ESMCInferenceClient):
             if device.type == "cuda"
             else contextlib.nullcontext(),
         ):
-            output = self.forward(sequence_tokens=input.sequence)
+            output = self(sequence_tokens=input.sequence)
         assert output.hidden_states is not None
         output.hidden_states = (
             output.hidden_states[config.ith_hidden_layer : config.ith_hidden_layer + 1]

@@ -524,7 +524,7 @@ class ESM3(nn.Module, ESM3InferenceClient):
             if device.type == "cuda"
             else contextlib.nullcontext(),
         ):
-            output = self.forward(
+            output = self(
                 sequence_tokens=input.sequence,
                 structure_tokens=input.structure,
                 ss8_tokens=input.secondary_structure,

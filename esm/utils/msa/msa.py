@@ -126,6 +126,9 @@ class MSA(SequentialDataclass):
         headers = header_bytes.decode().split("\n")
         # Sometimes the separation is two newlines, which results in an empty header.
         headers = [header for header in headers if header]
+        # If all headers were empty (e.g., saved from from_sequences), use empty headers
+        if len(headers) == 0 and depth > 0:
+            headers = [""] * depth
         entries = [
             FastaEntry(header, b"".join(row).decode())
             for header, row in zip(headers, array)
@@ -367,6 +370,9 @@ class FastMSA(SequentialDataclass):
         headers = header_bytes.decode().split("\n")
         # Sometimes the separation is two newlines, which results in an empty header.
         headers = [header for header in headers if header]
+        # If all headers were empty (e.g., saved from from_sequences), use empty headers
+        if len(headers) == 0 and depth > 0:
+            headers = [""] * depth
         return cls(array, headers)
 
     @classmethod

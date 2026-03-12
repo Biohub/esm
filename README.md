@@ -4,7 +4,7 @@
   <img src="_assets/logo.png" width="50"/>
 
 [ESM3](https://www.science.org/doi/10.1126/science.ads0018) &sdot; [ESM C](https://www.evolutionaryscale.ai/blog/esm-cambrian) &sdot;
-[Slack](https://bit.ly/esm-slack) &sdot; [Tutorials](https://github.com/evolutionaryscale/esm/tree/main/cookbook/tutorials) <br>
+[Slack](https://bit.ly/3FKwcWd) &sdot; [Tutorials](https://github.com/evolutionaryscale/esm/tree/main/cookbook/tutorials) <br>
 </div>
 
 

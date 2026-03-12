@@ -4,7 +4,7 @@ import asyncio
 import base64
 import pickle
 from concurrent.futures import ThreadPoolExecutor
-from typing import Any, Sequence
+from typing import Any, Sequence, cast
 
 import torch
 
@@ -720,7 +720,7 @@ class ESM3ForgeInferenceClient(ESM3InferenceClient, _BaseForgeInferenceClient):
                 try:
                     results.append(future.result())
                 except Exception as e:
-                    results.append(ESMProteinError(500, str(e)))
+                    results.append(ESMProteinError(error_code=500, error_msg=str(e)))
         return results
 
     async def __async_generate_protein(
@@ -967,6 +967,13 @@ class ESMCForgeInferenceClient(ESMCInferenceClient, _BaseForgeInferenceClient):
             "return_mean_hidden_states": config.return_mean_hidden_states,
             "return_hidden_states": config.return_hidden_states,
             "ith_hidden_layer": config.ith_hidden_layer,
+            "sae_config": {
+                "model": config.sae_config.model,
+                "normalize_features": config.sae_config.normalize_features,
+                "mode": config.sae_config.mode,
+            }
+            if config.sae_config
+            else None,
         }
         request = {"model": model_name, "inputs": req, "logits_config": logits_config}
         return request
@@ -980,12 +987,31 @@ class ESMCForgeInferenceClient(ESMCInferenceClient, _BaseForgeInferenceClient):
         data["embeddings"] = _maybe_b64_decode(data["embeddings"], return_bytes)
         data["hidden_states"] = _maybe_b64_decode(data["hidden_states"], return_bytes)
 
+        # sae outputs are always encoded
+        # NOTE: leave this intact for application/json since it's always
+        # base64 bytes, even with return_bytes=False
+        def _b64_decode(obj):
+            return (
+                deserialize_tensors(base64.b64decode(obj)) if obj is not None else obj
+            )
+
+        sae_outputs = data["sae_outputs"]
+        if isinstance(sae_outputs, str):
+            # sae outputs are always encoded for application/json
+            sae_outputs = _b64_decode(sae_outputs)
+            sae_outputs = (
+                {k: v.to(torch.float32) for k, v in sae_outputs.items()}
+                if sae_outputs
+                else None
+            )
+            sae_outputs = cast(dict[str, torch.Tensor] | None, sae_outputs)
         output = LogitsOutput(
             logits=ForwardTrackData(sequence=_maybe_logits(data, "sequence")),
             embeddings=maybe_tensor(data["embeddings"]),
             mean_embedding=data["mean_embedding"],
             hidden_states=maybe_tensor(data["hidden_states"]),
             mean_hidden_state=maybe_tensor(data["mean_hidden_state"]),
+            sae_outputs=sae_outputs,
         )
         return output
 

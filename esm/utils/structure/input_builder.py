@@ -7,7 +7,8 @@ import numpy as np
 @dataclass
 class Modification:
     position: int  # zero-indexed
-    ccd: str
+    ccd: str | None = None
+    smiles: str | None = None  # TODO(mlee): add smiles support
 
 
 @dataclass
@@ -15,6 +16,7 @@ class ProteinInput:
     id: str | list[str]
     sequence: str
     modifications: list[Modification] | None = None
+    cyclic: bool = False
 
 
 @dataclass

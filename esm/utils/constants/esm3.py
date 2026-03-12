@@ -100,7 +100,7 @@ TFIDF_VECTOR_SIZE = 58641
 def data_root(model: str):
     if "INFRA_PROVIDER" in os.environ:
         return Path("")
-    # Try to download from hugginface if it doesn't exist
+    # Try to download from huggingface if it doesn't exist
     if model.startswith("esm3"):
         path = Path(snapshot_download(repo_id="EvolutionaryScale/esm3-sm-open-v1"))
     elif model.startswith("esmc-300"):

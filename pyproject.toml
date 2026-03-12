@@ -4,7 +4,7 @@ version = "3.2.4.a1"
 description = "EvolutionaryScale open model repository"
 readme = "README.md"
 requires-python = ">=3.12,<3.13"
-license = {file = "LICENSE.txt"}
+license = {file = "LICENSE.md"}
 
 authors = [
   {name = "EvolutionaryScale Team"}
@@ -44,6 +44,7 @@ dependencies = [
   "boto3",
   "pygtrie",
   "dna_features_viewer",
+  "accelerate",
 ]
 # Pytest
 [tool.pytest.ini_options]

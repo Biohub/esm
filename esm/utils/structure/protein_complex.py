@@ -317,7 +317,9 @@ class ProteinComplex:
         )
 
     @classmethod
-    def from_pdb(cls, path: PathOrBuffer, id: str | None = None) -> "ProteinComplex":
+    def from_pdb(
+        cls, path: PathOrBuffer, id: str | None = None, is_predicted: bool = False
+    ) -> "ProteinComplex":
         atom_array = PDBFile.read(path).get_structure(
             model=1, extra_fields=["b_factor"]
         )
@@ -327,7 +329,7 @@ class ProteinComplex:
             chain = chain[~chain.hetero]
             if len(chain) == 0:
                 continue
-            chains.append(ProteinChain.from_atomarray(chain, id))
+            chains.append(ProteinChain.from_atomarray(chain, id, is_predicted))
         return ProteinComplex.from_chains(chains)
 
     def to_pdb(self, path: PathOrBuffer, include_insertions: bool = True):

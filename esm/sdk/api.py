@@ -58,14 +58,29 @@ class ESMProtein(ProteinType):
     def from_pdb(
         cls,
         path: PathOrBuffer,
-        chain_id: str = "detect",
+        chain_id: str = "all",
         id: str | None = None,
         is_predicted: bool = False,
     ) -> ESMProtein:
-        protein_chain = ProteinChain.from_pdb(
-            path=path, chain_id=chain_id, id=id, is_predicted=is_predicted
-        )
-        return cls.from_protein_chain(protein_chain)
+        """Return an ESMProtein object from a pdb file.
+
+        Args:
+            path (str | Path | io.TextIO): Path or buffer to read pdb file from. Should be uncompressed.
+            chain_id (str, optional): Select a chain corresponding to (author) chain id. "all" uses all chains,
+            "detect" uses the first detected chain
+            id (str, optional): String identifier to assign to structure. Will attempt to infer otherwise.
+            is_predicted (bool): If True, reads b factor as the confidence readout. Default: False.
+        """
+        if chain_id == "all":
+            protein_complex = ProteinComplex.from_pdb(
+                path=path, id=id, is_predicted=is_predicted
+            )
+            return cls.from_protein_complex(protein_complex)
+        else:
+            protein_chain = ProteinChain.from_pdb(
+                path=path, chain_id=chain_id, id=id, is_predicted=is_predicted
+            )
+            return cls.from_protein_chain(protein_chain)
 
     @classmethod
     def from_protein_chain(
@@ -396,6 +411,16 @@ class LogitsConfig:
     return_mean_hidden_states: bool = False
     ith_hidden_layer: int = -1
 
+    # SAE config only applies to ESMC models
+    sae_config: SAEConfig | None = None
+
+
+@define
+class SAEConfig:
+    model: str
+    normalize_features: bool = True
+    mode: str | None = None
+
 
 @define
 class LogitsOutput:
@@ -409,6 +434,8 @@ class LogitsOutput:
     residue_annotation_logits: torch.Tensor | None = None
     hidden_states: torch.Tensor | None = None
     mean_hidden_state: torch.Tensor | None = None
+    # sae_outputs keys are sae model names and values are sparse representations of the sae activations
+    sae_outputs: dict[str, torch.Tensor] | None = None
 
 
 @define
