@@ -6,9 +6,15 @@ from esm.sdk.forge import ESMCForgeInferenceClient
 from cookbook.snippets.sae import get_sae_features, get_sae_features_single
 from cookbook.snippets.sparse_utils import remove_indexes
 
-# Create ESMC 600M client
+ESMC_600M_MODEL = "esmc-600m-2024-12"
+ESMC_600M_SAE_MODEL = "esmc-600m-2024-12_k64_codebook16384_layer27"
+
+ESMC_6B_MODEL = "esmc-6b-2024-12"
+ESMC_6B_SAE_MODEL = "esmc-6b-2024-12_k64_codebook16384_layer60"
+
+# Create ESMC client
 client = ESMCForgeInferenceClient(
-    model="esmc-600m-2024-12",
+    model=ESMC_6B_MODEL,
     url="https://forge.evolutionaryscale.ai",
     token=os.environ["ESM_API_KEY"],
 )
@@ -16,7 +22,7 @@ client = ESMCForgeInferenceClient(
 # normalize feature activations by TF-IDF. Upweights activations
 # of more highly specific features
 sae_config = SAEConfig(
-    model="esmc-600m-2024-12_k64_codebook16384_layer27",
+    model=ESMC_6B_SAE_MODEL,
     normalize_features=True,
 )
 
