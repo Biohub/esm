@@ -1,15 +1,20 @@
+import math
 import os
 
+import torch
+
 from esm.models.esmc import ESMC
-from esm.sdk import client
+from esm.sdk import batch_executor, client
 from esm.sdk.api import (
     ESMCInferenceClient,
     ESMProtein,
+    ESMProteinError,
     ESMProteinTensor,
     LogitsConfig,
     LogitsOutput,
 )
-from esm.sdk.forge import ESM3ForgeInferenceClient
+from esm.sdk.forge import ESM3ForgeInferenceClient, ESMCForgeInferenceClient
+from esm.tokenization import get_esmc_model_tokenizers
 
 
 def main(client: ESMCInferenceClient | ESM3ForgeInferenceClient):
@@ -68,6 +73,58 @@ def raw_forward(model: ESMC):
     print(
         f"Raw model returned logits with shape: {logits.shape}, embeddings with shape: {embeddings.shape} and hidden states with shape {hiddens.shape}"
     )
+
+
+def compute_pseudoperplexity(
+    forge_client: ESMCForgeInferenceClient, sequence: str
+) -> float:
+    """Compute L-pass pseudoperplexity for a protein sequence via Forge.
+
+    Masks each position one at a time, retrieves logits from Forge, and returns
+    exp(-mean(log_prob_true_aa)).  Uses batch_executor for parallel requests.
+
+    Example::
+
+        forge_client = ESMCForgeInferenceClient(
+            model="esmc-6b-2024-12",
+            url="https://forge.evolutionaryscale.ai",
+            token=os.environ["ESM_API_KEY"],
+        )
+        pppl = compute_pseudoperplexity(forge_client, "MKTLLILAVL...")
+    """
+    L = len(sequence)
+    masked_sequences = [sequence[:i] + "_" + sequence[i + 1 :] for i in range(L)]
+
+    def _get_logits(client: ESMCForgeInferenceClient, sequence: str) -> LogitsOutput:
+        protein = ESMProtein(sequence=sequence)
+        protein_tensor = client.encode(protein)
+        if isinstance(protein_tensor, ESMProteinError):
+            raise protein_tensor
+        output = client.logits(protein_tensor, LogitsConfig(sequence=True))
+        if isinstance(output, ESMProteinError):
+            raise output
+        return output
+
+    with batch_executor() as executor:
+        logit_outputs = executor.execute_batch(
+            _get_logits, client=forge_client, sequence=masked_sequences
+        )
+
+    # Build vocab from the tokenizer to map amino acid characters to token indices
+    vocab: dict[str, int] = get_esmc_model_tokenizers().get_vocab()
+
+    log_probs = []
+    for i in range(L):
+        output = logit_outputs[i]
+        if isinstance(output, Exception):
+            raise output
+        logits = output.logits.sequence  # shape: (L+2, V)
+        position_logits = logits[i + 1]  # +1 for BOS token
+        log_softmax = torch.log_softmax(position_logits, dim=-1)
+        true_aa_idx = vocab[sequence[i]]
+        log_probs.append(log_softmax[true_aa_idx].item())
+
+    return math.exp(-sum(log_probs) / L)
 
 
 if __name__ == "__main__":

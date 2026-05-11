@@ -159,6 +159,7 @@ class ProteinComplex:
     confidence: np.ndarray
     # This metadata is parsed from the MMCIF file. For synthetic data, we do a best effort.
     metadata: ProteinComplexMetadata
+    atom37_confidence: np.ndarray | None = None  # [L, 37] per-atom pLDDT
 
     def __post_init__(self):
         l = len(self.sequence)
@@ -170,6 +171,11 @@ class ProteinComplex:
         assert self.entity_id.shape[0] == l, (self.entity_id.shape, l)
         assert self.chain_id.shape[0] == l, (self.chain_id.shape, l)
         assert self.sym_id.shape[0] == l, (self.sym_id.shape, l)
+        if self.atom37_confidence is not None:
+            assert self.atom37_confidence.shape == self.atom37_mask.shape, (
+                self.atom37_confidence.shape,
+                self.atom37_mask.shape,
+            )
 
     def __getitem__(self, idx: int | list[int] | slice | np.ndarray):
         """This function slices protein complexes without consideration of chain breaks
@@ -222,6 +228,9 @@ class ProteinComplex:
             atom37_positions=self.atom37_positions[..., idx, :, :],
             atom37_mask=self.atom37_mask[..., idx, :],
             confidence=self.confidence[..., idx],
+            atom37_confidence=self.atom37_confidence[..., idx, :]
+            if self.atom37_confidence is not None
+            else None,
         )
 
     def __len__(self):
@@ -314,10 +323,13 @@ class ProteinComplex:
             insertion_code=self.insertion_code,
             confidence=self.confidence,
             mmcif=self.metadata.mmcif,
+            atom37_confidence=self.atom37_confidence,
         )
 
     @classmethod
-    def from_pdb(cls, path: PathOrBuffer, id: str | None = None) -> "ProteinComplex":
+    def from_pdb(
+        cls, path: PathOrBuffer, id: str | None = None, is_predicted: bool = False
+    ) -> "ProteinComplex":
         atom_array = PDBFile.read(path).get_structure(
             model=1, extra_fields=["b_factor"]
         )
@@ -327,7 +339,7 @@ class ProteinComplex:
             chain = chain[~chain.hetero]
             if len(chain) == 0:
                 continue
-            chains.append(ProteinChain.from_atomarray(chain, id))
+            chains.append(ProteinChain.from_atomarray(chain, id, is_predicted))
         return ProteinComplex.from_chains(chains)
 
     def to_pdb(self, path: PathOrBuffer, include_insertions: bool = True):
@@ -386,6 +398,10 @@ class ProteinComplex:
         if backbone_only:
             dct["atom37_mask"][:, 3:] = False
         dct["atom37_positions"] = dct["atom37_positions"][dct["atom37_mask"]]
+        if dct.get("atom37_confidence") is not None:
+            dct["atom37_confidence"] = dct["atom37_confidence"][dct["atom37_mask"]]
+        else:
+            dct.pop("atom37_confidence", None)
         for k, v in dct.items():
             if isinstance(v, np.ndarray):
                 match v.dtype:
@@ -421,8 +437,16 @@ class ProteinComplex:
         atom37 = np.full((*dct["atom37_mask"].shape, 3), np.nan)
         atom37[dct["atom37_mask"]] = dct["atom37_positions"]
         dct["atom37_positions"] = atom37
+        if "atom37_confidence" in dct:
+            atom37_conf = np.full(dct["atom37_mask"].shape, np.nan, dtype=np.float32)
+            atom37_conf[dct["atom37_mask"]] = dct["atom37_confidence"]
+            dct["atom37_confidence"] = atom37_conf
         dct = {
-            k: (v.astype(np.float32) if k in ["atom37_positions", "confidence"] else v)
+            k: (
+                v.astype(np.float32)
+                if k in ["atom37_positions", "confidence", "atom37_confidence"]
+                else v
+            )
             for k, v in dct.items()
         }
         if "chain_boundaries" in dct:
@@ -504,8 +528,18 @@ class ProteinComplex:
             "confidence": np.array([0]),
         }
 
+        any_has_atom37_conf = any(c.atom37_confidence is not None for c in chains)
+        if any_has_atom37_conf:
+            sep_tokens["atom37_confidence"] = np.full([1, 37], np.nan, dtype=np.float32)
+
+        def _get_chain_attr(chain: ProteinChain, name: str) -> np.ndarray:
+            val = getattr(chain, name)
+            if val is None and name == "atom37_confidence":
+                return np.full([len(chain), 37], np.nan, dtype=np.float32)
+            return val
+
         array_args: dict[str, np.ndarray] = {
-            name: join_arrays([getattr(chain, name) for chain in chains], sep)
+            name: join_arrays([_get_chain_attr(chain, name) for chain in chains], sep)
             for name, sep in sep_tokens.items()
         }
 

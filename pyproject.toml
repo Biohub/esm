@@ -1,10 +1,10 @@
 [project]
 name = "esm"
-version = "3.2.4.a1"
+version = "3.2.4.a2"
 description = "EvolutionaryScale open model repository"
 readme = "README.md"
 requires-python = ">=3.12,<3.13"
-license = {file = "LICENSE.txt"}
+license = {file = "LICENSE.md"}
 
 authors = [
   {name = "EvolutionaryScale Team"}
@@ -22,8 +22,6 @@ classifiers = [
 
 dependencies = [
   "torch>=2.2.0",
-  "torchvision",
-  "torchtext",
   "transformers<4.53.0",
   "ipython",
   "einops",
@@ -44,6 +42,7 @@ dependencies = [
   "boto3",
   "pygtrie",
   "dna_features_viewer",
+  "accelerate",
 ]
 # Pytest
 [tool.pytest.ini_options]
@@ -65,7 +64,7 @@ include = ["esm*"]
 [tool.setuptools.package-data]
 esm = ["data/*"]
 
-[tool.pixi.project]
+[tool.pixi.workspace]
 channels = ["conda-forge"]
 platforms = ["linux-64", "osx-arm64"]
 
@@ -134,7 +133,6 @@ docstring-code-line-length = "dynamic"
 known_third_party = ["wandb"]
 
 [tool.pyright]
-root = ['.']
 useLibraryCodeForTypes = true
 reportPrivateImportUsage = false
 typeCheckingMode = "basic"

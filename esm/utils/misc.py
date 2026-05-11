@@ -158,7 +158,10 @@ def knn_graph(
     # instead. This is so that when a large portion of the structure is masked out,
     # the edges are built according to sequence distance.
     max_dist = MAX_SUPPORTED_DISTANCE
-    torch._assert_async((dists[~coord_mask] < max_dist).all())
+    if not (dists[~coord_mask] < max_dist).all():
+        raise ValueError(
+            f"Coordinate pairwise distances exceed max supported distance ({max_dist}). "
+        )
     struct_then_seq_dist = (
         seq_dists.to(dists.dtype)
         .mul(1e2)

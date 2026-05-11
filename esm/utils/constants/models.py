@@ -9,6 +9,8 @@ ESM3_FUNCTION_DECODER_V0 = "esm3_function_decoder_v0"
 ESMC_600M = "esmc_600m"
 ESMC_300M = "esmc_300m"
 
+ESMC_FOLD_MODELS_WITHOUT_MSA = ["esmc-fold-flash-2604"]
+
 
 def forge_only_return_single_layer_hidden_states(model_name: str):
     return model_name.startswith("esmc-6b")

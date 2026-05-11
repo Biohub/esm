@@ -68,7 +68,13 @@ class TransformerStack(nn.Module):
         affine: Affine3D | None = None,
         affine_mask: torch.Tensor | None = None,
         chain_id: torch.Tensor | None = None,
-    ) -> tuple[torch.Tensor, torch.Tensor, list[torch.Tensor]]:
+        output_attentions: bool = False,
+    ) -> tuple[
+        torch.Tensor,
+        torch.Tensor,
+        tuple[torch.Tensor, ...],
+        tuple[torch.Tensor, ...] | None,
+    ]:
         """
         Forward pass of the TransformerStack.
 
@@ -79,16 +85,31 @@ class TransformerStack(nn.Module):
             affine_mask (torch.Tensor | None): The affine mask tensor or None.
             chain_id (torch.Tensor): The protein chain tensor of shape (batch_size, sequence_length).
                 Only used in geometric attention.
+            output_attentions (bool): Whether to return per-layer attention weights.
 
         Returns:
             post_norm: The output tensor of shape (batch_size, sequence_length, d_model).
             pre_norm: The embedding of shape (batch_size, sequence_length, d_model).
+            hidden_states: Hidden states from each layer.
+            attentions: Tuple of per-layer attention weights, or None.
         """
         *batch_dims, _ = x.shape
         if chain_id is None:
             chain_id = torch.ones(size=batch_dims, dtype=torch.int64, device=x.device)
-        hiddens = []
+        all_hidden_states: list[torch.Tensor] = []
+        all_attentions: list[torch.Tensor] = []
         for block in self.blocks:
-            x = block(x, sequence_id, affine, affine_mask, chain_id)
-            hiddens.append(x)
-        return self.norm(x), x, hiddens
+            x, attn_weights = block(
+                x,
+                sequence_id,
+                affine,
+                affine_mask,
+                chain_id,
+                output_attentions=output_attentions,
+            )
+            all_hidden_states.append(x)
+            if output_attentions and attn_weights is not None:
+                all_attentions.append(attn_weights)
+        hidden_states = tuple(all_hidden_states)
+        attentions = tuple(all_attentions) if output_attentions else None
+        return self.norm(x), x, hidden_states, attentions
