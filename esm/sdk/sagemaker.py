@@ -26,10 +26,10 @@ class SequenceStructureSageMakerClient(SequenceStructureForgeInferenceClient):
         request["potential_sequence_of_concern"] = potential_sequence_of_concern
         request["model"] = request.get("model", None)
         invocations_request = {
-            # Duplicate these fields at the top level to make Forge requests consistent.
+            # Duplicate these fields at the top level to make Forge/Biohub Platform requests consistent.
             "model": request["model"],
-            "request_id": "",  # Forge specific field.
-            "user_id": "",  # Forge specific field.
+            "request_id": "",  # Forge/Biohub Platform specific field.
+            "user_id": "",  # Forge/Biohub Platform specific field.
             # Invocation data bits.
             "api_ver": "v1",  # Must be v1 right now.
             "endpoint": endpoint,
@@ -87,10 +87,10 @@ class ESM3SageMakerClient(ESM3ForgeInferenceClient):
             "return_bytes=true" if return_bytes else "return_bytes=false"
         )
         invocations_request = {
-            # Duplicate these fields at the top level to make Forge requests consistent.
+            # Duplicate these fields at the top level to make Forge/Biohub Platform requests consistent.
             "model": request["model"],
-            "request_id": "",  # Forge specific field.
-            "user_id": "",  # Forge specific field.
+            "request_id": "",  # Forge/Biohub Platform specific field.
+            "user_id": "",  # Forge/Biohub Platform specific field.
             # Invocation data bits.
             "api_ver": "v1",  # Must be v1 right now.
             "endpoint": endpoint,

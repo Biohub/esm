@@ -20,7 +20,7 @@ class _BaseForgeInferenceClient:
     ):
         if token == "":
             raise RuntimeError(
-                "Please provide a token to connect to Forge via token=YOUR_API_TOKEN_HERE"
+                "Please provide a token to connect to Forge/Biohub Platform via token=YOUR_API_TOKEN_HERE"
             )
         self.model = model  # Name of the model to run.
         self.url = url

@@ -1,13 +1,23 @@
 from dataclasses import dataclass
-from typing import Any, Sequence
+from typing import Any, Sequence, TypeAlias, Union
 
 import numpy as np
+
+from esm.utils.msa import MSA
+
+# fmt: off
+MSAInput: TypeAlias = Union[
+    MSA,
+    None,
+]
+# fmt: on
 
 
 @dataclass
 class Modification:
     position: int  # zero-indexed
     ccd: str
+    smiles: str | None = None  # TODO(mlee): add smiles support
 
 
 @dataclass
@@ -15,6 +25,7 @@ class ProteinInput:
     id: str | list[str]
     sequence: str
     modifications: list[Modification] | None = None
+    msa: MSAInput = None
 
 
 @dataclass
@@ -34,7 +45,7 @@ class DNAInput:
 @dataclass
 class LigandInput:
     id: str | list[str]
-    smiles: str
+    smiles: str | None = None
     ccd: list[str] | None = None
 
 
@@ -81,6 +92,15 @@ def serialize_structure_prediction_input(all_atom_input: StructurePredictionInpu
                 for mod in seq_input.modifications
             ]
             chain_data["modifications"] = mods
+        if not hasattr(seq_input, "msa"):
+            pass
+        elif seq_input.msa is None:
+            chain_data["msa"] = None
+        elif isinstance(seq_input.msa, MSA):
+            chain_data["msa"] = {"sequences": seq_input.msa.sequences}
+        else:
+            error_msg = f"MSA must be None or MSA. Got {seq_input.msa} instead."
+            raise AttributeError(error_msg)
         return chain_data
 
     sequences = []
@@ -131,3 +151,104 @@ def serialize_structure_prediction_input(all_atom_input: StructurePredictionInpu
         ]
 
     return result
+
+
+def deserialize_structure_prediction_input(
+    data: dict[str, Any],
+) -> StructurePredictionInput:
+    """Inverse of :func:`serialize_structure_prediction_input`.
+
+    Reconstructs a :class:`StructurePredictionInput` from the JSON-safe dict
+    produced by ``serialize_structure_prediction_input``. Values round-trip;
+    ``DistogramConditioning.distogram`` dtype follows from JSON (``int64``
+    for integer entries, ``float64`` for floats) — cast back to the original
+    dtype if downstream code requires a specific one.
+    """
+
+    def _mods(chain: dict[str, Any]) -> list[Modification] | None:
+        raw = chain.get("modifications")
+        if not raw:
+            return None
+        return [Modification(position=m["position"], ccd=m["ccd"]) for m in raw]
+
+    def _msa(chain: dict[str, Any]) -> MSAInput:
+        if "msa" not in chain or chain["msa"] is None:
+            return None
+        msa_blk = chain["msa"]
+        if isinstance(msa_blk, str):
+            raise ValueError(f"Unexpected MSA string value: {msa_blk!r}")
+        return MSA.from_sequences(msa_blk["sequences"])
+
+    sequences: list[ProteinInput | RNAInput | DNAInput | LigandInput] = []
+    for chain in data["sequences"]:
+        t = chain["type"]
+        if t == "protein":
+            sequences.append(
+                ProteinInput(
+                    id=chain["id"],
+                    sequence=chain["sequence"],
+                    modifications=_mods(chain),
+                    msa=_msa(chain),
+                )
+            )
+        elif t == "rna":
+            sequences.append(
+                RNAInput(
+                    id=chain["id"],
+                    sequence=chain["sequence"],
+                    modifications=_mods(chain),
+                )
+            )
+        elif t == "dna":
+            sequences.append(
+                DNAInput(
+                    id=chain["id"],
+                    sequence=chain["sequence"],
+                    modifications=_mods(chain),
+                )
+            )
+        elif t == "ligand":
+            sequences.append(
+                LigandInput(
+                    id=chain["id"], smiles=chain.get("smiles"), ccd=chain.get("ccd")
+                )
+            )
+        else:
+            raise ValueError(f"Unsupported sequence type: {t!r}")
+
+    pocket: PocketConditioning | None = None
+    if (pocket_blk := data.get("pocket")) is not None:
+        pocket = PocketConditioning(
+            binder_chain_id=pocket_blk["binder_chain_id"],
+            contacts=[tuple(c) for c in pocket_blk["contacts"]],
+        )
+
+    distogram_conditioning: list[DistogramConditioning] | None = None
+    if (disto_blk := data.get("distogram_conditioning")) is not None:
+        distogram_conditioning = [
+            DistogramConditioning(
+                chain_id=d["chain_id"], distogram=np.asarray(d["distogram"])
+            )
+            for d in disto_blk
+        ]
+
+    covalent_bonds: list[CovalentBond] | None = None
+    if (bonds_blk := data.get("covalent_bonds")) is not None:
+        covalent_bonds = [
+            CovalentBond(
+                chain_id1=b["chain_id1"],
+                res_idx1=b["res_idx1"],
+                atom_idx1=b["atom_idx1"],
+                chain_id2=b["chain_id2"],
+                res_idx2=b["res_idx2"],
+                atom_idx2=b["atom_idx2"],
+            )
+            for b in bonds_blk
+        ]
+
+    return StructurePredictionInput(
+        sequences=sequences,
+        pocket=pocket,
+        distogram_conditioning=distogram_conditioning,
+        covalent_bonds=covalent_bonds,
+    )

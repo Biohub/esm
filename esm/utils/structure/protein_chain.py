@@ -153,6 +153,7 @@ class ProteinChain:
     atom37_mask: np.ndarray
     confidence: np.ndarray
     mmcif: MmcifWrapper | None = None
+    atom37_confidence: np.ndarray | None = None  # [L, 37] per-atom pLDDT
 
     def __post_init__(self):
         assert self.atom37_mask.dtype == bool, self.atom37_mask.dtype
@@ -176,6 +177,11 @@ class ProteinChain:
             self.confidence.shape,
             len(self.sequence),
         )
+        if self.atom37_confidence is not None:
+            assert self.atom37_confidence.shape == self.atom37_mask.shape, (
+                self.atom37_confidence.shape,
+                self.atom37_mask.shape,
+            )
 
     @cached_property
     def atoms(self) -> AtomIndexer:
@@ -188,15 +194,29 @@ class ProteinChain:
     @cached_property
     def atom_array(self) -> bs.AtomArray:
         atoms = []
-        for res_name, res_idx, ins_code, positions, mask, conf in zip(
-            self.sequence,
-            self.residue_index,
-            self.insertion_code,
-            self.atom37_positions,
-            self.atom37_mask.astype(bool),
-            self.confidence,
+        for res_idx_i, (
+            res_name,
+            res_idx,
+            ins_code,
+            positions,
+            mask,
+            conf,
+        ) in enumerate(
+            zip(
+                self.sequence,
+                self.residue_index,
+                self.insertion_code,
+                self.atom37_positions,
+                self.atom37_mask.astype(bool),
+                self.confidence,
+            )
         ):
             for i, pos in zip(np.where(mask)[0], positions[mask]):
+                b_factor = (
+                    self.atom37_confidence[res_idx_i, i]
+                    if self.atom37_confidence is not None
+                    else conf
+                )
                 atom = bs.Atom(
                     coord=pos,
                     chain_id="A" if self.chain_id is None else self.chain_id,
@@ -206,7 +226,7 @@ class ProteinChain:
                     hetero=False,
                     atom_name=residue_constants.atom_types[i],
                     element=residue_constants.atom_types[i][0],
-                    b_factor=conf,
+                    b_factor=float(b_factor),
                 )
                 atoms.append(atom)
         return bs.array(atoms)
@@ -227,6 +247,11 @@ class ProteinChain:
             )
         ):
             for i, pos in zip(np.where(mask)[0], positions[mask]):
+                b_factor = (
+                    self.atom37_confidence[res_idx, i]
+                    if self.atom37_confidence is not None
+                    else conf
+                )
                 atom = bs.Atom(
                     coord=pos,
                     # hard coded to as we currently only support single chain structures
@@ -236,7 +261,7 @@ class ProteinChain:
                     hetero=False,
                     atom_name=residue_constants.atom_types[i],
                     element=residue_constants.atom_types[i][0],
-                    b_factor=conf,
+                    b_factor=float(b_factor),
                 )
                 atoms.append(atom)
         return bs.array(atoms)
@@ -256,6 +281,9 @@ class ProteinChain:
             atom37_positions=self.atom37_positions[..., idx, :, :],
             atom37_mask=self.atom37_mask[..., idx, :],
             confidence=self.confidence[..., idx],
+            atom37_confidence=self.atom37_confidence[..., idx, :]
+            if self.atom37_confidence is not None
+            else None,
         )
 
     def __len__(self):
@@ -357,6 +385,10 @@ class ProteinChain:
         if backbone_only:
             dct["atom37_mask"][:, 3:] = False
         dct["atom37_positions"] = dct["atom37_positions"][dct["atom37_mask"]]
+        if dct.get("atom37_confidence") is not None:
+            dct["atom37_confidence"] = dct["atom37_confidence"][dct["atom37_mask"]]
+        else:
+            dct.pop("atom37_confidence", None)
 
         for k, v in dct.items():
             if isinstance(v, np.ndarray):
@@ -390,9 +422,18 @@ class ProteinChain:
         atom37 = np.full((*dct["atom37_mask"].shape, 3), np.nan)
         atom37[dct["atom37_mask"]] = dct["atom37_positions"]
         dct["atom37_positions"] = atom37
+        if "atom37_confidence" in dct:
+            atom37_conf = np.full(dct["atom37_mask"].shape, np.nan, dtype=np.float32)
+            atom37_conf[dct["atom37_mask"]] = dct["atom37_confidence"]
+            dct["atom37_confidence"] = atom37_conf
         dct = {
-            k: (v.astype(np.float32) if k in ["atom37_positions", "confidence"] else v)
+            k: (
+                v.astype(np.float32)
+                if k in ["atom37_positions", "confidence", "atom37_confidence"]
+                else v
+            )
             for k, v in dct.items()
+            if not (k == "atom37_confidence" and v is None)
         }
         return cls(**dct, mmcif=None)
 

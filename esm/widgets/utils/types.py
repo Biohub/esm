@@ -4,7 +4,7 @@ from esm.sdk.api import ESM3InferenceClient
 
 
 class ClientInitContainerMetadata(TypedDict):
-    inference_option: Literal["Forge API", "Local"] | None
+    inference_option: Literal["Forge/Biohub Platform API", "Local"] | None
 
 
 class ClientInitContainer:

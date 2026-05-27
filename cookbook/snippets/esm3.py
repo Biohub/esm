@@ -196,11 +196,11 @@ def main(client: ESM3InferenceClient):
 
 if __name__ == "__main__":
     if os.environ.get("ESM_API_KEY", ""):
-        print("ESM_API_KEY found. Trying to use model from Forge...")
+        print("ESM_API_KEY found. Trying to use model from Forge/Biohub Platform...")
         main(client())
     else:
         print("No ESM_API_KEY found. Trying to load model locally...")
         print(
-            "TO try this script with a Forge API, please run ESM_API_KEY=your_api_key python esm3.py"
+            "To try this script with a Forge/Biohub Platform API, please run ESM_API_KEY=your_api_key python esm3.py"
         )
         main(ESM3.from_pretrained("esm3_sm_open_v1"))

@@ -7,7 +7,7 @@ from dataclasses import asdict, dataclass
 from pathlib import Path
 from subprocess import check_output
 from tempfile import TemporaryDirectory
-from typing import TYPE_CHECKING, Any, List
+from typing import TYPE_CHECKING, Any
 
 import biotite.structure as bs
 import biotite.structure.io.pdbx as pdbx
@@ -15,7 +15,13 @@ import brotli
 import msgpack
 import numpy as np
 import torch
-from biotite.structure.io.pdbx import CIFFile, set_structure
+from biotite.structure.io.pdbx import (
+    CIFCategory,
+    CIFColumn,
+    CIFData,
+    CIFFile,
+    set_structure,
+)
 
 from esm.utils import residue_constants
 from esm.utils.structure.metrics import compute_lddt, compute_rmsd
@@ -37,6 +43,7 @@ class MolecularComplexResult:
     output_embedding_pair_pooled: torch.Tensor | None = None
     residue_index: torch.Tensor | None = None
     entity_id: torch.Tensor | None = None
+    sae_features: np.ndarray | None = None  # [L, n_features]
 
 
 @dataclass
@@ -73,7 +80,7 @@ class MolecularComplex:
     """
 
     id: str
-    sequence: List[str]  # Token sequence like ['MET', 'LYS', 'A', 'G', 'ATP']
+    sequence: list[str]  # Token sequence like ['MET', 'LYS', 'A', 'G', 'ATP']
 
     # Flat atom arrays - simplified representation
     atom_positions: np.ndarray  # [N_atoms, 3] 3D coordinates
@@ -189,16 +196,17 @@ class MolecularComplex:
         token_to_atoms = []
 
         atom_idx = 0
-        residue_idx = 0
 
         for i, aa in enumerate(pc.sequence):
             if aa == "|":
                 # Skip chain break tokens
                 continue
 
-            # Get atom37 positions and mask for this residue
-            res_positions = pc.atom37_positions[residue_idx]  # [37, 3]
-            res_mask = pc.atom37_mask[residue_idx]  # [37]
+            # Get atom37 positions and mask for this residue.
+            # ProteinComplex arrays are indexed by sequence position (including |),
+            # so use `i` not a separate residue counter.
+            res_positions = pc.atom37_positions[i]  # [37, 3]
+            res_mask = pc.atom37_mask[i]  # [37]
 
             # Track start position for this token
             token_start = atom_idx
@@ -225,7 +233,6 @@ class MolecularComplex:
 
             # Record token-to-atom mapping [start_idx, end_idx)
             token_to_atoms.append([token_start, atom_idx])
-            residue_idx += 1
 
         # Convert to numpy arrays
         atom_positions = np.array(flat_positions, dtype=np.float32)
@@ -320,29 +327,37 @@ class MolecularComplex:
         # Calculate final sequence length (includes chain breaks)
         sequence_length = len(single_letter_sequence)
 
-        # Convert flat atoms back to atom37 representation
+        # Convert flat atoms back to atom37 representation using atom names
         for res_idx, token_idx in enumerate(protein_indices):
             token = self.sequence[token_idx]
             start_atom, end_atom = self.token_to_atoms[token_idx]
 
-            # Get atom data for this residue
             res_atom_positions = self.atom_positions[start_atom:end_atom]
+            res_atom_names = (
+                np.array(self.atom_names[start_atom:end_atom], dtype=str)
+                if self.atom_names is not None
+                else np.array([], dtype=str)
+            )
 
-            # Reconstruct atom37 representation by exactly reversing the forward conversion logic
-            # In from_protein_complex, atoms are added in atom_types order if present in mask
-            # So we need to reconstruct the mask and positions in the same order
-            atom_count = 0
-            for atom_type_idx, atom_name in enumerate(residue_constants.atom_types):
-                # Check if this atom type exists for this residue and was present
-                residue_atoms = residue_constants.residue_atoms.get(token, [])
-                if atom_name in residue_atoms:
-                    # This atom type exists for this residue, so it should have been included
-                    if atom_count < len(res_atom_positions):
-                        atom37_positions[res_idx, atom_type_idx] = res_atom_positions[
-                            atom_count
-                        ]
-                        atom37_mask[res_idx, atom_type_idx] = True
-                        atom_count += 1
+            # Build a mapping from normalized atom name -> position for this residue
+            # Normalize to uppercase and strip whitespace for robust matching
+            name_to_pos: dict[str, np.ndarray] = {}
+            for i, nm in enumerate(res_atom_names):
+                key = nm.upper().strip()
+                # Prefer first occurrence; ignore duplicates/altlocs
+                if key not in name_to_pos:
+                    name_to_pos[key] = res_atom_positions[i]
+
+            # Place atoms into atom37 by matching stored atom names to atom37 indices.
+            # This handles all atoms present in the flat representation, not just
+            # the canonical residue_atoms for this residue type. This preserves
+            # atoms that were in the original atom37_mask even if they're atypical
+            # for the residue (e.g., from alternate conformations or data quirks).
+            for atom_name_str, pos in name_to_pos.items():
+                idx37 = residue_constants.atom_order.get(atom_name_str)
+                if idx37 is not None:
+                    atom37_positions[res_idx, idx37] = pos
+                    atom37_mask[res_idx, idx37] = True
 
         # Create arrays that match sequence length (including chain breaks)
         # Initialize arrays with proper size
@@ -461,11 +476,49 @@ class MolecularComplex:
         if TYPE_CHECKING:
             structure: Any = structure
 
+        # Read label_asym_id from the raw CIF atom_site category.
+        # Biotite's atom.chain_id uses auth_asym_id, which collapses ligands
+        # onto their parent protein chain. label_asym_id gives each entity a
+        # distinct chain identifier.
+        block = mmcif_file.block
+        label_asym_ids: list[str] | None = None
+        if "atom_site" in block:
+            atom_site = block["atom_site"]
+            if "label_asym_id" in atom_site:
+                _col = atom_site["label_asym_id"]
+                _raw = (
+                    _col.as_array(str)
+                    if hasattr(_col, "as_array")
+                    else np.array(list(_col), dtype=str)  # type: ignore[arg-type]
+                )
+                # biotite's get_structure(model=1) filters to model 1 AND
+                # removes alternate conformations. We must apply the same
+                # filters to label_asym_id to keep arrays aligned.
+                keep = np.ones(len(_raw), dtype=bool)
+                if "pdbx_PDB_model_num" in atom_site:
+                    _mc = atom_site["pdbx_PDB_model_num"]
+                    _models = (
+                        _mc.as_array(str)
+                        if hasattr(_mc, "as_array")
+                        else np.array(list(_mc), dtype=str)  # type: ignore[arg-type]
+                    )
+                    keep &= _models == "1"
+                if "label_alt_id" in atom_site:
+                    _ac = atom_site["label_alt_id"]
+                    _alts = (
+                        _ac.as_array(str)
+                        if hasattr(_ac, "as_array")
+                        else np.array(list(_ac), dtype=str)  # type: ignore[arg-type]
+                    )
+                    keep &= np.isin(_alts, [".", "?", "", "A"])
+                filtered = _raw[keep]
+                if len(filtered) == len(structure):
+                    label_asym_ids = filtered.tolist()
+                # If lengths still don't match, fall back to atom.chain_id
+
         # Get entity information from mmCIF
         entity_info = {}
         try:
-            # Access the first block in CIFFile
-            block = mmcif_file[0]
             if "entity" in block:
                 entity_category = block["entity"]
                 if "id" in entity_category and "type" in entity_category:
@@ -495,22 +548,30 @@ class MolecularComplex:
 
         atom_idx = 0
 
-        # Group atoms by chain and residue
-        chain_residue_groups = {}
-        for atom in structure:
-            chain_id = atom.chain_id
+        # Group atoms by chain and residue.
+        # Use label_asym_id (distinct per entity) when available, otherwise
+        # fall back to biotite's chain_id (auth_asym_id).
+        chain_residue_groups: dict[str, dict[tuple[int, str], dict]] = {}
+        for atom_i, atom in enumerate(structure):
+            chain_id = (
+                label_asym_ids[atom_i] if label_asym_ids is not None else atom.chain_id
+            )
             res_id = atom.res_id
             res_name = atom.res_name
 
             if chain_id not in chain_residue_groups:
                 chain_residue_groups[chain_id] = {}
-            if res_id not in chain_residue_groups[chain_id]:
-                chain_residue_groups[chain_id][res_id] = {
+            # Key by (res_id, res_name) to distinguish residues that share
+            # the same res_id but have different res_name (e.g. a protein
+            # residue and a ligand that were on the same auth chain).
+            res_key = (res_id, res_name)
+            if res_key not in chain_residue_groups[chain_id]:
+                chain_residue_groups[chain_id][res_key] = {
                     "atoms": [],
                     "res_name": res_name,
                     "is_hetero": atom.hetero,
                 }
-            chain_residue_groups[chain_id][res_id]["atoms"].append(atom)
+            chain_residue_groups[chain_id][res_key]["atoms"].append(atom)
 
         # Create a mapping from chain_id to numeric indices
         chain_id_to_numeric = {
@@ -523,8 +584,8 @@ class MolecularComplex:
             residues = chain_residue_groups[chain_id]
             numeric_chain_id = chain_id_to_numeric[chain_id]
 
-            for res_id in sorted(residues.keys()):
-                residue_data = residues[res_id]
+            for res_key in sorted(residues.keys()):
+                residue_data = residues[res_key]
                 res_name = residue_data["res_name"]
                 atoms = residue_data["atoms"]
                 is_hetero = residue_data["is_hetero"]
@@ -632,6 +693,96 @@ class MolecularComplex:
             atom_hetero=atom_hetero,
         )
 
+    def _get_entity_mapping(
+        self,
+    ) -> tuple[dict[str, list[str]], dict[str, int], dict[int, tuple[str, ...]]]:
+        """Compute chain→sequence, chain→entity_id, and entity_id→sequence mappings.
+
+        Returns:
+            (chain_sequences, chain_to_entity, entity_sequences)
+        """
+        chain_sequences: dict[str, list[str]] = {}
+        for token_idx in range(len(self.token_to_atoms)):
+            chain_id_numeric = self.chain_id[token_idx]
+            chain_id_str = self.metadata.chain_lookup.get(
+                int(chain_id_numeric), chr(65 + int(chain_id_numeric))
+            )
+            if chain_id_str not in chain_sequences:
+                chain_sequences[chain_id_str] = []
+            chain_sequences[chain_id_str].append(self.sequence[token_idx])
+
+        sequence_to_entity: dict[tuple[str, ...], int] = {}
+        chain_to_entity: dict[str, int] = {}
+        entity_sequences: dict[int, tuple[str, ...]] = {}
+        entity_id_counter = 1
+        for chain_id_str, sequence in chain_sequences.items():
+            seq_tuple = tuple(sequence)
+            if seq_tuple not in sequence_to_entity:
+                sequence_to_entity[seq_tuple] = entity_id_counter
+                entity_sequences[entity_id_counter] = seq_tuple
+                entity_id_counter += 1
+            chain_to_entity[chain_id_str] = sequence_to_entity[seq_tuple]
+
+        return chain_sequences, chain_to_entity, entity_sequences
+
+    def _add_entity_information(
+        self, cif_file: CIFFile, entity_sequences: dict[int, tuple[str, ...]]
+    ) -> None:
+        """Add _entity category to CIF file so OST can identify ligands vs polymers."""
+
+        entity_ids: list[str] = []
+        entity_types: list[str] = []
+        entity_descriptions: list[str] = []
+        for eid in sorted(entity_sequences.keys()):
+            seq = entity_sequences[eid]
+            entity_ids.append(str(eid))
+            has_protein = any(t in residue_constants.restype_3to1 for t in seq)
+            has_na = any(
+                t in ("A", "T", "G", "C", "U", "DA", "DT", "DG", "DC") for t in seq
+            )
+            if has_protein or has_na:
+                entity_types.append("polymer")
+                if has_protein:
+                    entity_descriptions.append(f"Polymer entity {eid} (protein)")
+                else:
+                    entity_descriptions.append(f"Polymer entity {eid} (nucleic acid)")
+            else:
+                entity_types.append("non-polymer")
+                entity_descriptions.append(f"Non-polymer entity {eid}")
+
+        if entity_ids:
+            cif_file.block["entity"] = CIFCategory(
+                name="entity",
+                columns={
+                    "id": CIFColumn(
+                        data=CIFData(array=np.array(entity_ids), dtype=np.str_)
+                    ),
+                    "type": CIFColumn(
+                        data=CIFData(array=np.array(entity_types), dtype=np.str_)
+                    ),
+                    "pdbx_description": CIFColumn(
+                        data=CIFData(array=np.array(entity_descriptions), dtype=np.str_)
+                    ),
+                },
+            )
+
+        # Add _struct_asym to map chain IDs to entity IDs
+        _, chain_to_entity, _ = self._get_entity_mapping()
+        if chain_to_entity:
+            asym_ids = sorted(chain_to_entity.keys())
+            asym_entity_ids = [str(chain_to_entity[c]) for c in asym_ids]
+            cif_file.block["struct_asym"] = CIFCategory(
+                name="struct_asym",
+                columns={
+                    "id": CIFColumn(
+                        data=CIFData(array=np.array(asym_ids), dtype=np.str_)
+                    ),
+                    "entity_id": CIFColumn(
+                        data=CIFData(array=np.array(asym_entity_ids), dtype=np.str_)
+                    ),
+                },
+            )
+
     def to_mmcif(self) -> str:
         """Write MolecularComplex to mmcif string using biotite.
 
@@ -653,8 +804,13 @@ class MolecularComplex:
         atom_bfactors = np.zeros(n_atoms, dtype=np.float32)
         atom_names = np.empty(n_atoms, dtype=object)
 
+        # Build entity mappings: chains with identical sequences share entity ID
+        _, chain_to_entity, entity_sequences = self._get_entity_mapping()
+
+        atom_entity_ids = np.zeros(n_atoms, dtype=np.int32)
+
         # Track residue IDs per chain
-        chain_res_counters = {}
+        chain_res_counters: dict[int, int] = {}
 
         # Vectorized expansion of token-level to atom-level annotations
         for token_idx, (start, end) in enumerate(self.token_to_atoms):
@@ -701,15 +857,21 @@ class MolecularComplex:
                 atom_hetero[start:end] = not is_protein
             atom_bfactors[start:end] = self.plddt[token_idx] * 100.0
             atom_names[start:end] = names
+            atom_entity_ids[start:end] = chain_to_entity.get(chain_id_str, 1)
 
         # Set all AtomArray attributes at once (convert object arrays to proper string arrays)
+        # res_name uses U8 to accommodate CCD codes up to 5 characters (e.g., A1AZ2);
+        # chain_id uses U16 because chain names like ``ligand_1`` / ``ligand_2`` /
+        # auth-asym ids of arbitrary length are possible.
         atom_array.res_id = atom_res_ids
-        atom_array.chain_id = np.array(atom_chain_ids, dtype="U4")
-        atom_array.res_name = np.array(atom_res_names, dtype="U4")
+        atom_array.chain_id = np.array(atom_chain_ids, dtype="U16")
+        atom_array.res_name = np.array(atom_res_names, dtype="U8")
         atom_array.hetero = atom_hetero
         atom_array.atom_name = np.array(atom_names, dtype="U4")
         atom_array.add_annotation("b_factor", dtype=float)
         atom_array.b_factor = atom_bfactors
+        atom_array.add_annotation("entity_id", dtype=int)
+        atom_array.entity_id = atom_entity_ids
 
         # Use existing elements or infer them from atom names
         if self.atom_elements is not None and len(self.atom_elements) == n_atoms:
@@ -722,6 +884,28 @@ class MolecularComplex:
         # Create CIF file and set structure
         cif_file = CIFFile()
         set_structure(cif_file, atom_array, data_block=self.id)
+
+        # Manually fix label_entity_id (biotite doesn't use entity_id annotation correctly)
+        if "atom_site" in cif_file.block:
+            atom_site = cif_file.block["atom_site"]
+            if "label_asym_id" in atom_site and "label_entity_id" in atom_site:
+                label_asym_ids = atom_site["label_asym_id"]
+                if hasattr(label_asym_ids, "as_array"):
+                    chain_ids_list = label_asym_ids.as_array(str).tolist()
+                elif hasattr(label_asym_ids, "__iter__"):
+                    chain_ids_list = list(label_asym_ids)  # type: ignore[arg-type]
+                else:
+                    chain_ids_list = []
+                updated_entity_ids = [
+                    str(chain_to_entity.get(cid, 1)) for cid in chain_ids_list
+                ]
+                if updated_entity_ids:
+                    atom_site["label_entity_id"] = CIFColumn(
+                        data=CIFData(array=np.array(updated_entity_ids), dtype=np.str_)
+                    )
+
+        # Add _entity category for OST compatibility
+        self._add_entity_information(cif_file, entity_sequences)
 
         # Convert to string
         output = io.StringIO()

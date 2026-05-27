@@ -1,301 +1,301 @@
-# ESM
+<div align="center">
+  <img src="_assets/header.png" style="width: 60%; height: auto;" />
+
+# A world model of protein biology: ESMC, ESMFold2, & ESM Atlas
+
+
+[ESMC & ESMFold2 Preprint](https://biohub.ai/papers/esm_protein.pdf) &sdot;  [Atlas](https://biohub.ai/esm/protein/atlas) &sdot; [Tutorials](https://github.com/Biohub/esm/tree/main/cookbook/tutorials) &sdot; [Slack](https://bit.ly/esm-slack)<br>
+</div>
+
+We are releasing a world model for protein biology: a scientific engine for prediction, design, and discovery. Built on the latest generation of Evolutionary Scale Modeling (ESM), this system learns from the protein sequences produced by evolution and uses that knowledge to represent, map, predict, and design proteins across scales — from atomic interactions to evolutionary relationships spanning billions of years. The system includes three artifacts: ESMC, ESMFold2, and ESM Atlas.
+
+**[ESMC](https://biohub.ai/esm/protein)** is a state-of-the-art protein language model that has learned the rules of protein biology from training on billions of protein sequences. ESMC defines a new scaling frontier relative to ESM2, achieving stronger performance in emergent long-range structural understanding as model scale increases
+
 
 <div align="center">
-  <img src="_assets/logo.png" width="50"/>
-
-[ESM3](https://www.science.org/doi/10.1126/science.ads0018) &sdot; [ESM C](https://www.evolutionaryscale.ai/blog/esm-cambrian) &sdot;
-[Slack](https://bit.ly/esm-slack) &sdot; [Tutorials](https://github.com/evolutionaryscale/esm/tree/main/cookbook/tutorials) <br>
+  <img src="_assets/esmc_graphic.png" width="40%"/>
 </div>
 
 
-- [Installation ](#installation-)
-- [Available Models](#available-models-)
-- [ESM 3](#esm-3-)
-  - [Quickstart for ESM3 Open](#esm3-quickstart-)
-  - [ESM3 98B via Forge API](#esm3-forge)
-  - [ESM3 Example Usage](#esm3-example-usage)
-- [ESM C](#esm-c-)
-  - [Quickstart for ESM C Open Models](#esm-c-open-)
-  - [ESM C 6B via Forge API](#esm-c-forge-)
-  - [ESM C via SageMaker for Commercial Use  ](#esm-c-sagemaker-)
-  - [ESM C Example Usage](#esm-c-example-)
-- [Responsible Development](#responsible-development-)
-- [Licenses](#licenses-)
-- [Citations  ](#citations-)
+
+**[ESMFold2](https://huggingface.co/Biohub/ESMFold2)**, built on the ESMC 6B model, is a state-of-the-art structure prediction model that has been validated for the design of protein-protein interactions. ESMFold2 surpasses other models in DockQ pass-rate on Foldbench protein-protein and antibody-antigen complexes, and can be used in single-sequence mode for an order of magnitude speedup in folding.
+
+<div align="center">
+  <img src="_assets/esmfold2_folding.png" width="40%"/>
+</div>
 
 
-This repository contains flagship protein models for EvolutionaryScale, as well as access to the API. [ESM3](https://www.evolutionaryscale.ai/papers/esm3-simulating-500-million-years-of-evolution-with-a-language-model) is our flagship multimodal protein generative model, and can be used for generation and prediction tasks. [ESM C](https://www.evolutionaryscale.ai/blog/esm-cambrian) is our best protein representation learning model, and can be used to embed protein sequences.
+ESMFold2 is validated in the lab across five therapeutic targets. Inversion of ESMFold2 enables generation of de novo minibinders and antibody-derived scFvs with high hit rates, nanomolar affinities, target specificity, and functional activity. We're planning to release a notebook that walks through the full design loop from target sequence to ranked binder candidates. The full protocol is also described in the [preprint](https://biohub.ai/papers/esm_protein.pdf).
 
-## Installation <a name="installation"></a>
+<div align="center">
+  <img src="_assets/esmfold2_binder.png" width="60%"/>
+</div>
 
-To get started with ESM, install the python library using pip:
 
-```bash
-pip install esm
-```
+The **[ESM Atlas](https://biohub.ai/esm/protein/atlas)** is a map of 6.8 billion proteins covering the full breadth of life’s biodiversity. ESMFold2’s folding throughput enabled the prediction of more than one billion predicted structures. The Atlas is organized according to the internal world model of ESMC. We make this world model interpretable by training sparse autoencoders (SAEs). SAEs are unsupervised neural networks trained to decompose ESMC internal representations into a sparse set of ~16,000 interpretable features that reveal the functional relationships between proteins that ESMC has learned. Each feature is summarized in natural language with an agentic pipeline that maps features onto known biology from protein databases. We release a collection of SAEs trained on different model scales, layers, and at different levels of granularity. Learn more about how to use the ESM Atlas on the [Biohub Platform](https://biohub.ai/).
 
-## Available Models <a name="available-models"></a>
+For information on using ESM3, see the [ESM3 README](https://github.com/Biohub/esm/blob/main/_assets/ESM3_README.md).
 
-### ESM 3 Family
+## Table of Contents
 
-| Model | Model Size | Release Date | Note |
-|-------|------------|--------------|------|
-| **Flagship Models** | | | Most users will be interested in using one of these models. |
-| esm3-large-2024-03 | 98B | 2024-03 | |
-| esm3-medium-2024-08 | 7B | 2024-08 | |
-| esm3-small-2024-08 | 1.4B | 2024-08 | |
-| **Published Models** | | | These models were used to generate all of the results in the ESM3 paper and are provided to facilitate reproducibility. |
-| esm3-large-2024-03 | 98B | 2024-03 | |
-| esm3-medium-2024-03 | 7B | 2024-03 | |
-| esm3-small-2024-03 | 1.4B | 2024-03 | |
-| **Experimental Models** | | | These models are provided for early use by researchers and are still under development. |
-| esm3-medium-multimer-2024-09 | 7B | 2024-09 | |
+- [ESMC](#esmc)
+- [ESMC Sparse Autoencoders](#esmc-sparse-autoencoders)
+- [ESMFold2](#esmfold2)
+- [Frontier-Safety](#frontier-safety)
+- [Licenses](#licenses)
+- [Citations](#citations)
 
-### ESM C Models
+## ESMC
+<a name="esmc"></a>
 
-| Model | Model Size | Number of Layers | Release Date |
-|-------|------------|------------------|--------------|
-| esmc-6b-2024-12 | 6B | 80 | 2024-12 |
-| esmc-600m-2024-12 | 600M | 36 | 2024-12 |
-| esmc-300m-2024-12 | 300M | 30 | 2024-12 |
+[ESMC](https://biohub.ai/esm/protein) is a state-of-the-art protein language model that has learned representations of protein biology from training on billions of protein sequences.
 
-## ESM 3  <a name="esm3"></a>
+Codebase, model weights, and model variants for ESMC are available through [Hugging Face](https://huggingface.co/collections/Biohub/esmc-model-family).
 
-[ESM3](https://www.evolutionaryscale.ai/papers/esm3-simulating-500-million-years-of-evolution-with-a-language-model) is a frontier generative model for biology, able to jointly reason across three fundamental biological properties of proteins: sequence, structure, and function. These three data modalities are represented as tracks of discrete tokens at the input and output of ESM3. You can present the model with a combination of partial inputs across the tracks, and ESM3 will provide output predictions for all the tracks.
+There are two primary ways of running the ESM models: through the [**Biohub Platform**](https://biohub.ai/) or locally with Hugging Face. The Biohub Platform enables users to easily run inference with ESM models with minimal setup. Users interested in customizing or fine-tuning ESM models can use the models from Hugging Face.
 
-ESM3 is a _generative_ masked language model. You can prompt it with partial sequence, structure, and function keywords, and iteratively sample masked positions until all positions are unmasked. This iterative sampling is what the `.generate()` function does.
+### Running ESMC Locally
+<a name="running-esmc-locally"></a>
 
-<!--![ESM3 Diagram](_assets/esm3_diagram.png)-->
-<img src="_assets/esm3_diagram.png" alt="ESM3 Diagram" width="400" />
+The following code demonstrates how to run ESMC locally
 
-The ESM3 architecture is highly scalable due to its transformer backbone and all-to-all reasoning over discrete token sequences. At its largest scale, ESM3 was trained with 1.07e24 FLOPs on 2.78 billion proteins and 771 billion unique tokens, and has 98 billion parameters.
-Learn more by reading the [blog post](https://www.evolutionaryscale.ai/blog/esm3-release) and [the paper (Hayes et al., 2024)](https://www.science.org/doi/10.1126/science.ads0018).
-
-ESM3-open, with 1.4B parameters, is the smallest and fastest model in the family.
-
-### Quickstart for ESM3-open <a name="esm3-quickstart"></a>
-
-The weights are stored on HuggingFace Hub under [HuggingFace/EvolutionaryScale/esm3](https://huggingface.co/EvolutionaryScale/esm3).
-
-```py
+```python
+import torch
+from transformers import AutoModelForMaskedLM, AutoTokenizer
 from huggingface_hub import login
-from esm.models.esm3 import ESM3
-from esm.sdk.api import ESM3InferenceClient, ESMProtein, GenerationConfig
 
-# Will instruct you how to get an API key from huggingface hub, make one with "Read" permission.
+# login with your Hugging Face credentials
 login()
 
-# This will download the model weights and instantiate the model on your machine.
-model: ESM3InferenceClient = ESM3.from_pretrained("esm3-open").to("cuda") # or "cpu"
+# example GFP sequence
+sequences = ["MSKGEELFTGVVPILVELDGDVNGHKFSVSGEGEGDATYGKLTLKFICTTGKLPVPWPTLVTTFSYGVQCFSRYPDHMKQHDFFKSAMPEGYVQERTIFFKDDGNYKTRAEVKFEGDTLVNRIELKGIDFKEDGNILGHKLEYNYNSHNVYIMADKQKNGIKVNFKIRHNIEDGSVQLADHYQQNTPIGDGPVLLPDNHYLSTQSALSKDPNEKRDHMVLLEFVTAAGITHGMDELYK"]
 
-# Generate a completion for a partial Carbonic Anhydrase (2vvb)
-prompt = "___________________________________________________DQATSLRILNNGHAFNVEFDDSQDKAVLKGGPLDGTYRLIQFHFHWGSLDGQGSEHTVDKKKYAAELHLVHWNTKYGDFGKAVQQPDGLAVLGIFLKVGSAKPGLQKVVDVLDSIKTKGKSADFTNFDPRGLLPESLDYWTYPGSLTTPP___________________________________________________________"
-protein = ESMProtein(sequence=prompt)
-# Generate the sequence, then the structure. This will iteratively unmask the sequence track.
-protein = model.generate(protein, GenerationConfig(track="sequence", num_steps=8, temperature=0.7))
-# We can show the predicted structure for the generated sequence.
-protein = model.generate(protein, GenerationConfig(track="structure", num_steps=8))
-protein.to_pdb("./generation.pdb")
-# Then we can do a round trip design by inverse folding the sequence and recomputing the structure
-protein.sequence = None
-protein = model.generate(protein, GenerationConfig(track="sequence", num_steps=8))
-protein.coordinates = None
-protein = model.generate(protein, GenerationConfig(track="structure", num_steps=8))
-protein.to_pdb("./round_tripped.pdb")
+model = AutoModelForMaskedLM.from_pretrained(
+    "Biohub/ESMC-6B",
+    device_map="auto",
+).eval()
+tokenizer = AutoTokenizer.from_pretrained("Biohub/ESMC-6B")
+
+inputs = tokenizer(sequences, return_tensors="pt", padding=True)
+inputs = {k: v.to(model.device) for k, v in inputs.items()}
+with torch.inference_mode():
+    output = model(**inputs)
 ```
 
-Congratulations, you just generated your first proteins with ESM3!
-
-### EvolutionaryScale Forge: Access to larger ESM3 models
- <a name="esm3-forge"></a>
-
-You can access all scales of ESM3 models [EvolutionaryScale Forge](https://forge.evolutionaryscale.ai).
-
-We encourage users to interact with the Forge API through the python `esm` library instead of the command line.
-The python interface enables you to interactively load proteins, build prompts, and inspect generated proteins
-with the `ESMProtein` and config classes used to interact with the local model.
-
-In any example script you can replace a local `ESM3` model with a Forge API client:
-
-```py
-# Instead of loading the model locally on your machine:
-model: ESM3InferenceClient = ESM3.from_pretrained("esm3_sm_open_v1").to("cuda") # or "cpu"
-# just replace the line with this:
-model: ESM3InferenceClient = esm.sdk.client("esm3-medium-2024-08", token="<your forge token>")
-# and now you're interfacing with the model running on our remote servers.
-...
+By default, the model returns only the final layer representations. To return hidden states from **all transformer layers**, set:
+```python
+output = model(**inputs, output_hidden_states=True)
 ```
 
-and the exact same code will work.
-This enables a seamless transition from smaller and faster models, to our largest and most capable protein language models for protein design work.
+### Running ESMC Through the Biohub Platform
+<a name="running-esmc-through-biohub-platform"></a>
 
-### Async Forge Client
-The Forge client supports asynchronous API calls for improved performance when making multiple requests. Async methods follow the same naming convention as their synchronous counterparts, with `async_` prepended to the method name. For example:
+The code below shows how to access ESMC using the Biohub Platform. API tokens can be created in the [developer console](https://biohub.ai/developer-console/api-keys).
 
-```py
-model = esm.sdk.client("esm3-medium-2024-08", token="<your forge token>")
+Note that our API migrated from forge.evolutionaryscale.ai to [biohub.ai](https://biohub.ai), so some code classes reference “Forge”.
 
-protein = await model.async_generate(protein, GenerationConfig(track="sequence"))
+To get started with ESM, install the python library using `pip`:
+
+```
+pip install "esm @ git+https://github.com/Biohub/esm.git@fde4aaa7432c3f44c69e9615f43f2fd96f59c0d6"
 ```
 
-### ESM3 Example Usage
- <a name="esm3-example"></a>
+Then import the necessary libraries and instantiate your desired model.
 
-[Generating a novel GFP with chain of thought generation using ESM3](./cookbook/tutorials/3_gfp_design.ipynb) [![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/evolutionaryscale/esm/blob/main/cookbook/tutorials/3_gfp_design.ipynb)
-
-[Advanced prompting with ESM3 input tracks](./cookbook/tutorials/4_forge_generate.ipynb) [![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/evolutionaryscale/esm/blob/main/cookbook/tutorials/4_forge_generate.ipynb)
-
-
-
-## ESM C <a name="esm-c"></a>
-[ESM Cambrian](https://www.evolutionaryscale.ai/blog/esm-cambrian) is a parallel model family to our flagship ESM3 generative models. While ESM3 focuses on controllable generation of proteins, ESM C focuses on creating representations of the underlying biology of proteins.
-
-ESM C is designed as a drop-in replacement for ESM2 and comes with major performance benefits. The 300M parameter ESM C delivers similar performance to ESM2 650M with dramatically reduced memory requirements and faster inference. The 600M parameter ESM C rivals the 3B parameter ESM2 and approaches the capabilities of the 15B model, delivering frontier performance with far greater efficiency. The 6B parameter ESM C outperforms the best ESM2 models by a wide margin.
-
-ESM C can be run locally, via [the Forge API](https://forge.evolutionaryscale.ai/) or through [AWS SageMaker](https://aws.amazon.com/marketplace/seller-profile?id=seller-iw2nbscescndm).
-
-### Quickstart for ESM C Open Models<a name="esm-c-open"></a>
-When running the code below, a pytorch model will be instantiated locally on your machine, with the weights downloaded from the [HuggingFace hub](https://huggingface.co/EvolutionaryScale).
 ```py
-from esm.models.esmc import ESMC
-from esm.sdk.api import ESMProtein, LogitsConfig
+from esm.sdk import esmc_client
 
-protein = ESMProtein(sequence="AAAAA")
-client = ESMC.from_pretrained("esmc_300m").to("cuda") # or "cpu"
-protein_tensor = client.encode(protein)
-logits_output = client.logits(
-   protein_tensor, LogitsConfig(sequence=True, return_embeddings=True)
+model = esmc_client(
+    model="esmc-600m-2024-12", url="https://biohub.ai", token="<your API token>"
 )
+
+protein_tensor = model.encode(protein)
+logits_output = model.logits(
+  protein_tensor, LogitsConfig(sequence=True, return_embeddings=True)
+)
+
 print(logits_output.logits, logits_output.embeddings)
 ```
 
-To use Flash Attention with the open weights:
+For tutorials on how to use ESMC, see our [tutorials](https://github.com/Biohub/esm/tree/main/cookbook/tutorials).
 
-Simply install flash-attn package, which will enable Flash Attention automatically:
-```
-pip install flash-attn --no-build-isolation
-```
+## ESMC Sparse Autoencoders (SAE)
+<a name="esmc-sparse-autoencoders"></a>
 
-You can also disable flash-attn by passing ``use_flash_attn=False`` to utils like ``ESMC_300M_202412``.
+Sparse autoencoders (SAE) are an unsupervised method for decomposing representations of large transformer language models into interpretable units. We released SAEs trained on ESMC to reveal the interpretable units of functional organization that ESMC's world model has learned.
 
-### ESM C 6B via Forge API <a name="esm-c-forge"></a>
+The sparse autoencoder used in the Atlas and analyzed in the paper, `ESMC-6B-sae-layer60-k64-codebook16384`, is built on the ESMC 6B model. We also provide human-interpretable, agent-generated feature descriptions for this SAE's codebook.
 
-Apply for access and copy the API token from the console by first visiting [Forge](https://forge.evolutionaryscale.ai).
+Codebase, model weights, and model variants for ESMC SAEs are available through [Hugging Face](https://huggingface.co/collections/biohub/esmc-saes-for-hidden-states-all-layers).
 
-With the code below, a local python client talks to the model inference server hosted by EvolutionaryScale.
+```python
+import torch
+from transformers import AutoModel, AutoTokenizer
 
-```py
-from esm.sdk.forge import ESM3ForgeInferenceClient
-from esm.sdk.api import ESMProtein, LogitsConfig
+sequence = "MGSNKSKPKDASQRRRSLEPAENVHGAGGGAFPASQTPSKPASADGHRGPSAAFAPAAAEPKLFGGFNSSDTVTSPQRAGPLAGGVTTFVALYDYESRTETDLSFKKGERLQIVNNTEGDWWLAHSLSTGQTGYIPSNYVAPSDSIQAEEWYFGKITRRESERLLLNAENPRGTFLVRESETTKGAYCLSVSDFDNAKGLNVKHYKIRKLDSGGFYITSRTQFNSLQQLVAYYSKHADGLCHRLTTVCPTSKPQTQGLAKDAWEIPRESLRLEVKLGQGCFGEVWMGTWNGTTRVAIKTLKPGTMSPEAFLQEAQVMKKLRHEKLVQLYAVVSEEPIYIVTEYMSKGSLLDFLKGETGKYLRLPQLVDMAAQIASGMAYVERMNYVHRDLRAANILVGENLVCKVADFGLARLIEDNEYTARQGAKFPIKWTAPEAALYGRFTIKSDVWSFGILLTELTTKGRVPYPGMVNREVLDQVERGYRMPCPPECPESLHDLMCQCWRKEPEERPTFEYLQAFLEDYFTSTEPQYQPGENL"
 
-# Apply for forge access and get an access token
-forge_client = ESM3ForgeInferenceClient(model="esmc-6b-2024-12", url="https://forge.evolutionaryscale.ai", token="<your forge token>")
-protein_tensor = forge_client.encode(protein)
-logits_output = forge_client.logits(
-   protein_tensor, LogitsConfig(sequence=True, return_embeddings=True)
+model = AutoModel.from_pretrained("Biohub/ESMC-6B", device_map="auto").eval()
+tokenizer = AutoTokenizer.from_pretrained("Biohub/ESMC-6B")
+sae = AutoModel.from_pretrained(
+    "Biohub/ESMC-6B-sae-k64-codebook16384",
+    allow_patterns=["config.json", "layer_30.safetensors", "layer_60.safetensors"],
+    device=model.device,
 )
-print(logits_output.logits, logits_output.embeddings)
+sae.initialize_layers([30, 60])
+model.add_sae_models([sae.layers["30"], sae.layers["60"]])
+
+inputs = tokenizer(sequence, return_tensors="pt", padding=True)
+inputs = {k: v.to(model.device) for k, v in inputs.items()}
+
+with torch.inference_mode():
+    output = model(**inputs)
+
+output["sae_outputs"]["layer60"]  # sparse.coo tensor
+print(output["sae_outputs"]["layer60"].shape)
+
 ```
 
-Remember to replace `<your forge token>` with your actual Forge access token.
+For tutorials on how to use ESMC SAEs, see our [tutorials](https://github.com/Biohub/esm/tree/main/cookbook/tutorials).
 
-### Forge Batch Executor
+## ESMFold2
+<a name="esmfold2"></a>
 
-For jobs that require processing multiple inputs, the Forge Batch Executor provides a streamlined and way to execute them concurrently and efficiently while respecting rate limits and adapting to request latency.
+[ESMFold2](https://huggingface.co/Biohub/ESMFold2) is a state-of-the-art protein structure prediction model that combines ESMC (6B parameter) language model embeddings with a diffusion-based structure prediction architecture.
 
-```py
-from esm.sdk.forge import ESM3ForgeInferenceClient
-from esm.sdk.api import ESMProtein, LogitsConfig
-from esm.sdk import batch_executor
+The model predicts high-resolution, all-atom 3D protein structures directly from amino acid sequences, with optional multiple sequence alignment (MSA) input for enhanced accuracy on challenging targets. ESMFold2 achieves state-of-the-art performance matching or exceeding AlphaFold3 across diverse evaluation datasets, while offering improved computational efficiency through optimized diffusion sampling and architectural innovations.
 
-def embed_sequence(client: ESM3ForgeInferenceClient, sequence: str) -> LogitsOutput:
-    protein = ESMProtein(sequence=sequence)
-    protein_tensor = client.encode(protein)
-    if isinstance(protein_tensor, ESMProteinError):
-        raise protein_tensor
-    output = client.logits(protein_tensor, LogitsConfig(sequence=True, return_embeddings=True))
-    return output
+Codebase, model weights, and model variants for ESMFold2 are available through [Hugging Face](https://huggingface.co/collections/biohub/esmfold2-model-family)
 
-sequences = ["A", "AA", "AAA"]
-client =  ESM3ForgeInferenceClient(model="esmc-6b-2024-12", url="https://forge.evolutionaryscale.ai", token="<your forge token>")
+### Running ESMFold2 Locally
 
-# Usage Example:
-# To execute a batch job, wrap your function inside the batch executor context manager.
-# Syntax:
-# with batch_executor() as executor:
-#     outputs = executor.execute_batch(user_func=<your_function>, **kwargs)
+```python
+from esm.models.esmfold2 import (
+    DNAInput,
+    ESMFold2InputBuilder,
+    LigandInput,
+    Modification,
+    ProteinInput,
+    StructurePredictionInput,
+)
+from transformers.models.esmfold2.modeling_esmfold2 import ESMFold2Model
 
-with batch_executor() as executor:
-    outputs = executor.execute_batch(user_func=embed_sequence, client=client, sequence=sequences)
-```
-
-### ESM C via SageMaker for Commercial Use  <a name="esm-c-sagemaker"></a>
-
-ESM C models are also available on Amazon SageMaker under the [Cambrian Inference Clickthrough License Agreement](https://www.evolutionaryscale.ai/policies/cambrian-inference-clickthrough-license-agreement).
-Under this license agreement, models are available for broad use for commercial entities.
-
-You will need an admin AWS access to an AWS account to follow these instructions. To deploy, first we need to deploy the AWS package:
-
-1. Find the ESM C model version you want to subscribe to. All of our offerings are visible [here](https://aws.amazon.com/marketplace/seller-profile?id=seller-iw2nbscescndm).
-2. Click the name of the model version you are interested in, review pricing information and the end user license agreement (EULA), then click "Continue to Subscribe".
-3. Once you have subscribed, you should be able to see our model under your [marketplace subscriptions](https://us-east-1.console.aws.amazon.com/marketplace/home#/subscriptions).
-4. Click the product name and then from the "Actions" dropdown select "Configure".
-5. You will next see the "Configure and Launch" UI. There are multiple deployment paths - we recommend using "AWS CloudFormation".
-6. The default value for "Service Access" may or may not work. We recommend clicking "Create and use a new service role".
-7. Click "Launch CloudFormation Template".  This takes 15 to 25 minutes depending on model size.
-8. On the "Quick create stack" page, ensure the stack name and endpoint names are not already used. You can check existing stack names [here](https://console.aws.amazon.com/cloudformation/home/stacks) and existing endpoint names [here](https://us-east-1.console.aws.amazon.com/sagemaker/home?region=us-east-1#/endpoints).
-
-The SageMaker deployment of the model now lives on a dedicated GPU instance inside your AWS environment, and will be billed directly to your AWS account.
-Make sure to remember to shut down the instance after you stop using it. Find the CloudFormation stack you created [here](https://us-east-1.console.aws.amazon.com/cloudformation/home), select it, and then click "Delete" to clean up all resources.
-
-After creating the endpoint, you can create a SageMaker client and use it the same way as a Forge client. They share the same API.
-The local python client talks to the SageMaker endpoint you just deployed, which runs on an instance with a GPU to run model inference.
-
-Ensure that the code below runs in an environment that has AWS credentials available for the account which provisioned SageMaker resources.  Learn more about general AWS credential options [here](https://docs.aws.amazon.com/cli/latest/userguide/cli-chap-authentication.html#cli-chap-authentication-precedence).
-
-```py
-from esm.sdk.sagemaker import ESM3SageMakerClient
-from esm.sdk.api import ESMProtein, LogitsConfig
-
-sagemaker_client = ESM3SageMakerClient(
-   # E.g. "Endpoint-ESMC-6B-1"
-   endpoint_name=SAGE_ENDPOINT_NAME,
-   # E.g. "esmc-6b-2024-12". Same model names as in Forge.
-   model=MODEL_NAME,
+HHAI_SEQ = (
+    "MIEIKDKQLTGLRFIDLFAGLGGFRLALESCGAECVYSNEWDKYAQEVYEMNFGEKPEGDITQVNEKTIPDH"
+    "DILCAGFPCQAFSISGKQKGFEDSRGTLFFDIARIVREKKPKVVFMENVKNFASHDNGNTLEVVKNTMNELD"
+    "YSFHAKVLNALDYGIPQKRERIYMICFRNDLNIQNFQFPKPFELNTFVKDLLLPDSEVEHLVIDRKDLVMTN"
+    "QEIEQTTPKTVRLGIVGKGGQGERIYSTRGIAITLSAYGGGIFAKTGGYLVNGKTRKLHPRECARVMGYPDS"
+    "YKVHPSTSQAYKQFGNSVVINVLQYIAYNIGSSLNFKPY"
 )
 
-protein = ESMProtein(sequence="AAAAA")
-protein_tensor = sagemaker_client.encode(protein)
-logits_output = sagemaker_client.logits(
-   protein_tensor, LogitsConfig(sequence=True, return_embeddings=True)
+model = ESMFold2Model.from_pretrained("biohub/ESMFold2").cuda().eval()
+
+spi = StructurePredictionInput(
+    sequences=[
+        ProteinInput(id="A", sequence=HHAI_SEQ),
+        DNAInput(
+            id="B",
+            sequence="GATAGCGCTATC",
+            modifications=[Modification(position=5, ccd="C36")],
+        ),
+        DNAInput(
+            id="C",
+            sequence="TGATAGCGCTATC",
+            modifications=[Modification(position=6, ccd="C36")],
+        ),
+        LigandInput(id="L", ccd=["SAH"]),
+    ]
 )
-print(logits_output.logits, logits_output.embeddings)
+
+result = ESMFold2InputBuilder().fold(
+    model, spi, num_loops=3, num_sampling_steps=50, num_diffusion_samples=1, seed=0
+)
+
+print(f"pLDDT mean: {float(result.plddt.mean()):.3f}, pTM: {float(result.ptm):.3f}, ipTM: {float(result.iptm):.3f}")
+
+with open("1mht_pred.cif", "w") as f:
+    f.write(result.complex.to_mmcif())
 ```
 
-### ESM C Example Usage
- <a name="esm-c-example"></a>
+### Running ESMFold2 Through the Biohub Platform
 
-[Embedding a sequence using ESM C](./cookbook/tutorials/2_embed.ipynb) [![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/evolutionaryscale/esm/blob/main/cookbook/tutorials/2_embed.ipynb)
+Install the  `esm` Python package
 
-## Responsible Development <a name="responsible-development"></a>
+```
+pip install "esm @ git+https://github.com/Biohub/esm.git@fde4aaa7432c3f44c69e9615f43f2fd96f59c0d6"
+```
 
-EvolutionaryScale is a public benefit company. Our mission is to develop artificial intelligence to understand biology for the benefit of human health and society, through partnership with the scientific community, and open, safe, and responsible research. Inspired by the history of our field as well as [new principles and recommendations](https://responsiblebiodesign.ai/), we have created a Responsible Development Framework to guide our work towards our mission with transparency and clarity.
+Import the necessary libraries.
 
-The core tenets of our framework are
+```py
+from esm.sdk.forge import SequenceStructureForgeInferenceClient
+from esm.sdk.api import ESMProtein, ESMProteinError, LogitsConfig, LogitsOutput
+```
 
-- We will communicate the benefits and risks of our research
-- We will proactively and rigorously evaluate the risk of our models before public deployment
-- We will adopt risk mitigation strategies and precautionary guardrails
-- We will work with stakeholders in government, policy, and civil society to keep them informed
+Call the inference client with the selected model of choice and replace <your API token> with your token name.
 
-With this in mind, we have performed a variety of mitigations for `esm3-sm-open-v1`, detailed in our [paper](https://www.science.org/doi/10.1126/science.ads0018)
+```py
+client = SequenceStructureForgeInferenceClient(model="esmfold2-fast-2026-05", url="https://biohub.ai", token="<your API token>")
 
-## Licenses  <a name="licenses"></a>
+gfp_sequence = "MSKGEELFTGVVPILVELDGDVNGHKFSVRGEGEGDATNGKLTLKFICTTGKLPVPWPTLVTTLTYGVQCFSRYPDHMKRHDFFKSAMPEGYVQERTISFKDDGTYKTRAEVKFEGDTLVNRIELKGIDFKEDGNILGHKLEYNFNSHNVYITADKQKNGIKANFKIRHNVEDGSVQLADHYQQNTPIGDGPVLLPDNHYLSTQSVLSKDPNEKRDHMVLLEFVTAAGITHGMDELYK"
+gfp_input = input_builder.StructurePredictionInput(
+    sequences=[gfp_sequence]
+)
 
-The code and model weights of ESM3 and ESM C are available under a mixture of non-commercial and permissive commercial licenses. For complete license details, see [LICENSE.md](./LICENSE.md).
+config = FoldingConfig(num_loops=3, num_sampling_steps=32, seed=0)
+result = client.fold_all_atom(gfp_input, config=config)
 
-## Citations  <a name="citations"></a>
+with open("result.cif", "w") as f:
+    f.write(result.complex.to_mmcif())
+```
+
+For tutorials on how to use ESMFold2, see our [tutorials](https://github.com/Biohub/esm/tree/main/cookbook/tutorials).
+
+
+## Frontier Safety
+<a name="frontier-safety"></a>
+
+Biohub has established a safety team to assess the benefits and potential risks of our models and tools prior to release, and develop mitigations where necessary. To do this, we follow a structured approach that includes assessing both biosafety and biosecurity risks as well as existing, comparable open-source models and tools. We actively engage with the scientific community, stakeholders and domain experts to advance innovation as well as best practices for responsible development. Risk assessment was conducted for each of the components of this release, including our ESMC Cambrian models, ESMFold2, ESMC SAEs, ESM Atlas, and binder design system.
+
+Informed by our risk assessments, we are releasing the source code and model weights for ESMC 6B, ESMFold2, and ESMC SAEs. We are also releasing our ESM Atlas dataset and binder design system openly. Biohub values open science, and we share our research with the scientific community so that others can evaluate, reproduce, and build upon our work.
+
+Evaluations: Prior to release, we conducted evaluations to inform our understanding of capability uplift for specific misuse-relevant functional tasks. The full details of these evaluations are available in our corresponding paper appendix.
+
+The Biohub Platform: We implement guardrails that detect and restrict the use of keywords and sequences corresponding to controlled pathogens and toxins on our freely accessible platform. For further details regarding these guardrails, please refer to our Biohub Platform Resources page. We recognize there are many legitimate reasons to use AI models to understand and model these sequences and proteins. If you are a researcher whose work is impacted by these guardrails, you can request elevated access to our platform via [Biohub.ai](http://Biohub.ai).
+
+Please follow our [Acceptable Use Policy](https://biohub.org/acceptable-use-policy/) when using the model.
+
+## Licenses
+<a name="licenses"></a>
+
+These models are available under the [MIT license](https://github.com/Biohub/esm/blob/main/LICENSE.md).
+
+## Citations
+<a name="citations"></a>
+
 If you use ESM in your work, please cite one of the following:
+
+#### ESMC, SAEs, and ESMFold2
+```
+@misc{candido2026language,
+  title  = {Language Modeling Materializes a World Model of Protein Biology},
+  author = {Candido, Salvatore and Hayes, Thomas and Derry, Alexander and Rao, Roshan
+            and Lin, Zeming and Verkuil, Robert and Wu, Bryan and Lee, Jin Sub
+            and Bruguera, Elise S. and Keval, Jehan A. and Kopylov, Mykhailo
+            and Pak, John E. and Wu, Wesley and Thomas, Neil and Mataraso, Samson
+            and Hsu, Alvin and Trotman-Grant, Ashton C. and Fatras, Kilian
+            and dos Santos Costa, Allan and Badkundri, Rohil and Ak{\i}n, Halil
+            and Oktay, Deniz and Deaton, Jonathan and Montabana, Elizabeth
+            and Sitwala, Hrishita and Yu, Yue and Wiggert, Marius
+            and Carlin, Dylan Alexander and Goering, Anthony W. and Blazejewski, Tomasz
+            and Sandora, McCullen and Hla, Michael and Jia, Tina Z.
+            and Kloker, Leon H. and Sofroniew, Nicholas J. and Uehara, Masatoshi
+            and Pannu, Jassi and Bachas, Sharrol and Liu, Daniel S.
+            and Sercu, Tom and Rives, Alexander},
+  year   = {2026},
+  url    = {https://biohub.ai/papers/esm_protein.pdf},
+  note   = {Preprint}
+}
+```
 
 #### ESM3
 ```
@@ -309,19 +309,8 @@ If you use ESM in your work, please cite one of the following:
 }
 ```
 
-#### ESM C
-```
-@misc{esm2024cambrian,
-  author = {{ESM Team}},
-  title = {ESM Cambrian: Revealing the mysteries of proteins with unsupervised learning},
-  year = {2024},
-  publisher = {EvolutionaryScale Website},
-  url = {https://evolutionaryscale.ai/blog/esm-cambrian},
-  urldate = {2024-12-04}
-}
-```
-
 #### ESM Github (Code / Weights)
+
 ```
 @software{evolutionaryscale_2024,
   author = {{EvolutionaryScale Team}},

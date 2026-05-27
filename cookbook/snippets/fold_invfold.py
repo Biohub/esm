@@ -105,7 +105,9 @@ def inverse_fold(
 
 if __name__ == "__main__":
     if not os.environ.get("ESM_API_KEY", ""):
-        print("Please export your Forge API key as ESM_API_KEY environment variable.")
+        print(
+            "Please export your Forge/Biohub Platform API key as ESM_API_KEY environment variable."
+        )
     client = SequenceStructureForgeInferenceClient(token=os.environ["ESM_API_KEY"])
     esm3_client = ESM3ForgeInferenceClient(
         model="esm3-medium-2024-08", token=os.environ["ESM_API_KEY"]
