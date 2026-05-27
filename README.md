@@ -50,7 +50,7 @@ For information on using ESM3, see the [ESM3 README](https://github.com/Biohub/e
 
 [ESMC](https://biohub.ai/esm/protein) is a state-of-the-art protein language model that has learned representations of protein biology from training on billions of protein sequences.
 
-Codebase, model weights, and model variants for ESMC are available through [Hugging Face](https://huggingface.co/collections/Biohub/esmc-model-family).
+Codebase, model weights, and model variants for ESMC are available through [Hugging Face](https://huggingface.co/collections/biohub/esmc-model-family).
 
 There are two primary ways of running the ESM models: through the [**Biohub Platform**](https://biohub.ai/) or locally with Hugging Face. The Biohub Platform enables users to easily run inference with ESM models with minimal setup. Users interested in customizing or fine-tuning ESM models can use the models from Hugging Face.
 
