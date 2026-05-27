@@ -97,7 +97,7 @@ Note that our API migrated from forge.evolutionaryscale.ai to [biohub.ai](https:
 To get started with ESM, install the python library using `pip`:
 
 ```
-pip install esm
+pip install "esm @ git+https://github.com/Biohub/esm.git@c94ed8d763bbd7088b296949e5b401e8ea12073a"
 ```
 
 Then import the necessary libraries and instantiate your desired model.
@@ -221,7 +221,7 @@ with open("1mht_pred.cif", "w") as f:
 Install the  `esm` Python package
 
 ```
-pip install esm
+pip install "esm @ git+https://github.com/Biohub/esm.git@c94ed8d763bbd7088b296949e5b401e8ea12073a"
 ```
 
 Import the necessary libraries.
