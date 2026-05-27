@@ -57,6 +57,12 @@ There are two primary ways of running the ESM models: through the [**Biohub Plat
 ### Running ESMC Locally
 <a name="running-esmc-locally"></a>
 
+Install `esm` from GitHub (a PyPI release is coming soon):
+
+```
+pip install esm@git+https://github.com/Biohub/esm.git@c94ed8d
+```
+
 The following code demonstrates how to run ESMC locally
 
 ```python
