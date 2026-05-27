@@ -60,6 +60,7 @@ There are two primary ways of running the ESM models: through the [**Biohub Plat
 The following code demonstrates how to run ESMC locally
 
 ```python
+# pip install esm@git+https://github.com/Biohub/esm.git@c94ed8d
 import torch
 from transformers import AutoModelForMaskedLM, AutoTokenizer
 from huggingface_hub import login
@@ -84,6 +85,7 @@ with torch.inference_mode():
 
 By default, the model returns only the final layer representations. To return hidden states from **all transformer layers**, set:
 ```python
+# pip install esm@git+https://github.com/Biohub/esm.git@c94ed8d
 output = model(**inputs, output_hidden_states=True)
 ```
 
@@ -103,6 +105,7 @@ pip install esm@git+https://github.com/Biohub/esm.git@c94ed8d
 Then import the necessary libraries and instantiate your desired model.
 
 ```py
+# pip install esm@git+https://github.com/Biohub/esm.git@c94ed8d
 from esm.sdk import esmc_client
 
 model = esmc_client(
@@ -129,6 +132,7 @@ The sparse autoencoder used in the Atlas and analyzed in the paper, `ESMC-6B-sae
 Codebase, model weights, and model variants for ESMC SAEs are available through [Hugging Face](https://huggingface.co/collections/biohub/esmc-saes-for-hidden-states-all-layers).
 
 ```python
+# pip install esm@git+https://github.com/Biohub/esm.git@c94ed8d
 import torch
 from transformers import AutoModel, AutoTokenizer
 
@@ -169,6 +173,7 @@ Codebase, model weights, and model variants for ESMFold2 are available through [
 ### Running ESMFold2 Locally
 
 ```python
+# pip install esm@git+https://github.com/Biohub/esm.git@c94ed8d
 from esm.models.esmfold2 import (
     DNAInput,
     ESMFold2InputBuilder,
@@ -227,6 +232,7 @@ pip install esm@git+https://github.com/Biohub/esm.git@c94ed8d
 Import the necessary libraries.
 
 ```py
+# pip install esm@git+https://github.com/Biohub/esm.git@c94ed8d
 from esm.sdk.forge import SequenceStructureForgeInferenceClient
 from esm.sdk.api import ESMProtein, ESMProteinError, LogitsConfig, LogitsOutput
 ```
@@ -234,6 +240,7 @@ from esm.sdk.api import ESMProtein, ESMProteinError, LogitsConfig, LogitsOutput
 Call the inference client with the selected model of choice and replace <your API token> with your token name.
 
 ```py
+# pip install esm@git+https://github.com/Biohub/esm.git@c94ed8d
 client = SequenceStructureForgeInferenceClient(model="esmfold2-fast-2026-05", url="https://biohub.ai", token="<your API token>")
 
 gfp_sequence = "MSKGEELFTGVVPILVELDGDVNGHKFSVRGEGEGDATNGKLTLKFICTTGKLPVPWPTLVTTLTYGVQCFSRYPDHMKRHDFFKSAMPEGYVQERTISFKDDGTYKTRAEVKFEGDTLVNRIELKGIDFKEDGNILGHKLEYNFNSHNVYITADKQKNGIKANFKIRHNVEDGSVQLADHYQQNTPIGDGPVLLPDNHYLSTQSVLSKDPNEKRDHMVLLEFVTAAGITHGMDELYK"
