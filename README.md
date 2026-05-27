@@ -110,14 +110,24 @@ Then import the necessary libraries and instantiate your desired model.
 
 ```py
 from esm.sdk import esmc_client
+from esm.sdk.api import ESMProtein, LogitsConfig
 
+# Human carbonic anhydrase II (PDB 2CBA)
+protein = ESMProtein(
+    sequence=(
+        "MSHHWGYGKHNGPEHWHKDFPIAKGERQSPVDIDTHTAKYDPSLKPLSVSYDQATSLRILNNGHAFNVEFDD"
+        "SQDKAVLKGGPLDGTYRLIQFHFHWGSLDGQGSEHTVDKKKYAAELHLVHWNTKYGDFGKAVQQPDGLAVL"
+        "GIFLKVGSAKPGLQKVVDVLDSIKTKGKSADFTNFDPRGLLPESLDYWTYPGSLTTPPLLECVTWIVLKEP"
+        "ISVSSEQVLKFRKLNFNGEGEPEELMVDNWRPAQPLKNRQIKASFK"
+    )
+)
 model = esmc_client(
     model="esmc-600m-2024-12", url="https://biohub.ai", token="<your API token>"
 )
 
 protein_tensor = model.encode(protein)
 logits_output = model.logits(
-  protein_tensor, LogitsConfig(sequence=True, return_embeddings=True)
+    protein_tensor, LogitsConfig(sequence=True, return_embeddings=True)
 )
 
 print(logits_output.logits, logits_output.embeddings)
@@ -234,7 +244,8 @@ Import the necessary libraries.
 
 ```py
 from esm.sdk.forge import SequenceStructureForgeInferenceClient
-from esm.sdk.api import ESMProtein, ESMProteinError, LogitsConfig, LogitsOutput
+from esm.sdk.api import FoldingConfig
+from esm.utils.structure.input_builder import ProteinInput, StructurePredictionInput
 ```
 
 Call the inference client with the selected model of choice and replace <your API token> with your token name.
@@ -242,13 +253,19 @@ Call the inference client with the selected model of choice and replace <your AP
 ```py
 client = SequenceStructureForgeInferenceClient(model="esmfold2-fast-2026-05", url="https://biohub.ai", token="<your API token>")
 
-gfp_sequence = "MSKGEELFTGVVPILVELDGDVNGHKFSVRGEGEGDATNGKLTLKFICTTGKLPVPWPTLVTTLTYGVQCFSRYPDHMKRHDFFKSAMPEGYVQERTISFKDDGTYKTRAEVKFEGDTLVNRIELKGIDFKEDGNILGHKLEYNFNSHNVYITADKQKNGIKANFKIRHNVEDGSVQLADHYQQNTPIGDGPVLLPDNHYLSTQSVLSKDPNEKRDHMVLLEFVTAAGITHGMDELYK"
-gfp_input = input_builder.StructurePredictionInput(
-    sequences=[gfp_sequence]
+# Human carbonic anhydrase II (PDB 2CBA)
+ca2_sequence = (
+    "MSHHWGYGKHNGPEHWHKDFPIAKGERQSPVDIDTHTAKYDPSLKPLSVSYDQATSLRILNNGHAFNVEFDD"
+    "SQDKAVLKGGPLDGTYRLIQFHFHWGSLDGQGSEHTVDKKKYAAELHLVHWNTKYGDFGKAVQQPDGLAVL"
+    "GIFLKVGSAKPGLQKVVDVLDSIKTKGKSADFTNFDPRGLLPESLDYWTYPGSLTTPPLLECVTWIVLKEP"
+    "ISVSSEQVLKFRKLNFNGEGEPEELMVDNWRPAQPLKNRQIKASFK"
+)
+ca2_input = StructurePredictionInput(
+    sequences=[ProteinInput(id="A", sequence=ca2_sequence)]
 )
 
-config = FoldingConfig(num_loops=3, num_sampling_steps=32, seed=0)
-result = client.fold_all_atom(gfp_input, config=config)
+config = FoldingConfig(num_loops=3, num_sampling_steps=32)
+result = client.fold_all_atom(ca2_input, config=config)
 
 with open("result.cif", "w") as f:
     f.write(result.complex.to_mmcif())
