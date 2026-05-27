@@ -45,7 +45,9 @@ class MultiHeadAttention(nn.Module):
         k = k.flatten(-2, -1)
         return q, k
 
-    def forward(self, x, seq_id):
+    def forward(
+        self, x, seq_id, output_attentions: bool = False
+    ) -> tuple[torch.Tensor, torch.Tensor | None]:
         qkv_BLD3 = self.layernorm_qkv(x)
         query_BLD, key_BLD, value_BLD = torch.chunk(qkv_BLD3, 3, dim=-1)
         query_BLD, key_BLD = (
@@ -66,20 +68,32 @@ class MultiHeadAttention(nn.Module):
             # Where True, enable participation in attention.
             mask_BLL = seq_id.unsqueeze(-1) == seq_id.unsqueeze(-2)
             mask_BHLL = mask_BLL.unsqueeze(1)
-
-            context_BHLD = F.scaled_dot_product_attention(
-                query_BHLD, key_BHLD, value_BHLD, mask_BHLL
-            )
         else:
-            # Shortcut, if we don't use attention biases then torch
-            # will autoselect flashattention as the implementation
-            context_BHLD = F.scaled_dot_product_attention(
-                query_BHLD, key_BHLD, value_BHLD
-            )
+            mask_BHLL = None
+
+        if output_attentions:
+            scale = self.d_head**-0.5
+            attn_scores = torch.einsum("bhld,bhsd->bhls", query_BHLD, key_BHLD) * scale
+            if mask_BHLL is not None:
+                attn_scores = attn_scores.masked_fill(~mask_BHLL, float("-inf"))
+            attn_weights = torch.softmax(attn_scores, dim=-1)
+            context_BHLD = torch.einsum("bhls,bhsd->bhld", attn_weights, value_BHLD)
+        else:
+            attn_weights = None
+            if mask_BHLL is None:
+                # Shortcut, if we don't use attention biases then torch
+                # will autoselect flashattention as the implementation
+                context_BHLD = F.scaled_dot_product_attention(
+                    query_BHLD, key_BHLD, value_BHLD
+                )
+            else:
+                context_BHLD = F.scaled_dot_product_attention(
+                    query_BHLD, key_BHLD, value_BHLD, mask_BHLL
+                )
 
         context_BLD = einops.rearrange(context_BHLD, "b h s d -> b s (h d)")
 
-        return self.out_proj(context_BLD)
+        return self.out_proj(context_BLD), attn_weights
 
 
 class FlashMultiHeadAttention(MultiHeadAttention):
@@ -93,7 +107,14 @@ class FlashMultiHeadAttention(MultiHeadAttention):
         # Flash attention rotary.
         self.rotary = TritonRotaryEmbedding(d_model // n_heads)
 
-    def forward(self, x, seq_id):
+    def forward(
+        self, x, seq_id, output_attentions: bool = False
+    ) -> tuple[torch.Tensor, torch.Tensor | None]:
+        if output_attentions:
+            raise ValueError(
+                "FlashMultiHeadAttention does not support output_attentions=True. "
+                "Use MultiHeadAttention instead."
+            )
         assert seq_id.dtype == torch.bool
 
         seqlens = seq_id.sum(dim=-1, dtype=torch.int32)
@@ -119,4 +140,4 @@ class FlashMultiHeadAttention(MultiHeadAttention):
         )
         context_ND = einops.rearrange(context_NHD, "n h d -> n (h d)")
 
-        return self.out_proj(context_ND)
+        return self.out_proj(context_ND), None

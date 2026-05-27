@@ -58,6 +58,9 @@ SEQUENCE_VOCAB = [
 ]
 # fmt: on
 
+SEQUENCE_STANDARD_AA_MIN_TOKEN = 4  # L
+SEQUENCE_STANDARD_AA_MAX_TOKEN = 24  # X (exclusive)
+
 SSE_8CLASS_VOCAB = "GHITEBSC"
 SSE_3CLASS_VOCAB = "HEC"
 SSE_8CLASS_TO_3CLASS_MAP = {
@@ -94,19 +97,23 @@ MAX_RESIDUE_ANNOTATIONS = 16
 
 TFIDF_VECTOR_SIZE = 58641
 
+FUNCTION_TOKENS_DEPTH = 8
+
 
 @staticmethod
 @cache
 def data_root(model: str):
     if "INFRA_PROVIDER" in os.environ:
         return Path("")
-    # Try to download from hugginface if it doesn't exist
+    # Try to download from huggingface if it doesn't exist
     if model.startswith("esm3"):
-        path = Path(snapshot_download(repo_id="EvolutionaryScale/esm3-sm-open-v1"))
+        path = Path(snapshot_download(repo_id="biohub/esm3-sm-open-v1"))
     elif model.startswith("esmc-300"):
-        path = Path(snapshot_download(repo_id="EvolutionaryScale/esmc-300m-2024-12"))
+        path = Path(snapshot_download(repo_id="biohub/esmc-300m-2024-12"))
     elif model.startswith("esmc-600"):
-        path = Path(snapshot_download(repo_id="EvolutionaryScale/esmc-600m-2024-12"))
+        path = Path(snapshot_download(repo_id="biohub/esmc-600m-2024-12"))
+    elif model.startswith("esmc-6b"):
+        path = Path(snapshot_download(repo_id="biohub/esmc-6b-2024-12"))
     else:
         raise ValueError(f"{model=} is an invalid model name.")
     return path

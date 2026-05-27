@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import warnings
 from abc import ABC
 from copy import deepcopy
 from typing import Sequence
@@ -36,6 +37,16 @@ class ESMProtein(ProteinType):
     ptm: torch.Tensor | None = None
     pae: torch.Tensor | None = None
 
+    crmsd: torch.Tensor | None = None
+    globularity: torch.Tensor | None = None
+    interface_annotations: list[str] | None = None
+    interface_ptm: torch.Tensor | None = None
+    pair_chains_iptm: torch.Tensor | None = None
+    output_embedding_sequence: torch.Tensor | None = None
+    output_embedding_pair_pooled: torch.Tensor | None = None
+    residue_index: torch.Tensor | None = None
+    entity_id: torch.Tensor | None = None
+
     # When calling EvolutionaryScale API, use this flag to disclose any
     # sequences that may potentially have concerns.
     # Such sequences may not go through standard safety filter for approved users.
@@ -58,14 +69,29 @@ class ESMProtein(ProteinType):
     def from_pdb(
         cls,
         path: PathOrBuffer,
-        chain_id: str = "detect",
+        chain_id: str = "all",
         id: str | None = None,
         is_predicted: bool = False,
     ) -> ESMProtein:
-        protein_chain = ProteinChain.from_pdb(
-            path=path, chain_id=chain_id, id=id, is_predicted=is_predicted
-        )
-        return cls.from_protein_chain(protein_chain)
+        """Return an ESMProtein object from a pdb file.
+
+        Args:
+            path (str | Path | io.TextIO): Path or buffer to read pdb file from. Should be uncompressed.
+            chain_id (str, optional): Select a chain corresponding to (author) chain id. "all" uses all chains,
+            "detect" uses the first detected chain
+            id (str, optional): String identifier to assign to structure. Will attempt to infer otherwise.
+            is_predicted (bool): If True, reads b factor as the confidence readout. Default: False.
+        """
+        if chain_id == "all":
+            protein_complex = ProteinComplex.from_pdb(
+                path=path, id=id, is_predicted=is_predicted
+            )
+            return cls.from_protein_complex(protein_complex)
+        else:
+            protein_chain = ProteinChain.from_pdb(
+                path=path, chain_id=chain_id, id=id, is_predicted=is_predicted
+            )
+            return cls.from_protein_chain(protein_chain)
 
     @classmethod
     def from_protein_chain(
@@ -187,6 +213,9 @@ class ESMProtein(ProteinType):
                 chain_id=gt_chains[i].chain_id
                 if gt_chains is not None
                 else SINGLE_LETTER_CHAIN_IDS[i],
+                residue_index=self.residue_index[start:end]
+                if self.residue_index is not None
+                else None,
                 entity_id=gt_chains[i].entity_id if gt_chains is not None else None,
                 confidence=plddt[start:end] if plddt is not None else None,
             )
@@ -329,8 +358,16 @@ class GenerationConfig:
 class InverseFoldingConfig:
     invalid_ids: Sequence[int] = []
     temperature: float = 0.1
-    seed: int | None = None
-    decode_in_residue_index_order: bool = False
+
+
+@define
+class FoldingConfig:
+    include_distogram: bool = False
+    include_pae: bool = False
+    include_pair_chains_iptm: bool = False
+    num_sampling_steps: int = 100
+    num_loops: int = 10
+    include_embeddings: bool = False
 
 
 ## Low Level Endpoint Types
@@ -380,7 +417,7 @@ class LogitsConfig:
     sequence: bool = False
 
     # Note that getting logits for tracks other than sequence
-    # are not supported by Forge today, due to their impractical
+    # are not supported by Forge/Biohub Platform today, due to their impractical
     # data sizes.
     # These are of course supported when running local OSS models.
     structure: bool = False
@@ -396,6 +433,38 @@ class LogitsConfig:
     return_mean_hidden_states: bool = False
     ith_hidden_layer: int = -1
 
+    # SAE config only applies to ESMC models
+    sae_config: SAEConfig | None = None
+
+
+@define
+class SAEConfig:
+    models: list[str] = attr.Factory(list)
+    normalize_features: bool = True
+    model: str | None = None  # deprecated, use models
+
+    def __attrs_post_init__(self):
+        if self.model is not None:
+            if self.models:
+                raise ValueError(
+                    "Cannot specify both 'model' and 'models' in SAEConfig. "
+                    "Use 'models' only."
+                )
+            warnings.warn(
+                "SAEConfig(model=...) is deprecated, use SAEConfig(models=[...]) instead.",
+                DeprecationWarning,
+                stacklevel=2,
+            )
+            self.models = [self.model]
+
+        if self.normalize_features:
+            unsupported = [m for m in self.models if "300m" in m.lower()]
+            if unsupported:
+                raise ValueError(
+                    f"normalize_features=True is not supported for ESMC 300M SAE models: {unsupported}. "
+                    "Set normalize_features=False when using 300M SAE models."
+                )
+
 
 @define
 class LogitsOutput:
@@ -409,6 +478,8 @@ class LogitsOutput:
     residue_annotation_logits: torch.Tensor | None = None
     hidden_states: torch.Tensor | None = None
     mean_hidden_state: torch.Tensor | None = None
+    # sae_outputs keys are sae model names and values are sparse representations of the sae activations
+    sae_outputs: dict[str, torch.Tensor] | None = None
 
 
 @define
@@ -429,6 +500,8 @@ class ForwardAndSampleOutput(LogitsOutput):
 
 
 class ESM3InferenceClient(ABC):
+    model: str
+
     def generate(self, input: ProteinType, config: GenerationConfig) -> ProteinType:
         # This is the easiest and most flexible way to run ESM3. Generate will
         # iteratively sample tokens an provide an output with the track specified
@@ -501,6 +574,8 @@ class ESM3InferenceClient(ABC):
 
 
 class ESMCInferenceClient(ABC):
+    model: str
+
     def encode(self, input: ESMProtein) -> ESMProteinTensor:
         # Encode allows for encoding RawRepresentation into TokenizedRepresentation.
         raise NotImplementedError

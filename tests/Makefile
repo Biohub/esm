@@ -1,6 +1,7 @@
 # OSS-specific variables and commands
 DOCKER_TAG ?= dev
 DOCKER_IMAGE_OSS=oss_pytests:${DOCKER_TAG}
+INFRA_PROVIDER ?= AWS
 
 build-oss-ci:
 	docker build \
@@ -12,8 +13,9 @@ build-oss-ci:
 start-docker-oss:
 	docker run \
 		--rm \
+		-e INFRA_PROVIDER=${INFRA_PROVIDER} \
 		-e URL=${URL} \
-		-e ESM3_FORGE_TOKEN=${ESM3_FORGE_TOKEN} \
+		-e ESM_API_KEY=${ESM_API_KEY} \
 		--name=$(USER)-oss_pytests \
 		--network=host \
 		${DOCKER_IMAGE_OSS}

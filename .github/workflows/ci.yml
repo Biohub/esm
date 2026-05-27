@@ -27,7 +27,7 @@ jobs:
     - name: Setup Environment
       uses: prefix-dev/setup-pixi@v0.9.0
       with:
-        pixi-version: v0.54.0
+        pixi-version: v0.68.0
         cache: false
         cache-write: ${{ github.event_name == 'push' && github.ref_name == 'main' }}
 
@@ -45,7 +45,7 @@ jobs:
     - name: Setup Environment
       uses: prefix-dev/setup-pixi@v0.9.0
       with:
-        pixi-version: v0.54.0
+        pixi-version: v0.68.0
         cache: false
         cache-write: ${{ github.event_name == 'push' && github.ref_name == 'main' }}
 
@@ -55,13 +55,13 @@ jobs:
     - name: Run Docker tests
       env:
         DOCKER_TAG: ${{ github.sha }}
-        FORGE_URL: https://forge.evolutionaryscale.ai/
-        ESM3_FORGE_TOKEN: ${{ secrets.ESM3_FORGE_TOKEN }}
+        BIOHUB_URL: https://biohub.ai/
+        ESM_API_KEY: ${{ secrets.ESM_API_KEY }}
       run: |
         set -e
         cd tests
         make build-oss-ci
-        make start-docker-oss URL=${{ env.FORGE_URL }} DOCKER_TAG=${{ env.DOCKER_TAG }} ESM3_FORGE_TOKEN=${{ env.ESM3_FORGE_TOKEN }}
+        make start-docker-oss URL=${{ env.BIOHUB_URL }} DOCKER_TAG=${{ env.DOCKER_TAG }} ESM_API_KEY=${{ env.ESM_API_KEY }}
       shell: pixi run bash -e {0}
 
     - name: cleanup docker containers if they're hanging

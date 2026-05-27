@@ -21,8 +21,8 @@ def get_forge_client(model_name: str) -> ESM3InferenceClient:
     forge_token = os.environ.get("ESM_API_KEY", None)
     if forge_token is None:
         raise ValueError(
-            "Forge API key not found. Please set the ESM_API_KEY environment variable."
+            "Forge/Biohub Platform API key not found. Please set the ESM_API_KEY environment variable."
         )
     return ESM3ForgeInferenceClient(
-        model=model_name, url="https://forge.evolutionaryscale.ai", token=forge_token
+        model=model_name, url="https://biohub.ai", token=forge_token
     )

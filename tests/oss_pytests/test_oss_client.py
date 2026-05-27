@@ -16,7 +16,7 @@ from esm.sdk.api import (  # pyright: ignore
 )
 from esm.sdk.forge import SequenceStructureForgeInferenceClient  # pyright: ignore
 
-API_TOKEN = os.environ.get("ESM3_FORGE_TOKEN", "")
+API_TOKEN = os.environ.get("ESM_API_KEY", "")
 URL = os.environ.get("URL")
 
 

@@ -14,11 +14,11 @@ def create_login_ui(client_container: ClientInitContainer):
     <div style="font-family: Arial, sans-serif;">
         <h2>Inference Options for Our Model</h2>
 
-        <p><strong>Forge API (remote):</strong> Our hosted service that provides access to the full suite of ESM3 models.
-        To utilize the Forge API, users must first agree to the
-        <a href="https://forge.evolutionaryscale.ai/termsofservice" target="_blank">Terms of Service</a>
+        <p><strong>Forge/Biohub Platform API (remote):</strong> Our hosted service that provides access to the full suite of ESM3 models.
+        To utilize the Forge/Biohub Platform API, users must first agree to the
+        <a href="https://biohub.org/terms-of-use/" target="_blank">Terms of Service</a>
         and generate an access token via the
-        <a href="https://forge.evolutionaryscale.ai/console" target="_blank">Forge console</a>.
+        <a href="https://biohub.ai/" target="_blank">Biohub Platform</a>.
         The console also provides a comprehensive list of models available to each user.</p>
         <p><strong>Local:</strong> Self-hosted solution that supports the <code>esm3-sm-open-v1</code> model exclusively.
         A GPU-enabled instance is recommended for running the model locally. All data processing with the Local API is conducted on the user's machine, ensuring that no data is transmitted to EvolutionaryScale servers.</p>
@@ -31,7 +31,7 @@ def create_login_ui(client_container: ClientInitContainer):
         [
             widgets.HTML(value="<h3>Select an Inference Option</h3>"),
             widgets.RadioButtons(
-                options=["Forge API", "Local"],
+                options=["Forge/Biohub Platform API", "Local"],
                 value=None,
                 description="",
                 disabled=False,
@@ -52,7 +52,7 @@ def create_login_ui(client_container: ClientInitContainer):
 
     # If not logged in, show login form
     forge_info = widgets.HTML(
-        value="<p>Copy a token from your <a href='https://forge.evolutionaryscale.ai/console'>Forge console page</a> and paste it below:</p>"
+        value="<p>Copy a token from your <a href='https://biohub.ai/console'>Forge console page</a> and paste it below:</p>"
     )
     forge_token_input = widgets.Text(
         description="Token:",
@@ -69,7 +69,7 @@ def create_login_ui(client_container: ClientInitContainer):
 
     # If logged in, show info view
     forge_logged_in = widgets.HTML(
-        value="<p>You are already logged in. You can now use the Forge API.</p>"
+        value="<p>You are already logged in. You can now use the Forge/Biohub Platform API.</p>"
     )
     forge_login_with_new_token = widgets.Button(description="Use different token")
     forge_logged_in_view = widgets.VBox([forge_logged_in, forge_login_with_new_token])
@@ -96,7 +96,7 @@ def create_login_ui(client_container: ClientInitContainer):
     )
 
     forge_model_selection_info = widgets.HTML(
-        value="<p>Enter the model name from the <a href='https://forge.evolutionaryscale.ai/console'>Forge console page</a> that you would like to use:</p>"
+        value="<p>Enter the model name from the <a href='https://biohub.ai/console'>Forge console page</a> that you would like to use:</p>"
     )
 
     model_selection_header = widgets.HTML(value="<h3>Select a Model</h3>")
@@ -115,7 +115,7 @@ def create_login_ui(client_container: ClientInitContainer):
 
     def on_selection_change(change):
         client_container.metadata["inference_option"] = change["new"]
-        if change["new"] == "Forge API":
+        if change["new"] == "Forge/Biohub Platform API":
             model_selection_ui.children = [
                 model_selection_header,
                 forge_model_selection_info,
@@ -140,7 +140,7 @@ def create_login_ui(client_container: ClientInitContainer):
             ]
 
     def on_start(*args):
-        if selection_ui.children[1].value == "Forge API":
+        if selection_ui.children[1].value == "Forge/Biohub Platform API":
             client_container.client_init_callback = partial(
                 get_forge_client, forge_model.value
             )
@@ -153,7 +153,7 @@ def create_login_ui(client_container: ClientInitContainer):
                 f"""
                 Parameters for the ESM3 Inference Client:
                 - Inference Option: {selection_ui.children[1].value}
-                - Model Name: {forge_model.value if selection_ui.children[1].value == "Forge API" else local_model.value}
+                - Model Name: {forge_model.value if selection_ui.children[1].value == "Forge/Biohub Platform API" else local_model.value}
 
                 Please initialize the client by executing the next code cell in the notebook.
                 """
