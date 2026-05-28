@@ -294,7 +294,7 @@ class ESMFold2InputBuilder:
         seed: int | None = None,
         noise_scale: float | None = None,
         step_scale: float | None = None,
-        max_inference_sigma: int | None = None,
+        max_inference_sigma: float | None = None,
         early_exit: bool = False,
         complex_id: str = "pred",
     ) -> MolecularComplexResult | list[MolecularComplexResult]:
