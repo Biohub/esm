@@ -9,7 +9,7 @@
 
 We are releasing a world model for protein biology: a scientific engine for prediction, design, and discovery. Built on the latest generation of Evolutionary Scale Modeling (ESM), this system learns from the protein sequences produced by evolution and uses that knowledge to represent, map, predict, and design proteins across scales — from atomic interactions to evolutionary relationships spanning billions of years. The system includes three artifacts: ESMC, ESMFold2, and ESM Atlas.
 
-**[ESMC](https://biohub.ai/esm/protein)** is a state-of-the-art protein language model that has learned the rules of protein biology from training on billions of protein sequences. ESMC defines a new scaling frontier relative to ESM2, achieving stronger performance in emergent long-range structural understanding as model scale increases
+**[ESMC](https://biohub.ai/esm/protein)** is a state-of-the-art protein language model that has learned the rules of protein biology from training on billions of protein sequences. ESMC defines a new scaling frontier relative to ESM2, achieving stronger performance in emergent long-range structural understanding as model scale increases.
 
 
 <div align="center">
@@ -21,7 +21,7 @@ We are releasing a world model for protein biology: a scientific engine for pred
 **[ESMFold2](https://huggingface.co/Biohub/ESMFold2)**, built on the ESMC 6B model, is a state-of-the-art structure prediction model that has been validated for the design of protein-protein interactions. ESMFold2 surpasses other models in DockQ pass-rate on Foldbench protein-protein and antibody-antigen complexes, and can be used in single-sequence mode for an order of magnitude speedup in folding.
 
 <div align="center">
-  <img src="_assets/esmfold2_folding.png" width="40%"/>
+  <img src="_assets/esmfold2_folding.png" width="60%"/>
 </div>
 
 
@@ -50,7 +50,7 @@ For information on using ESM3, see the [ESM3 README](https://github.com/Biohub/e
 
 [ESMC](https://biohub.ai/esm/protein) is a state-of-the-art protein language model that has learned representations of protein biology from training on billions of protein sequences.
 
-Codebase, model weights, and model variants for ESMC are available through [Hugging Face](https://huggingface.co/collections/Biohub/esmc-model-family).
+Codebase, model weights, and model variants for ESMC are available through [Hugging Face](https://huggingface.co/collections/biohub/esmc-model-family).
 
 There are two primary ways of running the ESM models: through the [**Biohub Platform**](https://biohub.ai/) or locally with Hugging Face. The Biohub Platform enables users to easily run inference with ESM models with minimal setup. Users interested in customizing or fine-tuning ESM models can use the models from Hugging Face.
 
@@ -60,7 +60,7 @@ There are two primary ways of running the ESM models: through the [**Biohub Plat
 Install `esm` from GitHub (a PyPI release is coming soon):
 
 ```
-pip install esm@git+https://github.com/Biohub/esm.git@c94ed8d
+pip install esm@git+https://github.com/Biohub/esm.git@main
 ```
 
 The following code demonstrates how to run ESMC locally
@@ -103,7 +103,7 @@ Note that our API migrated from forge.evolutionaryscale.ai to [biohub.ai](https:
 To get started with ESM, install the python library using `pip`:
 
 ```
-pip install esm@git+https://github.com/Biohub/esm.git@c94ed8d
+pip install esm@git+https://github.com/Biohub/esm.git@main
 ```
 
 Then import the necessary libraries and instantiate your desired model.
@@ -180,7 +180,7 @@ For tutorials on how to use ESMC SAEs, see our [tutorials](https://github.com/Bi
 
 The model predicts high-resolution, all-atom 3D protein structures directly from amino acid sequences, with optional multiple sequence alignment (MSA) input for enhanced accuracy on challenging targets. ESMFold2 achieves state-of-the-art performance matching or exceeding AlphaFold3 across diverse evaluation datasets, while offering improved computational efficiency through optimized diffusion sampling and architectural innovations.
 
-Codebase, model weights, and model variants for ESMFold2 are available through [Hugging Face](https://huggingface.co/collections/biohub/esmfold2-model-family)
+Codebase, model weights, and model variants for ESMFold2 are available through [Hugging Face](https://huggingface.co/Biohub/ESMFold2)
 
 ### Running ESMFold2 Locally
 
@@ -237,7 +237,7 @@ with open("1mht_pred.cif", "w") as f:
 Install the  `esm` Python package
 
 ```
-pip install esm@git+https://github.com/Biohub/esm.git@c94ed8d
+pip install esm@git+https://github.com/Biohub/esm.git@main
 ```
 
 Import the necessary libraries.

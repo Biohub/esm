@@ -34,7 +34,7 @@ The code for ESM3 is available from Github and weights for esm3-sm-open-v1 is av
 First install the python library using `pip`:
 
 ```
-pip install esm@git+https://github.com/Biohub/esm.git@c94ed8d
+pip install esm@git+https://github.com/Biohub/esm.git@main
 ```
 
 Then import the necessary libraries and instantiate your model. Use your token from the [Biohub platform](https://biohub.ai")
@@ -54,7 +54,7 @@ The following code demonstrates how to run ESM3 locally and generate a simple se
 First install the python library using `pip`:
 
 ```
-pip install esm@git+https://github.com/Biohub/esm.git@c94ed8d
+pip install esm@git+https://github.com/Biohub/esm.git@main
 ```
 
 Then import the necessary libraries for your model.

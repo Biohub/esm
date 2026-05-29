@@ -146,7 +146,7 @@ environments:
       - conda: https://conda.anaconda.org/conda-forge/noarch/wheel-0.45.1-pyhd8ed1ab_1.conda
       - conda: https://conda.anaconda.org/conda-forge/noarch/zipp-3.21.0-pyhd8ed1ab_1.conda
       - pypi: .
-      - pypi: git+https://github.com/Biohub/transformers.git?rev=3a8956fb4d4ea16b0ec8e71deef2c2909b6a5cbf#3a8956fb4d4ea16b0ec8e71deef2c2909b6a5cbf
+      - pypi: git+https://github.com/Biohub/transformers.git?rev=main#3a8956fb4d4ea16b0ec8e71deef2c2909b6a5cbf
       - pypi: https://files.pythonhosted.org/packages/00/78/9cbcc1c073b9d4918e925af1a059762265dc65004e020511b2a06fbfd020/pydssp-0.9.1-py3-none-any.whl
       - pypi: https://files.pythonhosted.org/packages/00/c0/8f5d070730d7836adc9c9b6408dec68c6ced86b304a9b26a14df072a6e8c/traitlets-5.14.3-py3-none-any.whl
       - pypi: https://files.pythonhosted.org/packages/02/e9/367e81e114deb92a6e0d5740f0bff4548af710be318af65265b9aad72237/botocore-1.40.9-py3-none-any.whl
@@ -346,7 +346,7 @@ environments:
       - conda: https://conda.anaconda.org/conda-forge/osx-arm64/zstandard-0.23.0-py312hea69d52_2.conda
       - conda: https://conda.anaconda.org/conda-forge/osx-arm64/zstd-1.5.7-h6491c7d_2.conda
       - pypi: .
-      - pypi: git+https://github.com/Biohub/transformers.git?rev=3a8956fb4d4ea16b0ec8e71deef2c2909b6a5cbf#3a8956fb4d4ea16b0ec8e71deef2c2909b6a5cbf
+      - pypi: git+https://github.com/Biohub/transformers.git?rev=main#3a8956fb4d4ea16b0ec8e71deef2c2909b6a5cbf
       - pypi: https://files.pythonhosted.org/packages/00/78/9cbcc1c073b9d4918e925af1a059762265dc65004e020511b2a06fbfd020/pydssp-0.9.1-py3-none-any.whl
       - pypi: https://files.pythonhosted.org/packages/00/c0/8f5d070730d7836adc9c9b6408dec68c6ced86b304a9b26a14df072a6e8c/traitlets-5.14.3-py3-none-any.whl
       - pypi: https://files.pythonhosted.org/packages/02/e9/367e81e114deb92a6e0d5740f0bff4548af710be318af65265b9aad72237/botocore-1.40.9-py3-none-any.whl
@@ -636,7 +636,7 @@ environments:
       - conda: https://conda.anaconda.org/conda-forge/noarch/wheel-0.45.1-pyhd8ed1ab_1.conda
       - conda: https://conda.anaconda.org/conda-forge/noarch/zipp-3.21.0-pyhd8ed1ab_1.conda
       - pypi: .
-      - pypi: git+https://github.com/Biohub/transformers.git?rev=3a8956fb4d4ea16b0ec8e71deef2c2909b6a5cbf#3a8956fb4d4ea16b0ec8e71deef2c2909b6a5cbf
+      - pypi: git+https://github.com/Biohub/transformers.git?rev=main#3a8956fb4d4ea16b0ec8e71deef2c2909b6a5cbf
       - pypi: https://files.pythonhosted.org/packages/00/78/9cbcc1c073b9d4918e925af1a059762265dc65004e020511b2a06fbfd020/pydssp-0.9.1-py3-none-any.whl
       - pypi: https://files.pythonhosted.org/packages/00/c0/8f5d070730d7836adc9c9b6408dec68c6ced86b304a9b26a14df072a6e8c/traitlets-5.14.3-py3-none-any.whl
       - pypi: https://files.pythonhosted.org/packages/02/e9/367e81e114deb92a6e0d5740f0bff4548af710be318af65265b9aad72237/botocore-1.40.9-py3-none-any.whl
@@ -863,7 +863,7 @@ environments:
       - conda: https://conda.anaconda.org/conda-forge/osx-arm64/zstandard-0.23.0-py312hea69d52_2.conda
       - conda: https://conda.anaconda.org/conda-forge/osx-arm64/zstd-1.5.7-h6491c7d_2.conda
       - pypi: .
-      - pypi: git+https://github.com/Biohub/transformers.git?rev=3a8956fb4d4ea16b0ec8e71deef2c2909b6a5cbf#3a8956fb4d4ea16b0ec8e71deef2c2909b6a5cbf
+      - pypi: git+https://github.com/Biohub/transformers.git?rev=main#3a8956fb4d4ea16b0ec8e71deef2c2909b6a5cbf
       - pypi: https://files.pythonhosted.org/packages/00/78/9cbcc1c073b9d4918e925af1a059762265dc65004e020511b2a06fbfd020/pydssp-0.9.1-py3-none-any.whl
       - pypi: https://files.pythonhosted.org/packages/00/c0/8f5d070730d7836adc9c9b6408dec68c6ced86b304a9b26a14df072a6e8c/traitlets-5.14.3-py3-none-any.whl
       - pypi: https://files.pythonhosted.org/packages/02/e9/367e81e114deb92a6e0d5740f0bff4548af710be318af65265b9aad72237/botocore-1.40.9-py3-none-any.whl
@@ -5297,7 +5297,7 @@ packages:
   name: esm
   requires_dist:
   - torch>=2.2.0
-  - transformers @ git+https://github.com/Biohub/transformers.git@3a8956fb4d4ea16b0ec8e71deef2c2909b6a5cbf
+  - transformers @ git+https://github.com/Biohub/transformers.git@main
   - ipython
   - einops
   - biotite>=1.0.0
@@ -5320,7 +5320,7 @@ packages:
   - dna-features-viewer
   - accelerate
   requires_python: '>=3.12,<3.13'
-- pypi: git+https://github.com/Biohub/transformers.git?rev=3a8956fb4d4ea16b0ec8e71deef2c2909b6a5cbf#3a8956fb4d4ea16b0ec8e71deef2c2909b6a5cbf
+- pypi: git+https://github.com/Biohub/transformers.git?rev=main#3a8956fb4d4ea16b0ec8e71deef2c2909b6a5cbf
   name: transformers
   version: 4.57.6
   requires_dist:

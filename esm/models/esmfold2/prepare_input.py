@@ -100,6 +100,8 @@ class ChainInfo:
     sym_id: int
     mol_type: int
     tokens: list[TokenInfo] = field(default_factory=list)
+    # (atom_name1, atom_name2) bonds for SMILES ligands, which have no CCD entry.
+    ligand_bonds: list[tuple[str, str]] = field(default_factory=list)
 
 
 # =============================================================================
@@ -566,8 +568,11 @@ def tokenize_ligand_smiles(
     atom_offset: int,
     space_uid_offset: int,
     seed: int | None = None,
-) -> tuple[list[TokenInfo], list[AtomInfo]]:
-    """Tokenize a ligand from SMILES (1 token per heavy atom)."""
+) -> tuple[list[TokenInfo], list[AtomInfo], list[tuple[str, str]]]:
+    """Tokenize a ligand from SMILES (1 token per heavy atom).
+
+    Returns tokens, atoms, and heavy-atom bonds as (name1, name2) pairs.
+    """
     from rdkit import Chem
     from rdkit.Chem import AllChem
 
@@ -651,7 +656,13 @@ def tokenize_ligand_smiles(
         token_idx += 1
         atom_idx += 1
 
-    return tokens, atoms_list
+    bonds: list[tuple[str, str]] = []
+    for bond in mol_no_h.GetBonds():
+        n1 = bond.GetBeginAtom().GetProp("name")
+        n2 = bond.GetEndAtom().GetProp("name")
+        bonds.append((n1, n2))
+
+    return tokens, atoms_list, bonds
 
 
 # =============================================================================
@@ -753,6 +764,7 @@ def build_chains_from_input(
 
             elif isinstance(item, LigandInput):
                 has_cov = chain_id_str in covalent_chain_ids
+                ligand_bonds: list[tuple[str, str]] = []
                 if item.ccd is not None:
                     if item.smiles is not None:
                         warnings.warn("Both ccd and smiles provided, using ccd")
@@ -767,7 +779,7 @@ def build_chains_from_input(
                         has_covalent_bond=has_cov,
                     )
                 elif item.smiles is not None:
-                    new_tokens, new_atoms = tokenize_ligand_smiles(
+                    new_tokens, new_atoms, ligand_bonds = tokenize_ligand_smiles(
                         smiles=item.smiles,
                         entity_id=entity_id,
                         asym_id=asym_id,
@@ -789,6 +801,7 @@ def build_chains_from_input(
                 sym_id=sym_id,
                 mol_type=new_tokens[0].mol_type if new_tokens else MOL_TYPE_PROTEIN,
                 tokens=new_tokens,
+                ligand_bonds=ligand_bonds if isinstance(item, LigandInput) else [],
             )
             chains.append(chain)
             all_tokens.extend(new_tokens)
@@ -990,16 +1003,24 @@ def compute_token_bonds(
                 (atom.name, atom.token_index)
             )
 
+    # SMILES ligand bonds keyed by (asym_id, residue_index 0).
+    explicit_bonds: dict[tuple[int, int], list[tuple[str, str]]] = {
+        (c.asym_id, 0): c.ligand_bonds for c in chains if c.ligand_bonds
+    }
+
     # Add intra-residue bonds from CCD
     for (asym_id_val, res_idx), atom_list in residue_tokens.items():
         if not atom_list:
             continue
         res_name = tokens[atom_list[0][1]].residue_name
-        ccd_bonds = get_ligand_ccd_bonds(res_name)
         atom_to_tok = {name: ti for name, ti in atom_list}
 
-        if ccd_bonds:
-            for a1, a2 in ccd_bonds:
+        bonds = explicit_bonds.get((asym_id_val, res_idx))
+        if bonds is None:
+            bonds = get_ligand_ccd_bonds(res_name)
+
+        if bonds:
+            for a1, a2 in bonds:
                 if a1 in atom_to_tok and a2 in atom_to_tok:
                     add_bond(atom_to_tok[a1], atom_to_tok[a2])
         else:

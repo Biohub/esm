@@ -22,7 +22,7 @@ classifiers = [
 
 dependencies = [
   "torch>=2.2.0",
-  "transformers @ git+https://github.com/Biohub/transformers.git@3a8956fb4d4ea16b0ec8e71deef2c2909b6a5cbf",
+  "transformers @ git+https://github.com/Biohub/transformers.git@main",
   "ipython",
   "einops",
   "biotite>=1.0.0",
