@@ -31,6 +31,8 @@ repos:
       language: system
       types: [python]
       pass_filenames: true # For speed, we only check the files that are changed
+      # Modal-app tutorial: deps (modal, abnumber) and dynamic decorators aren't resolvable in the lint env.
+      exclude: ^cookbook/tutorials/esmfold2_esmc_binder_design\.py$
 - repo: https://github.com/gitleaks/gitleaks
   rev: v8.24.2
   hooks:
