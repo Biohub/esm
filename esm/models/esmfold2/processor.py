@@ -288,7 +288,7 @@ class ESMFold2InputBuilder:
         model: Any,
         input: StructurePredictionInput,
         *,
-        num_loops: int = 3,
+        num_loops: int = 20,
         num_sampling_steps: int = 200,
         num_diffusion_samples: int = 1,
         seed: int | None = None,

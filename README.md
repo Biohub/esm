@@ -18,14 +18,14 @@ We are releasing a world model for protein biology: a scientific engine for pred
 
 
 
-**[ESMFold2](https://huggingface.co/Biohub/ESMFold2)**, built on the ESMC 6B model, is a state-of-the-art structure prediction model that has been validated for the design of protein-protein interactions. ESMFold2 surpasses other models in DockQ pass-rate on Foldbench protein-protein and antibody-antigen complexes, and can be used in single-sequence mode for an order of magnitude speedup in folding.
+**[ESMFold2](https://huggingface.co/biohub/ESMFold2)**, built on the ESMC 6B model, is a state-of-the-art structure prediction model that has been validated for the design of protein-protein interactions. ESMFold2 surpasses other models in DockQ pass-rate on Foldbench protein-protein and antibody-antigen complexes, and can be used in single-sequence mode for an order of magnitude speedup in folding.
 
 <div align="center">
   <img src="_assets/esmfold2_folding.png" width="60%"/>
 </div>
 
 
-ESMFold2 is validated in the lab across five therapeutic targets. Inversion of ESMFold2 enables generation of de novo minibinders and antibody-derived scFvs with high hit rates, nanomolar affinities, target specificity, and functional activity. We're planning to release a notebook that walks through the full design loop from target sequence to ranked binder candidates. The full protocol is also described in the [preprint](https://biohub.ai/papers/esm_protein.pdf).
+ESMFold2 is validated in the lab across five therapeutic targets. Inversion of ESMFold2 enables generation of de novo minibinders and antibody-derived scFvs with high hit rates, nanomolar affinities, target specificity, and functional activity. We've released the full protocol from target sequence to ranked binder design in this [tutorial](https://github.com/Biohub/esm/blob/main/cookbook/tutorials/esmfold2_esmc_binder_design.ipynb). For additional details, please refer to the [preprint](https://biohub.ai/papers/esm_protein.pdf).
 
 <div align="center">
   <img src="_assets/esmfold2_binder.png" width="60%"/>
@@ -77,10 +77,10 @@ login()
 sequences = ["MSKGEELFTGVVPILVELDGDVNGHKFSVSGEGEGDATYGKLTLKFICTTGKLPVPWPTLVTTFSYGVQCFSRYPDHMKQHDFFKSAMPEGYVQERTIFFKDDGNYKTRAEVKFEGDTLVNRIELKGIDFKEDGNILGHKLEYNYNSHNVYIMADKQKNGIKVNFKIRHNIEDGSVQLADHYQQNTPIGDGPVLLPDNHYLSTQSALSKDPNEKRDHMVLLEFVTAAGITHGMDELYK"]
 
 model = AutoModelForMaskedLM.from_pretrained(
-    "Biohub/ESMC-6B",
+    "biohub/ESMC-6B",
     device_map="auto",
 ).eval()
-tokenizer = AutoTokenizer.from_pretrained("Biohub/ESMC-6B")
+tokenizer = AutoTokenizer.from_pretrained("biohub/ESMC-6B")
 
 inputs = tokenizer(sequences, return_tensors="pt", padding=True)
 inputs = {k: v.to(model.device) for k, v in inputs.items()}
@@ -150,10 +150,10 @@ from transformers import AutoModel, AutoTokenizer
 
 sequence = "MGSNKSKPKDASQRRRSLEPAENVHGAGGGAFPASQTPSKPASADGHRGPSAAFAPAAAEPKLFGGFNSSDTVTSPQRAGPLAGGVTTFVALYDYESRTETDLSFKKGERLQIVNNTEGDWWLAHSLSTGQTGYIPSNYVAPSDSIQAEEWYFGKITRRESERLLLNAENPRGTFLVRESETTKGAYCLSVSDFDNAKGLNVKHYKIRKLDSGGFYITSRTQFNSLQQLVAYYSKHADGLCHRLTTVCPTSKPQTQGLAKDAWEIPRESLRLEVKLGQGCFGEVWMGTWNGTTRVAIKTLKPGTMSPEAFLQEAQVMKKLRHEKLVQLYAVVSEEPIYIVTEYMSKGSLLDFLKGETGKYLRLPQLVDMAAQIASGMAYVERMNYVHRDLRAANILVGENLVCKVADFGLARLIEDNEYTARQGAKFPIKWTAPEAALYGRFTIKSDVWSFGILLTELTTKGRVPYPGMVNREVLDQVERGYRMPCPPECPESLHDLMCQCWRKEPEERPTFEYLQAFLEDYFTSTEPQYQPGENL"
 
-model = AutoModel.from_pretrained("Biohub/ESMC-6B", device_map="auto").eval()
-tokenizer = AutoTokenizer.from_pretrained("Biohub/ESMC-6B")
+model = AutoModel.from_pretrained("biohub/ESMC-6B", device_map="auto").eval()
+tokenizer = AutoTokenizer.from_pretrained("biohub/ESMC-6B")
 sae = AutoModel.from_pretrained(
-    "Biohub/ESMC-6B-sae-k64-codebook16384",
+    "biohub/ESMC-6B-sae-k64-codebook16384",
     allow_patterns=["config.json", "layer_30.safetensors", "layer_60.safetensors"],
     device=model.device,
 )
@@ -176,11 +176,11 @@ For tutorials on how to use ESMC SAEs, see our [tutorials](https://github.com/Bi
 ## ESMFold2
 <a name="esmfold2"></a>
 
-[ESMFold2](https://huggingface.co/Biohub/ESMFold2) is a state-of-the-art protein structure prediction model that combines ESMC (6B parameter) language model embeddings with a diffusion-based structure prediction architecture.
+[ESMFold2](https://huggingface.co/biohub/ESMFold2) is a state-of-the-art protein structure prediction model that combines ESMC (6B parameter) language model embeddings with a diffusion-based structure prediction architecture.
 
 The model predicts high-resolution, all-atom 3D protein structures directly from amino acid sequences, with optional multiple sequence alignment (MSA) input for enhanced accuracy on challenging targets. ESMFold2 achieves state-of-the-art performance matching or exceeding AlphaFold3 across diverse evaluation datasets, while offering improved computational efficiency through optimized diffusion sampling and architectural innovations.
 
-Codebase, model weights, and model variants for ESMFold2 are available through [Hugging Face](https://huggingface.co/Biohub/ESMFold2)
+Codebase, model weights, and model variants for ESMFold2 are available through [Hugging Face](https://huggingface.co/biohub/ESMFold2)
 
 ### Running ESMFold2 Locally
 
@@ -232,9 +232,11 @@ with open("1mht_pred.cif", "w") as f:
     f.write(result.complex.to_mmcif())
 ```
 
+> **AMD ROCm users:** use ROCm 6.4 with PyTorch 2.9 or newer.
+
 ### Running ESMFold2 Through the Biohub Platform
 
-Install the  `esm` Python package
+Install the `esm` Python package
 
 ```
 pip install esm@git+https://github.com/Biohub/esm.git@main
@@ -283,7 +285,7 @@ Informed by our risk assessments, we are releasing the source code and model wei
 
 Evaluations: Prior to release, we conducted evaluations to inform our understanding of capability uplift for specific misuse-relevant functional tasks. The full details of these evaluations are available in our corresponding paper appendix.
 
-The Biohub Platform: We implement guardrails that detect and restrict the use of keywords and sequences corresponding to controlled pathogens and toxins on our freely accessible platform. For further details regarding these guardrails, please refer to our Biohub Platform Resources page. We recognize there are many legitimate reasons to use AI models to understand and model these sequences and proteins. If you are a researcher whose work is impacted by these guardrails, you can request elevated access to our platform via [Biohub.ai](http://Biohub.ai).
+The Biohub Platform: We implement guardrails that detect and restrict the use of keywords and sequences corresponding to controlled pathogens and toxins on our freely accessible platform. For further details regarding these guardrails, please refer to our Biohub Platform Resources page. We recognize there are many legitimate reasons to use AI models to understand and model these sequences and proteins. If you are a researcher whose work is impacted by these guardrails, you can request elevated access to our platform via [biohub.ai](https://biohub.ai).
 
 Please follow our [Acceptable Use Policy](https://biohub.org/acceptable-use-policy/) when using the model.
 

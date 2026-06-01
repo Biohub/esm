@@ -366,7 +366,7 @@ class FoldingConfig:
     include_pae: bool = False
     include_pair_chains_iptm: bool = False
     num_sampling_steps: int = 100
-    num_loops: int = 10
+    num_loops: int = 20
     include_embeddings: bool = False
 
 
