@@ -1145,49 +1145,15 @@ class ESMFold2Design:
 # ---- Modal ----
 
 
-FLASH_ATTN_WHEEL = (
-    "flash-attn @ https://github.com/Dao-AILab/flash-attention/releases/download/"
-    "v2.8.3/flash_attn-2.8.3+cu12torch2.8cxx11abiFALSE-cp312-cp312-linux_x86_64.whl"
-)
-TRANSFORMER_ENGINE_TORCH_WHEEL = (
-    "transformer-engine-torch @ https://github.com/evolutionaryscale/wheels/"
-    "releases/download/transformer-engine-torch/v2.13.0-pt2.8-cu128-cp312/"
-    "transformer_engine_torch-2.13.0-cp312-cp312-linux_x86_64.whl"
-)
-
-
 def get_base_image():
     return (
         modal.Image.micromamba(python_version="3.12")
         .run_commands("apt update && apt install -y git build-essential")
         .micromamba_install(
-            "anarci>=2020.04.03",
-            "hmmer=3.4",
-            "cuda-version=12.8",
-            "cuda-libraries-dev=12.8",
-            channels=["conda-forge", "bioconda"],
+            "anarci>=2020.04.03", "hmmer=3.4", channels=["conda-forge", "bioconda"]
         )
-        .pip_install(
-            "torch==2.8.0",
-            "triton==3.4.0",
-            index_url="https://download.pytorch.org/whl/cu128",
-        )
-        .pip_install(
-            FLASH_ATTN_WHEEL,
-            "transformer-engine[core-cu12,pytorch]==2.13.0",
-            TRANSFORMER_ENGINE_TORCH_WHEEL,
-            "xformers==0.0.32.post1",
-        )
-        .pip_install(
-            "abnumber", "esm@git+https://github.com/Biohub/esm.git@main", "modal"
-        )
-        .env(
-            {
-                "HF_HOME": "/models",
-                "HF_XET_HIGH_PERFORMANCE": "1",
-                "XFORMERS_IGNORE_FLASH_VERSION_CHECK": "1",
-            }
-        )
+        .pip_install("abnumber", "esm@git+https://github.com/Biohub/esm.git@main")
+        .env({"HF_HOME": "/models", "HF_XET_HIGH_PERFORMANCE": "1"})
     )
 
 

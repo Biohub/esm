@@ -23,9 +23,10 @@ ESMC is a protein language model that embeds sequences into rich numerical repre
 
 ESMFold2 predicts 3D protein structure from sequence, including DNA/RNA and small molecules.
 
-| Notebook | Colab  Notebook  | Description |
+| Notebook | Colab Notebook | Description |
 | :---- | :---- | :---- |
-| Folding with ESMFold2 | `esmfold2.ipynb`<br>[![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/biohub/esm/blob/main/cookbook/tutorials/esmfold2.ipynb) | Fold proteins in combination with DNA, RNA and small-molecule ligands.
+| Folding with ESMFold2 | `esmfold2.ipynb`<br>[![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/biohub/esm/blob/main/cookbook/tutorials/esmfold2.ipynb) | Fold proteins in combination with DNA, RNA and small-molecule ligands. |
+| Binder design | `esmfold2_esmc_binder_design.ipynb`<br>[![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/biohub/esm/blob/main/cookbook/tutorials/esmfold2_esmc_binder_design.ipynb) | Design antibodies and minibinders with high hit rates. Implements the protocol featured in our paper, which produced binders exhibiting nanomolar affinity, target specificity, and functional activity in laboratory assays. |
 
 ## **ESM3**
 
