@@ -370,7 +370,7 @@ def compute_structure_losses(
 def _binding_confidence_entropy(
     dgram: torch.Tensor, bin_distance: torch.Tensor, cutoff: float
 ) -> torch.Tensor:
-    """Pair entropy within cutoff; matches rd3 contact_score scoring."""
+    """Pair entropy within cutoff."""
 
     probs = torch.softmax(dgram, dim=-1)
     cutoff_mask = bin_distance < cutoff
@@ -1205,7 +1205,7 @@ app = modal.App(
 class ESMFold2DesignModal(ESMFold2Design):
     """Modal entrypoint. Hero critics are HF experimental exports with
     confidence heads. Set ``use_scaling_critics=True`` to also load the
-    15-checkpoint rd3 scaling-experiment ensemble (distogram binding confidence only).
+    15-checkpoint scaling-experiment ensemble (distogram binding confidence only).
     """
 
     use_scaling_critics: bool = modal.parameter(default=False)
