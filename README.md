@@ -223,7 +223,7 @@ spi = StructurePredictionInput(
 )
 
 result = ESMFold2InputBuilder().fold(
-    model, spi, num_loops=3, num_sampling_steps=50, num_diffusion_samples=1, seed=0
+    model, spi, num_loops=20, num_sampling_steps=100, num_diffusion_samples=1, seed=0
 )
 
 print(f"pLDDT mean: {float(result.plddt.mean()):.3f}, pTM: {float(result.ptm):.3f}, ipTM: {float(result.iptm):.3f}")
@@ -266,7 +266,10 @@ ca2_input = StructurePredictionInput(
     sequences=[ProteinInput(id="A", sequence=ca2_sequence)]
 )
 
-config = FoldingConfig(num_loops=3, num_sampling_steps=32)
+config = FoldingConfig(
+    num_loops=20,
+    num_sampling_steps=100
+)
 result = client.fold_all_atom(ca2_input, config=config)
 
 with open("result.cif", "w") as f:

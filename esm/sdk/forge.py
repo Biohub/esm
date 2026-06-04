@@ -30,7 +30,12 @@ from esm.sdk.api import (
 from esm.sdk.base_forge_client import _BaseForgeInferenceClient
 from esm.sdk.retry import retry_decorator
 from esm.utils.constants.api import MIMETYPE_ES_PICKLE
-from esm.utils.constants.models import ESMFOLD2_FAST, ESMFOLD2_MAX_MSA_SEQS
+from esm.utils.constants.models import (
+    DEFAULT_ESMFOLD2_FAST_LM_MASK_PCT,
+    ESMFOLD2,
+    ESMFOLD2_FAST,
+    ESMFOLD2_MAX_MSA_SEQS,
+)
 from esm.utils.misc import deserialize_tensors, maybe_list, maybe_tensor
 from esm.utils.msa import MSA
 from esm.utils.structure.input_builder import (
@@ -50,6 +55,18 @@ MSAInput: TypeAlias = Union[
     None,
 ]
 # fmt: on
+
+
+def _resolve_lm_mask_pct(lm_mask_pct: float | None, model_name: str | None) -> float:
+    f"""
+    An explicit value is always honored. When unset (``None``),
+    {ESMFOLD2_FAST} (or no model name) defaults to 0.1,
+    {ESMFOLD2} defaults to 0.0.
+    """
+    if lm_mask_pct is not None:
+        return lm_mask_pct
+    is_fast_or_default = model_name is None or model_name == ESMFOLD2_FAST
+    return DEFAULT_ESMFOLD2_FAST_LM_MASK_PCT if is_fast_or_default else 0.0
 
 
 def _list_to_function_annotations(l) -> list[FunctionAnnotation] | None:
@@ -150,6 +167,10 @@ class SequenceStructureForgeInferenceClient(_BaseForgeInferenceClient):
         request["include_pair_chains_iptm"] = config.include_pair_chains_iptm
         request["num_sampling_steps"] = config.num_sampling_steps
         request["num_loops"] = config.num_loops
+        request["lm_dropout"] = config.lm_dropout
+        request["lm_mask_pct"] = _resolve_lm_mask_pct(config.lm_mask_pct, model_name)
+        request["msa_max_depth"] = config.msa_max_depth
+        request["msa_column_mask_rate"] = config.msa_column_mask_rate
         request["include_embeddings"] = config.include_embeddings
 
         request["model"] = model_name
@@ -371,6 +392,10 @@ class SequenceStructureForgeInferenceClient(_BaseForgeInferenceClient):
         request["include_pae"] = config.include_pae
         request["num_sampling_steps"] = config.num_sampling_steps
         request["num_loops"] = config.num_loops
+        request["lm_dropout"] = config.lm_dropout
+        request["lm_mask_pct"] = _resolve_lm_mask_pct(config.lm_mask_pct, model_name)
+        request["msa_max_depth"] = config.msa_max_depth
+        request["msa_column_mask_rate"] = config.msa_column_mask_rate
         request["include_embeddings"] = config.include_embeddings
 
         return request

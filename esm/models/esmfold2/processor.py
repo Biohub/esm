@@ -42,6 +42,47 @@ def _seed_context(seed: int | None):
             torch.cuda.set_rng_state_all(cuda_state)
 
 
+@contextmanager
+def _lm_dropout_context(model: Any, lm_dropout: float | None):
+    """Temporarily set LM-embedding dropout for the wrapped forward, restoring on exit.
+
+    Applies dropout to ``lm_z`` at inference (``training=True``, fresh mask per
+    loop) so repeated folds give a diverse ensemble. Release models read
+    ``config.lm_encoder.lm_dropout``, the experimental model a top-level
+    ``config.lm_dropout`` — disambiguated by ``config.type``. ``None``/``0`` is a no-op.
+    """
+    if not lm_dropout:
+        yield
+        return
+
+    cfg = model.config
+    lm_encoder_cfg = getattr(cfg, "lm_encoder", None)
+    if lm_encoder_cfg is not None and getattr(cfg, "type", None) != "experimental":
+        saved = (lm_encoder_cfg.lm_dropout, lm_encoder_cfg.per_loop_lm_dropout)
+        lm_encoder_cfg.lm_dropout = lm_dropout
+        lm_encoder_cfg.per_loop_lm_dropout = True
+        try:
+            yield
+        finally:
+            lm_encoder_cfg.lm_dropout, lm_encoder_cfg.per_loop_lm_dropout = saved
+    elif hasattr(cfg, "lm_dropout"):
+        saved = (
+            cfg.lm_dropout,
+            getattr(cfg, "force_lm_dropout_during_inference", False),
+        )
+        cfg.lm_dropout = lm_dropout
+        cfg.force_lm_dropout_during_inference = True
+        try:
+            yield
+        finally:
+            cfg.lm_dropout, cfg.force_lm_dropout_during_inference = saved
+    else:
+        raise ValueError(
+            "lm_dropout was requested but this model's config exposes neither "
+            "`lm_encoder.lm_dropout` nor a top-level `lm_dropout`."
+        )
+
+
 def clean_esmfold2_input(input: StructurePredictionInput) -> StructurePredictionInput:
     """Group identical protein sequences into the same ProteinInput with multiple ids.
 
@@ -295,7 +336,9 @@ class ESMFold2InputBuilder:
         noise_scale: float | None = None,
         step_scale: float | None = None,
         max_inference_sigma: float | None = None,
+        lm_mask_pct: float | None = None,
         early_exit: bool = False,
+        lm_dropout: float | None = 0.3,
         complex_id: str = "pred",
     ) -> MolecularComplexResult | list[MolecularComplexResult]:
         """Fold a structure end-to-end: encode → model → decode.
@@ -312,6 +355,13 @@ class ESMFold2InputBuilder:
             Seeds both input prep (SMILES conformer generation) and diffusion sampling.
         noise_scale, step_scale, max_inference_sigma, early_exit
             Optional sampler overrides forwarded to the model when not None.
+        lm_mask_pct : float, optional
+            Fraction of sequence residues randomly masked before the PLM backbone.
+            Overrides the checkpoint config when not None.
+        lm_dropout : float, optional
+            LM-embedding dropout for this fold (fresh mask per loop → diverse
+            ensemble on repeated folds). Defaults to ``0.3`` (paper folding-eval
+            value); ``0``/``None`` disables.
         complex_id : str
             Identifier assigned to the predicted MolecularComplex(es).
 
@@ -331,17 +381,20 @@ class ESMFold2InputBuilder:
             sampler_kwargs["step_scale"] = step_scale
         if max_inference_sigma is not None:
             sampler_kwargs["max_inference_sigma"] = max_inference_sigma
+        if lm_mask_pct is not None:
+            sampler_kwargs["lm_mask_pct"] = lm_mask_pct
 
         with torch.no_grad():
             with _seed_context(seed) if seed is not None else nullcontext():
-                output = model(
-                    **features,
-                    num_loops=num_loops,
-                    num_sampling_steps=num_sampling_steps,
-                    num_diffusion_samples=num_diffusion_samples,
-                    early_exit=early_exit,
-                    **sampler_kwargs,
-                )
+                with _lm_dropout_context(model, lm_dropout):
+                    output = model(
+                        **features,
+                        num_loops=num_loops,
+                        num_sampling_steps=num_sampling_steps,
+                        num_diffusion_samples=num_diffusion_samples,
+                        early_exit=early_exit,
+                        **sampler_kwargs,
+                    )
 
         return self.decode(
             output,

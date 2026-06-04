@@ -367,6 +367,12 @@ class FoldingConfig:
     include_pair_chains_iptm: bool = False
     num_sampling_steps: int = 100
     num_loops: int = 20
+    lm_dropout: float = 0.3
+    lm_mask_pct: float | None = (
+        None  # If not provided, defaults to 0.1 for ESMFOLD2_FAST and 0.0 for ESMFOLD2
+    )
+    msa_max_depth: int | None = 1024
+    msa_column_mask_rate: float = 0.1
     include_embeddings: bool = False
 
 

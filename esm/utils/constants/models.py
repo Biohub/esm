@@ -11,7 +11,9 @@ ESMC_300M = "esmc_300m"
 ESMC_6B = "esmc_6b"
 ESMFOLD2_FAST = "esmfold2-fast-2026-05"
 ESMFOLD2 = "esmfold2-2026-05"
+
 ESMFOLD2_MAX_MSA_SEQS = 16384
+DEFAULT_ESMFOLD2_FAST_LM_MASK_PCT = 0.1
 
 
 def forge_only_return_single_layer_hidden_states(model_name: str):
