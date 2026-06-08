@@ -341,7 +341,6 @@ class ESMFold2InputBuilder:
         lm_dropout: float | None = 0.3,
         msa_max_depth: int = 1024,
         msa_column_mask_rate: float = 0.1,
-        msa_subsample_at_inference: bool = True,
         complex_id: str = "pred",
     ) -> MolecularComplexResult | list[MolecularComplexResult]:
         """Fold a structure end-to-end: encode → model → decode.
@@ -371,9 +370,6 @@ class ESMFold2InputBuilder:
         msa_column_mask_rate : float
             Fraction of MSA columns masked once before the loop
             (shared across loops). Only affects inputs that carry an MSA.
-        msa_subsample_at_inference : bool
-            Whether to subsample MSA rows at inference time. The query row is
-            always kept. Only affects inputs that carry an MSA.
         complex_id : str
             Identifier assigned to the predicted MolecularComplex(es).
 
@@ -407,7 +403,6 @@ class ESMFold2InputBuilder:
                         early_exit=early_exit,
                         msa_max_depth=msa_max_depth,
                         msa_column_mask_rate=msa_column_mask_rate,
-                        msa_subsample_at_inference=msa_subsample_at_inference,
                         **sampler_kwargs,
                     )
 
