@@ -227,6 +227,7 @@ class ProteinChain:
                     atom_name=residue_constants.atom_types[i],
                     element=residue_constants.atom_types[i][0],
                     b_factor=float(b_factor),
+                    occupancy=1.0,  # Necessary for BioPython MMCIFParser
                 )
                 atoms.append(atom)
         return bs.array(atoms)
@@ -262,6 +263,7 @@ class ProteinChain:
                     atom_name=residue_constants.atom_types[i],
                     element=residue_constants.atom_types[i][0],
                     b_factor=float(b_factor),
+                    occupancy=1.0,  # Necessary for BioPython MMCIFParser
                 )
                 atoms.append(atom)
         return bs.array(atoms)

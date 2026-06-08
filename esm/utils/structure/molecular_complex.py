@@ -870,6 +870,10 @@ class MolecularComplex:
         atom_array.atom_name = np.array(atom_names, dtype="U4")
         atom_array.add_annotation("b_factor", dtype=float)
         atom_array.b_factor = atom_bfactors
+        atom_array.add_annotation("occupancy", dtype=float)
+        atom_array.occupancy = np.ones(
+            n_atoms, dtype=np.float32
+        )  # Necessary for BioPython MMCIFParser
         atom_array.add_annotation("entity_id", dtype=int)
         atom_array.entity_id = atom_entity_ids
 
