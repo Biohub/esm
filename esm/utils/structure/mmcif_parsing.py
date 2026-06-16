@@ -9,11 +9,38 @@ from typing import Union
 
 import biotite.structure as bs
 import biotite.structure.io.pdbx as pdbx
+import numpy as np
+from biotite.structure.io.pdbx import CIFColumn, CIFData, CIFFile
 
 from esm.utils import residue_constants
 
 # Define PathOrBuffer for the opensource version
 PathOrBuffer = Union[str, os.PathLike, io.StringIO]
+
+# pLDDT/confidence is stored internally on a 0-1 scale, but written to the mmCIF
+# B-factor column on the conventional 0-100 scale
+PLDDT_B_FACTOR_SCALE = 100.0
+
+_MMCIF_COLUMN_DECIMALS = {"Cartn_x": 3, "Cartn_y": 3, "Cartn_z": 3, "B_iso_or_equiv": 2}
+
+
+def round_mmcif_columns(cif_file: CIFFile) -> None:
+    """Round coordinate and B-factor columns in ``cif_file`` in-place."""
+    if "atom_site" not in cif_file.block:
+        return
+    atom_site = cif_file.block["atom_site"]
+    for col_name, decimals in _MMCIF_COLUMN_DECIMALS.items():
+        if col_name not in atom_site:
+            continue
+        column = atom_site[col_name]
+        values = column.as_array(np.float64)
+        atom_site[col_name] = CIFColumn(
+            data=CIFData(
+                array=np.array([f"{v:.{decimals}f}" for v in values], dtype=np.str_),
+                dtype=np.str_,
+            ),
+            mask=column.mask,
+        )
 
 
 class NoProteinError(Exception):
@@ -246,10 +273,10 @@ class MmcifWrapper:
                     clean_ins_code = ""
                     res_num = None
 
-                is_het = hetflag.upper() == "Y"  # type: ignore
+                is_het = hetflag.upper() == "Y"
                 chain_data[asym_id][seq_index] = Residue(
                     residue_number=res_num,
-                    insertion_code=clean_ins_code,  # type: ignore
+                    insertion_code=clean_ins_code,
                     hetflag=is_het,
                 )
 

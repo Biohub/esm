@@ -22,7 +22,7 @@ def rgba_tuple_to_hex(
         g = float_to_int(rgba[1])
         b = float_to_int(rgba[2])
         if len(rgba) > 3:
-            rgba = (r, g, b, rgba[3])
+            rgba = (r, g, b, rgba[3])  # ty:ignore[index-out-of-bounds]
         else:
             rgba = (r, g, b)
 

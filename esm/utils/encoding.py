@@ -77,9 +77,9 @@ def tokenize_structure(
     _, structure_tokens = structure_encoder.encode(
         coordinates, residue_index=residue_index
     )
-    coordinates = torch.squeeze(coordinates, dim=0)  # (L, 37, 3)  # type: ignore
-    plddt = torch.squeeze(plddt, dim=0)  # (L,)  # type: ignore
-    structure_tokens = torch.squeeze(structure_tokens, dim=0)  # (L,)  # type: ignore
+    coordinates = torch.squeeze(coordinates, dim=0)  # (L, 37, 3)
+    plddt = torch.squeeze(plddt, dim=0)  # (L,)
+    structure_tokens = torch.squeeze(structure_tokens, dim=0)  # (L,)
 
     # Add space for BOS and EOS tokens
     if add_special_tokens:

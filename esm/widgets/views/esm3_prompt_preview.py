@@ -53,7 +53,7 @@ def text_to_sasa(sasa_text: str) -> list[int | float | None] | None:
 def function_annotations_to_text(annotations: list[FunctionAnnotation]) -> str:
     return "\n".join(
         [
-            f"[{annotation.start-1}-{annotation.end-1}]: {annotation.label}"
+            f"[{annotation.start - 1}-{annotation.end - 1}]: {annotation.label}"
             for annotation in annotations
         ]
     )

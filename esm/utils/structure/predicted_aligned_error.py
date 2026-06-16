@@ -48,7 +48,7 @@ def compute_predicted_aligned_error(
     return (probs * bins).sum(dim=-1)
 
 
-@torch.no_grad
+@torch.no_grad  # ty:ignore[too-many-positional-arguments]
 def compute_tm(logits: torch.Tensor, aa_mask: torch.Tensor, max_bin: float = 31.0):
     square_mask = _compute_pae_masks(aa_mask)
     seqlens = aa_mask.sum(-1, keepdim=True)

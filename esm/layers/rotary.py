@@ -26,11 +26,9 @@ import torch
 from einops import rearrange, repeat
 
 try:
-    from flash_attn.ops.triton.rotary import (  # type:ignore
-        apply_rotary as apply_triton_rotary,
-    )
+    from flash_attn.ops.triton.rotary import apply_rotary as apply_triton_rotary
 except ImportError:
-    apply_triton_rotary = None
+    apply_triton_rotary = None  # ty:ignore[invalid-assignment]
 
 
 def rotate_half(x, interleaved=False):
@@ -169,23 +167,23 @@ class RotaryEmbedding(torch.nn.Module):
                 else:
                     inv_freq = self.inv_freq
             else:
-                t = torch.arange(seqlen, device=device, dtype=self.inv_freq.dtype)  # pyright: ignore[reportArgumentType, reportCallIssue]
+                t = torch.arange(
+                    seqlen, device=device, dtype=self.inv_freq.dtype
+                )  # ty:ignore[no-matching-overload]
                 t /= self.scaling_factor
                 inv_freq = self.inv_freq
             # Don't do einsum, it converts fp32 to fp16 under AMP
             # freqs = torch.einsum("i,j->ij", t, self.inv_freq)
-            freqs = torch.outer(t, inv_freq)  # pyright: ignore[reportArgumentType]
+            freqs = torch.outer(t, inv_freq)  # ty:ignore[invalid-argument-type]
 
             if self.scale is None:
                 self._cos_cached = torch.cos(freqs).to(dtype)
                 self._sin_cached = torch.sin(freqs).to(dtype)
             else:
                 power = (
-                    torch.arange(  # pyright: ignore[reportCallIssue]
-                        seqlen,
-                        dtype=self.scale.dtype,  # pyright: ignore[reportArgumentType]
-                        device=self.scale.device,  # pyright: ignore[reportArgumentType]
-                    )
+                    torch.arange(
+                        seqlen, dtype=self.scale.dtype, device=self.scale.device
+                    )  # ty:ignore[no-matching-overload]
                     - seqlen // 2
                 ) / self.scale_base
                 scale = self.scale.to(device=power.device) ** power.unsqueeze(-1)
@@ -225,7 +223,7 @@ class RotaryEmbedding(torch.nn.Module):
                     self.interleaved,
                     True,  # inplace=True
                 ),
-            )  # type: ignore
+            )
         else:
             assert False
 

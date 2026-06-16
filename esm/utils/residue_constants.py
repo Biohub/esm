@@ -1044,12 +1044,14 @@ def _make_rigid_group_constants():
     for restype, restype_letter in enumerate(restypes_with_x):
         resname = restype_1to3[restype_letter]
         for atomname, group_idx, atom_position in rigid_group_atom_positions[resname]:
-            atomtype = atom_order[atomname]
+            atomtype = atom_order[atomname]  # ty:ignore[invalid-argument-type]
             restype_atom37_to_rigid_group[restype, atomtype] = group_idx
             restype_atom37_mask[restype, atomtype] = 1
             restype_atom37_rigid_group_positions[restype, atomtype, :] = atom_position
 
-            atom14idx = restype_name_to_atom14_names[resname].index(atomname)
+            atom14idx = restype_name_to_atom14_names[resname].index(
+                atomname  # ty:ignore[invalid-argument-type]
+            )
             restype_atom14_to_rigid_group[restype, atom14idx] = group_idx
             restype_atom14_mask[restype, atom14idx] = 1
             restype_atom14_rigid_group_positions[restype, atom14idx, :] = atom_position

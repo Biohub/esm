@@ -28,8 +28,8 @@ def create_structure_prompt_selector(
 
     min_residue, max_residue = indexing.get_pdb_index_min_max(protein_chain)
 
-    is_active_callback = (
-        lambda: active_tag_callback() == tag if active_tag_callback else True
+    is_active_callback = lambda: (
+        active_tag_callback() == tag if active_tag_callback else True
     )
 
     matrix_output = widgets.Output()

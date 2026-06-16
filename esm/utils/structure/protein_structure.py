@@ -6,7 +6,7 @@ import numpy as np
 import torch
 import torch.nn.functional as F
 from torch import Tensor
-from torch.amp import autocast  # type: ignore
+from torch.amp import autocast
 
 from esm.utils import residue_constants
 from esm.utils.misc import unbinpack
@@ -28,7 +28,7 @@ def index_by_atom_name(
     result = atom37[index]  # type: ignore
     if squeeze:
         result = result.squeeze(dim)
-    return result
+    return result  # ty:ignore[invalid-return-type]
 
 
 def infer_cbeta_from_atom37(
@@ -52,7 +52,7 @@ def infer_cbeta_from_atom37(
 
         cross = np.cross
     else:
-        normalize = F.normalize  # type: ignore
+        normalize = F.normalize
         cross = torch.cross
 
     with np.errstate(invalid="ignore"):  # inf - inf = nan is ok here

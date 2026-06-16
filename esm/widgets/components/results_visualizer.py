@@ -38,7 +38,7 @@ def create_results_visualizer(
         # Sort structures by pTM
         samples = sorted(
             samples,
-            key=lambda item: (item.ptm.item() if item.ptm is not None else 0),
+            key=lambda item: item.ptm.item() if item.ptm is not None else 0,
             reverse=True,
         )
 

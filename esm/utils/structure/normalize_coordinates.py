@@ -28,7 +28,7 @@ def index_by_atom_name(
     result = atom37[index]  # type: ignore
     if squeeze:
         result = result.squeeze(dim)
-    return result
+    return result  # ty:ignore[invalid-return-type]
 
 
 def get_protein_normalization_frame(coords: Tensor) -> Affine3D:

@@ -86,12 +86,15 @@ upload-wheel = "python -m twine upload --repository pypi"
 
 [tool.pixi.feature.dev.dependencies]
 matplotlib = "*"
+# Pin the lint/test env to numpy<2: the numpy 2.x type stubs trip ty false positives
+# (savez/zip) that don't reflect runtime behavior. Runtime deps stay numpy-unconstrained.
+numpy = ">=1.26.0,<2.0.0"
 pre-commit = "*"
 pytest = "*"
 pytest-cov = "*"
 pytest-xdist = "*"
 seaborn = "*"
-pyright = "==1.1.399"
+ty = "==0.0.49"
 
 [tool.pixi.feature.dev.tasks]
 lint-all = "pre-commit run --all-files --show-diff-on-failure"
@@ -133,10 +136,37 @@ docstring-code-line-length = "dynamic"
 [tool.isort]
 known_third_party = ["wandb"]
 
-[tool.pyright]
-useLibraryCodeForTypes = true
-reportPrivateImportUsage = false
-typeCheckingMode = "basic"
+[tool.ty.src]
+# gitignore-style globs. Skip notebooks, tests, and the Modal-app tutorial whose deps
+# (modal, abnumber) and dynamic decorators aren't resolvable in the lint env.
+exclude = [
+    "**/*.ipynb",
+    "**/*_test.py",
+    "**/test_*.py",
+    "**/tests/",
+    "**/conftest.py",
+    "cookbook/tutorials/binder_design.py",
+]
+
+[tool.ty.rules]
+# Strict LSP override-compatibility checking that pyright `basic` never enforced; low
+# value for duck-typed ML code.
+invalid-method-override = "ignore"
+# flash_attn resolves only where it's installed (a GPU environment); the ignores it
+# requires there read as unused/redundant in this CPU lint env where it's absent.
+unused-ignore-comment = "ignore"
+unused-type-ignore-comment = "ignore"
+
+[tool.ty.analysis]
+# ty can't introspect optional/compiled deps absent from this lint env (flash_attn is
+# GPU-only; zstd is a C-extension), so it falsely reports them unresolved. Treat as Any
+# rather than disabling unresolved-import, so genuinely-broken first-party imports still
+# surface.
+replace-imports-with-any = [
+    "flash_attn",
+    "flash_attn.**",
+    "zstd",
+]
 
 [tool.importlinter]
 root_package = "esm"

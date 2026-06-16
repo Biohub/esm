@@ -8,12 +8,12 @@ import torch.nn as nn
 from attr import dataclass
 
 try:
-    from flash_attn.bert_padding import pad_input, unpad_input  # type:ignore
+    from flash_attn.bert_padding import pad_input, unpad_input
 
     is_flash_attn_available = True
 except ImportError:
-    pad_input = None
-    unpad_input = None
+    pad_input = None  # ty:ignore[invalid-assignment]
+    unpad_input = None  # ty:ignore[invalid-assignment]
     is_flash_attn_available = False
 
 from esm.layers.regression_head import RegressionHead
@@ -141,7 +141,9 @@ class ESMC(nn.Module, ESMCInferenceClient):
         output_attentions = bool(output_attentions)
         if sequence_id is None:
             # For EMSC, a boolean mask is created in place of sequence_id if not specified.
-            sequence_id = sequence_tokens != self.tokenizer.pad_token_id
+            sequence_id = (
+                sequence_tokens != self.tokenizer.pad_token_id
+            )  # ty:ignore[invalid-assignment]
 
         x = self.embed(sequence_tokens)
 
@@ -154,13 +156,11 @@ class ESMC(nn.Module, ESMCInferenceClient):
                     "output_attentions is not supported with flash attention."
                 )
             assert (
-                sequence_id.dtype == torch.bool
+                sequence_id.dtype == torch.bool  # ty:ignore[unresolved-attribute]
             ), "sequence_id must be a boolean mask if Flash Attention is used"
-            assert sequence_id.shape == (B, L)
+            assert sequence_id.shape == (B, L)  # ty:ignore[unresolved-attribute]
             assert unpad_input is not None
-            x, indices, *_ = unpad_input(  # type: ignore
-                x, sequence_id
-            )
+            x, indices, *_ = unpad_input(x, sequence_id)
         else:
             indices = None
 
@@ -179,7 +179,7 @@ class ESMC(nn.Module, ESMCInferenceClient):
             ]
 
         # Stack hidden states into a [n_layers, B, L, D] matrix.
-        hidden_states = torch.stack(hidden_states, dim=0)  # type: ignore
+        hidden_states = torch.stack(hidden_states, dim=0)
 
         sequence_logits = self.sequence_head(x)
         output = ESMCOutput(
@@ -225,7 +225,7 @@ class ESMC(nn.Module, ESMCInferenceClient):
 
         with (
             torch.no_grad(),
-            torch.autocast(enabled=True, device_type=device.type, dtype=torch.bfloat16)  # type: ignore
+            torch.autocast(enabled=True, device_type=device.type, dtype=torch.bfloat16)
             if device.type == "cuda"
             else contextlib.nullcontext(),
         ):

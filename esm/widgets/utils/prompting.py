@@ -280,14 +280,14 @@ class PromptManager:
                 f"{range_string}"
             )
         )
-        entry_label.tag = range_string  # type: ignore
+        entry_label.tag = range_string
         entry_container = widgets.HBox([entry_button, entry_label])
 
         def delete_entry(b):
             self.entries_box.children = [
                 w for w in self.entries_box.children if w != entry_container
             ]
-            self.delete_prompt(entry_label.tag)  # type: ignore
+            self.delete_prompt(entry_label.tag)
             self.redraw()
             for callback in self.delete_callbacks:
                 callback()

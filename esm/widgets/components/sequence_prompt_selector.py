@@ -20,8 +20,8 @@ def create_sequence_prompt_selector(
 ) -> widgets.Widget:
     sequence_length = len(full_sequence)
 
-    is_active_callback = (
-        lambda: active_tag_callback() == tag if active_tag_callback else True
+    is_active_callback = lambda: (
+        active_tag_callback() == tag if active_tag_callback else True
     )
 
     range_slider = widgets.IntRangeSlider(

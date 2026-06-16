@@ -21,26 +21,26 @@ class ResidueAnnotationsTokenizer(EsmTokenizerBase):
 
     @cached_property
     def _description2label(self) -> dict[str, str]:
-        with AnyPath(self.csv_path).open() as f:  # type: ignore
+        with AnyPath(self.csv_path).open() as f:
             df = pd.read_csv(f)
         return dict(zip(df.label, df.label_clean))
 
     @cached_property
     def _labels(self) -> list[str]:
-        with AnyPath(self.csv_path).open() as f:  # type: ignore
+        with AnyPath(self.csv_path).open() as f:
             df = pd.read_csv(f)
         labels = (
             df.groupby("label_clean")["count"]
             .sum()
-            .sort_values(ascending=False, kind="stable")  # type: ignore
+            .sort_values(ascending=False, kind="stable")
             .index.tolist()
         )
         assert isinstance(labels, list)
-        return labels  # type: ignore
+        return labels
 
     def _description2id(self, description: str) -> int | None:
         label = self._description2label.get(description)
-        return self._label2id.get(label)  # type: ignore
+        return self._label2id.get(label)
 
     @cached_property
     def _label2id(self) -> dict[str, int]:

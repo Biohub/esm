@@ -41,7 +41,7 @@ def read_sequences(path: PathOrBuffer) -> Generator[FastaEntry, None, None]:
     # Doesn't use explicit isinstance check to support
     # inputs that are not explicitly str/Path/TextIOBase but
     # may support similar functionality
-    data = None  # type: ignore
+    data = None
     try:
         if str(path).endswith(".gz"):
             import gzip

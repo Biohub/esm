@@ -280,7 +280,7 @@ class StructureTokenEncoder(nn.Module):
                 (coords.shape[0], coords.shape[1]), device=coords.device
             ).long()
 
-        with torch.no_grad(), torch.cuda.amp.autocast(enabled=False):  # type: ignore
+        with torch.no_grad(), torch.cuda.amp.autocast(enabled=False):
             ca = coords[..., 1, :]
             edges, edge_mask = knn_graph(
                 ca, coord_mask, padding_mask, sequence_id, no_knn=knn
@@ -419,8 +419,8 @@ class StructureTokenDecoder(nn.Module):
         # This might be broken for chainbreak tokens? We might align to the chainbreak
         ptm = compute_tm(
             pae_logits,  # type: ignore
-            aa_mask=~special_tokens_mask,
-            max_bin=self.max_pae_bin,
+            aa_mask=~special_tokens_mask,  # ty:ignore[unknown-argument]
+            max_bin=self.max_pae_bin,  # ty:ignore[unknown-argument]
         )
 
         plddt_logits = self.plddt_head(x)

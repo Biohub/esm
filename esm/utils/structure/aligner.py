@@ -14,11 +14,11 @@ class Alignable(Protocol):
     __dataclass_fields__: ClassVar[dict[str, Field[Any]]]
 
     @property
-    def atom37_positions(self) -> np.ndarray:  # type: ignore
+    def atom37_positions(self) -> np.ndarray:
         pass
 
     @property
-    def atom37_mask(self) -> np.ndarray:  # type: ignore
+    def atom37_mask(self) -> np.ndarray:
         pass
 
     def __len__(self) -> int: ...

@@ -3,7 +3,7 @@ import torch
 import torch.nn.functional as F
 from einops import rearrange
 from torch import Tensor
-from torch.amp import autocast  # type: ignore
+from torch.amp import autocast
 
 from esm.utils import residue_constants
 from esm.utils.misc import binpack, unbinpack

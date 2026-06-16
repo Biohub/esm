@@ -44,7 +44,7 @@ class LSHTokenized:
             filepath = AnyPath(filepath)
             if not filepath.exists():
                 raise FileNotFoundError(filepath)
-            table_hyperplanes = np.load(filepath)  # type: ignore
+            table_hyperplanes = np.load(filepath)
             for i in range(num_tables):
                 assert str(i) in table_hyperplanes, f"Missing hyperplane for table {i}"
         elif not allow_create_hyperplanes:
@@ -62,10 +62,10 @@ class LSHTokenized:
         ]
 
     def write_hyperplanes(self, filepath: PathLike):
-        hyperplanes: dict[str, np.ndarray] = {  # type: ignore
+        hyperplanes: dict[str, np.ndarray] = {
             str(i): table.hyperplanes for i, table in enumerate(self.tables)
         }
-        np.savez(filepath, **hyperplanes)  # type: ignore
+        np.savez(filepath, **hyperplanes)
 
     def __call__(self, array):
         tokens = np.stack([table(array) for table in self.tables], 1)

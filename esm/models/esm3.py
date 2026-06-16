@@ -421,8 +421,8 @@ class ESM3(nn.Module, ESM3InferenceClient):
                 self,
                 inputs,  # type: ignore
                 configs,
-                self.tokenizers,  # type: ignore
-            )
+                self.tokenizers,
+            )  # ty:ignore[invalid-return-type]
         else:
             raise ValueError("Input must be an ESMProtein or ESMProteinTensor")
 
@@ -535,7 +535,7 @@ class ESM3(nn.Module, ESM3InferenceClient):
 
         with (
             torch.no_grad(),  # Assume no gradients for now...
-            torch.autocast(enabled=True, device_type=device.type, dtype=torch.bfloat16)  # type: ignore
+            torch.autocast(enabled=True, device_type=device.type, dtype=torch.bfloat16)
             if device.type == "cuda"
             else contextlib.nullcontext(),
         ):

@@ -40,6 +40,6 @@ def run_subprocess_with_errorcheck(
         )
     except subprocess.CalledProcessError as e:
         raise RuntimeError(
-            f"Command failed with errorcode {e.returncode}." f"\n\n{e.stderr.decode()}"
+            f"Command failed with errorcode {e.returncode}.\n\n{e.stderr.decode()}"
         )
     return p

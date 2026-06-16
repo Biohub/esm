@@ -209,8 +209,7 @@ def _stack_protein_tensors(
             o,
             fn,
             stack_variable_length_tensors(
-                sequences=tensors,  # type: ignore
-                constant_value=mask_token_id,
+                sequences=tensors, constant_value=mask_token_id
             ),
         )
 
@@ -658,7 +657,9 @@ def _sample_per_prompt(
 
     # Format output
     forward_and_sample_output_dir = {}
-    forward_and_sample_output_dir["protein_tensor"] = ESMProteinTensor(**tokens_dir)
+    forward_and_sample_output_dir["protein_tensor"] = ESMProteinTensor(
+        **tokens_dir  # ty:ignore[invalid-argument-type]
+    )
     for property in [
         "entropy",
         "prob",
@@ -682,7 +683,7 @@ def _sample_per_prompt(
             forward_and_sample_output_dir[property] = None
 
     per_res_embed = (
-        logits_output.embeddings  # type: ignore
+        logits_output.embeddings
         if sampling_config.return_per_residue_embeddings
         else None
     )
@@ -696,7 +697,7 @@ def _sample_per_prompt(
     return ForwardAndSampleOutput(
         per_residue_embedding=per_res_embed,
         mean_embedding=mean_embedding,
-        **forward_and_sample_output_dir,
+        **forward_and_sample_output_dir,  # ty:ignore[invalid-argument-type]
     )
 
 

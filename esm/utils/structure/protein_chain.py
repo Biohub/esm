@@ -26,7 +26,12 @@ from esm.utils.structure.affine3d import Affine3D
 from esm.utils.structure.aligner import Aligner
 from esm.utils.structure.atom_indexer import AtomIndexer
 from esm.utils.structure.metrics import compute_gdt_ts, compute_lddt_ca
-from esm.utils.structure.mmcif_parsing import MmcifWrapper, Residue
+from esm.utils.structure.mmcif_parsing import (
+    PLDDT_B_FACTOR_SCALE,
+    MmcifWrapper,
+    Residue,
+    round_mmcif_columns,
+)
 from esm.utils.structure.normalize_coordinates import (
     apply_frame_to_coords,
     get_protein_normalization_frame,
@@ -42,7 +47,9 @@ def _str_key_to_int_key(dct: dict, ignore_keys: list[str] | None = None) -> dict
     new_dict = {}
     for k, v in dct.items():
         v_new = v
-        if k not in ignore_keys and isinstance(v, dict):
+        if k not in ignore_keys and isinstance(  # ty:ignore[unsupported-operator]
+            v, dict
+        ):
             v_new = _str_key_to_int_key(v, ignore_keys=ignore_keys)
         # Note assembly_composition is *supposed* to have string keys.
         if isinstance(k, str) and k.isdigit():
@@ -125,7 +132,7 @@ def chain_to_ndarray(
                 )
                 atom_mask[res_index, residue_constants.atom_order[atom_name]] = True
                 if is_predicted and atom_name == "CA":
-                    confidence[res_index] = atom.b_factor
+                    confidence[res_index] = atom.b_factor / PLDDT_B_FACTOR_SCALE
 
     assert all(sequence), "Some residue name was not specified correctly"
     return (
@@ -226,7 +233,8 @@ class ProteinChain:
                     hetero=False,
                     atom_name=residue_constants.atom_types[i],
                     element=residue_constants.atom_types[i][0],
-                    b_factor=float(b_factor),
+                    b_factor=float(b_factor) * PLDDT_B_FACTOR_SCALE,
+                    occupancy=1.0,  # Necessary for BioPython MMCIFParser
                 )
                 atoms.append(atom)
         return bs.array(atoms)
@@ -261,7 +269,8 @@ class ProteinChain:
                     hetero=False,
                     atom_name=residue_constants.atom_types[i],
                     element=residue_constants.atom_types[i][0],
-                    b_factor=float(b_factor),
+                    b_factor=float(b_factor) * PLDDT_B_FACTOR_SCALE,
+                    occupancy=1.0,  # Necessary for BioPython MMCIFParser
                 )
                 atoms.append(atom)
         return bs.array(atoms)
@@ -359,7 +368,9 @@ class ProteinChain:
                 data=CIFData(array=["2"] * len(self.residue_index), dtype=np.str_)
             ),
             "metric_value": CIFColumn(
-                data=CIFData(array=self.confidence, dtype=np.float32)
+                data=CIFData(
+                    array=self.confidence * PLDDT_B_FACTOR_SCALE, dtype=np.float32
+                )
             ),
             # hard coded to show there are the initial version, there are no revisions
             "model_id": CIFColumn(
@@ -369,6 +380,9 @@ class ProteinChain:
         f.block["ma_qa_metric_local"] = CIFCategory(
             name="ma_qa_metric_local", columns=resid_pldd_table
         )
+        # biotite echoes unmasked float columns at full precision
+        # so we round every float column to conventional mmCIF precision
+        round_mmcif_columns(f)
         f.write(path)
 
     def to_mmcif_string(self) -> str:
@@ -453,7 +467,7 @@ class ProteinChain:
 
     def sasa(self, by_residue: bool = True):
         arr = self.atom_array_no_insertions
-        sasa_per_atom = bs.sasa(arr)  # type: ignore
+        sasa_per_atom = bs.sasa(arr)
         if by_residue:
             # Sum per-atom SASA into residue "bins", with np.bincount.
             assert arr.res_id is not None
@@ -545,7 +559,7 @@ class ProteinChain:
                 assert len(sap_by_residue) == len(self)
                 return sap_by_residue
             case "protein":
-                return sum(sap_by_atom[sap_by_atom > 0])  # pyright: ignore[reportReturnType]
+                return sum(sap_by_atom[sap_by_atom > 0])
             case _:
                 raise ValueError(
                     f"Invalid aggregation method: {aggregation}. Must be one of 'atom', 'residue', or 'protein'"
@@ -561,7 +575,7 @@ class ProteinChain:
         # NOTE(@zeming): due to the approximation we make here, that atoms never overlap, you might get >1 globularity
         mask = self.atom37_mask.any(-1)
         points = self.atom37_positions[self.atom37_mask]
-        sequence = [aa for aa, m in zip(self.sequence, mask) if m]  # type: ignore
+        sequence = [aa for aa, m in zip(self.sequence, mask) if m]
         A, _ = self._mvee(points, tol=1e-3)
         mvee_volume = (4 * np.pi) / (3 * np.sqrt(np.linalg.det(A)))
         volume = sum(residue_constants.amino_acid_volumes[x] for x in sequence)
@@ -954,7 +968,7 @@ class ProteinChain:
 
         return cls(
             id=id,
-            sequence=sequence,  # type: ignore
+            sequence=sequence,
             chain_id=chain_id,
             entity_id=entity_id,
             atom37_positions=atom37_positions,
@@ -1081,7 +1095,7 @@ class ProteinChain:
                     )
                     atom_mask[i, residue_constants.atom_order[atom_name]] = True
                     if is_predicted and atom_name == "CA":
-                        confidence[i] = atom.b_factor
+                        confidence[i] = atom.b_factor / PLDDT_B_FACTOR_SCALE
 
         assert all(sequence), "Some residue name was not specified correctly"
 
@@ -1121,7 +1135,7 @@ class ProteinChain:
         entity_id: int | None = None,
         keep_source: bool = False,
     ) -> ProteinChain:
-        f: io.StringIO = rcsb.fetch(pdb_id, "cif")  # type: ignore
+        f: io.StringIO = rcsb.fetch(pdb_id, "cif")
         return cls.from_mmcif(
             f,
             id=pdb_id,
@@ -1139,7 +1153,7 @@ class ProteinChain:
         Uses PDB file format as intermediate."""
         atom_array = atom_array.copy()
         atom_array.box = None  # remove surrounding box, from_pdb won't handle this
-        pdb_file = PDBFile()  # pyright: ignore
+        pdb_file = PDBFile()
         pdb_file.set_structure(atom_array)
 
         buf = io.StringIO()

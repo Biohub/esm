@@ -18,8 +18,8 @@ def create_sasa_prompt_selector(
     with_title: bool = True,
     active_tag_callback: Callable[[], str] | None = None,
 ) -> widgets.Widget:
-    is_active_callback = (
-        lambda: active_tag_callback() == tag if active_tag_callback else True
+    is_active_callback = lambda: (
+        active_tag_callback() == tag if active_tag_callback else True
     )
 
     if input_array is None:

@@ -582,7 +582,7 @@ def tokenize_ligand_smiles(
     mol = Chem.AddHs(mol)
 
     # Assign atom names using canonical ranking
-    canonical_order = AllChem.CanonicalRankAtoms(mol)  # type: ignore[attr-defined]
+    canonical_order = AllChem.CanonicalRankAtoms(mol)  # ty:ignore[unresolved-attribute]
     for atom, can_idx in zip(mol.GetAtoms(), canonical_order):
         atom_name = atom.GetSymbol().upper() + str(can_idx + 1)
         if len(atom_name) > 4:
@@ -592,17 +592,19 @@ def tokenize_ligand_smiles(
         atom.SetProp("name", atom_name)
 
     # Generate 3D conformer
-    options = AllChem.ETKDGv3()  # type: ignore[attr-defined]
+    options = AllChem.ETKDGv3()  # ty:ignore[unresolved-attribute]
     options.clearConfs = False
     if seed is not None:
         options.randomSeed = seed
-    conf_id = AllChem.EmbedMolecule(mol, options)  # type: ignore[attr-defined]
+    conf_id = AllChem.EmbedMolecule(mol, options)  # ty:ignore[unresolved-attribute]
     if conf_id == -1:
         options.useRandomCoords = True
-        conf_id = AllChem.EmbedMolecule(mol, options)  # type: ignore[attr-defined]
+        conf_id = AllChem.EmbedMolecule(mol, options)  # ty:ignore[unresolved-attribute]
     if conf_id != -1:
         try:
-            AllChem.UFFOptimizeMolecule(mol, confId=conf_id, maxIters=1000)  # type: ignore[attr-defined]
+            AllChem.UFFOptimizeMolecule(  # ty:ignore[unresolved-attribute]
+                mol, confId=conf_id, maxIters=1000
+            )
         except (RuntimeError, ValueError):
             pass
 

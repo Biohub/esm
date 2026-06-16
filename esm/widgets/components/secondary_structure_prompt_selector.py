@@ -21,8 +21,8 @@ def create_secondary_structure_prompt_selector(
 ) -> widgets.Widget:
     ss3_categories = get_ss3_categories()
 
-    is_active_callback = (
-        lambda: active_tag_callback() == tag if active_tag_callback else True
+    is_active_callback = lambda: (
+        active_tag_callback() == tag if active_tag_callback else True
     )
 
     if input_array is None:

@@ -157,7 +157,7 @@ class SequenceStructureForgeInferenceClient(_BaseForgeInferenceClient):
                     UserWarning,
                     stacklevel=4,
                 )
-            request["msa"] = {"sequences": msa.sequences}
+            request["msa"] = msa.state_dict(json_serializable=True)
         else:
             error_msg = f"MSA must be None or MSA. Got {msa} instead."
             raise AttributeError(error_msg)
@@ -541,6 +541,7 @@ class ESM3ForgeInferenceClient(ESM3InferenceClient, _BaseForgeInferenceClient):
             "condition_on_coordinates_only": config.condition_on_coordinates_only,
             "strategy": config.strategy,
             "temperature_annealing": config.temperature_annealing,
+            "only_compute_backbone_rmsd": config.only_compute_backbone_rmsd,
         }
         return request
 
@@ -586,6 +587,10 @@ class ESM3ForgeInferenceClient(ESM3InferenceClient, _BaseForgeInferenceClient):
             ),
             plddt=maybe_tensor(data["outputs"]["plddt"]),
             ptm=maybe_tensor(data["outputs"]["ptm"]),
+            pae=maybe_tensor(data["outputs"]["pae"]),
+            crmsd=maybe_tensor(data["outputs"]["crmsd"]),
+            globularity=maybe_tensor(data["outputs"]["globularity"]),
+            interface_ptm=maybe_tensor(data["outputs"]["interface_ptm"]),
         )
 
     @staticmethod

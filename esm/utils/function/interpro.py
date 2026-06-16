@@ -43,15 +43,15 @@ def _parse_interpro2go(path: PathLike) -> dict[str, list[str]]:
     df["interpro_id"] = df.line.apply(lambda line: re.findall(r"IPR\d+", line))
     df["go_ids"] = df.line.apply(parse_go_terms)
     df = df[df.go_ids.apply(len).gt(0) & df.interpro_id.apply(len).eq(1)]
-    df["interpro_id"] = df["interpro_id"].apply(lambda xs: xs[0])  # type: ignore
+    df["interpro_id"] = df["interpro_id"].apply(lambda xs: xs[0])
 
     # Group all mappints together into a single map.
     df = (
-        df.groupby("interpro_id")["go_ids"]  # type: ignore
+        df.groupby("interpro_id")["go_ids"]
         .apply(lambda group: list(itertools.chain.from_iterable(group)))
         .reset_index()
     )
-    return dict(zip(df.interpro_id, df.go_ids))  # type: ignore
+    return dict(zip(df.interpro_id, df.go_ids))
 
 
 class InterProEntryType(IntEnum):

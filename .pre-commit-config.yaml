@@ -22,17 +22,17 @@ repos:
     args: [ --fix ]
   - id: ruff-format # formatter
     types_or: [python, jupyter]
-- repo: https://github.com/RobertCraigie/pyright-python
-  rev: v1.1.399
+- repo: local
   hooks:
-    - id: pyright
-      name: pyright
-      entry: pyright
-      language: system
-      types: [python]
-      pass_filenames: true # For speed, we only check the files that are changed
-      # Modal-app tutorial: deps (modal, abnumber) and dynamic decorators aren't resolvable in the lint env.
-      exclude: ^cookbook/tutorials/binder_design\.py$
+    - id: ty
+      name: ty
+      entry: ty check
+      language: system # ty is a pixi dev dep (pyproject.toml [tool.pixi.feature.dev]); pre-commit runs in the pixi env
+      # pass_filenames: false — ty checks the whole project (it needs the full module graph and
+      # is fast enough), and per-file invocation would bypass [tool.ty.src].exclude (astral-sh/ty#269).
+      pass_filenames: false
+      always_run: true
+      require_serial: true
 - repo: https://github.com/gitleaks/gitleaks
   rev: v8.24.2
   hooks:

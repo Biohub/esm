@@ -143,7 +143,7 @@ class ForgeBatchExecutor:
                             retry_count += 1
                             pbar.update(0)
                         else:
-                            results[idx] = e  # type: ignore
+                            results[idx] = e
                             fail_count += 1
                             pbar.update(1)
 

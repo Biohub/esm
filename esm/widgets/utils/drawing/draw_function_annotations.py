@@ -43,7 +43,7 @@ def draw_function_annotations(
             start=annotation.start - 1,  # one index -> zero index
             end=annotation.end,
             label=label,
-            color=type_colors[entry_type],  # type: ignore
+            color=type_colors[entry_type],
             strand=None,
         )
         features.append(feature)

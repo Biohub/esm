@@ -33,7 +33,11 @@ from esm.utils.structure.affine3d import Affine3D
 from esm.utils.structure.aligner import Aligner
 from esm.utils.structure.atom_indexer import AtomIndexer
 from esm.utils.structure.metrics import compute_gdt_ts, compute_lddt_ca
-from esm.utils.structure.mmcif_parsing import MmcifWrapper, NoProteinError
+from esm.utils.structure.mmcif_parsing import (
+    MmcifWrapper,
+    NoProteinError,
+    round_mmcif_columns,
+)
 from esm.utils.structure.protein_chain import (
     ProteinChain,
     _str_key_to_int_key,
@@ -474,7 +478,7 @@ class ProteinComplex:
 
     @classmethod
     def from_rcsb(cls, pdb_id: str, keep_source: bool = False) -> ProteinComplex:
-        f: io.StringIO = rcsb.fetch(pdb_id, "cif")  # type: ignore
+        f: io.StringIO = rcsb.fetch(pdb_id, "cif")
         return cls.from_mmcif(f, id=pdb_id, keep_source=keep_source, is_predicted=False)
 
     @classmethod
@@ -890,7 +894,7 @@ class ProteinComplex:
 
         def parse_dict(d: dict[str, Any]) -> DockQSingleScore:
             return DockQSingleScore(
-                native_chains=tuple(d["Native chains"]),  # type: ignore
+                native_chains=tuple(d["Native chains"]),
                 DockQ=float(d["DockQ"]),
                 interface_rms=float(d["irms"]),
                 ligand_rms=float(d["Lrms"]),  # Note the capitalization difference
@@ -901,7 +905,10 @@ class ProteinComplex:
                 DockQ_F1=float(d["DockQ_F1"]),
             )
 
-        inv_mapping = {v: k for k, v in result["mapping"].items()}
+        inv_mapping = {
+            v: k
+            for k, v in result["mapping"].items()  # ty:ignore[unresolved-attribute]
+        }
 
         self_chain_map = {c.chain_id: c for c in self.chain_iter()}
         realigned = []
@@ -913,9 +920,11 @@ class ProteinComplex:
         realigned = aligner.apply(realigned)
 
         result = DockQResult(
-            total_dockq=result["value"],
-            native_interfaces=result["native interfaces"],
-            chain_mapping=result["mapping"],
+            total_dockq=result["value"],  # ty:ignore[invalid-argument-type]
+            native_interfaces=result[
+                "native interfaces"
+            ],  # ty:ignore[invalid-argument-type]
+            chain_mapping=result["mapping"],  # ty:ignore[invalid-argument-type]
             interfaces={
                 (i["Model chains"][0], i["Model chains"][1]): parse_dict(i)
                 for i in interfaces
@@ -1010,6 +1019,10 @@ class ProteinComplex:
 
         # Add entity information for proper mmCIF structure
         self._add_entity_information(f)
+
+        # biotite echoes unmasked float columns at full precision
+        # so we round every float column to conventional mmCIF precision
+        round_mmcif_columns(f)
 
         # Write to string
         output = io.StringIO()
@@ -1142,20 +1155,20 @@ def get_assembly_fast(
     ### Get structure according to additional parameters
     structure = get_structure(
         pdbx_file, model, data_block, altloc, ["label_asym_id"], use_author_fields
-    )[0]  # type: ignore
+    )[0]
     # TODO(@zeming) This line will remove all non-protein structural elements,
     # we should remove this when we want to parse these too.
     structure: bs.AtomArray = structure[
-        bs.filter_amino_acids(structure) & ~structure.hetero  # type: ignore
+        bs.filter_amino_acids(structure) & ~structure.hetero
     ]
     if len(structure) == 0:
         raise NoProteinError
-    unique_asym_ids = np.unique(structure.label_asym_id)  # type: ignore
+    unique_asym_ids = np.unique(structure.label_asym_id)
     asym2chain = {}
     asym2auth = {}
     for asym_id in unique_asym_ids:
-        sub_structure: bs.AtomArray = structure[structure.label_asym_id == asym_id]  # type: ignore
-        chain_id: str = sub_structure[0].chain_id  # type: ignore
+        sub_structure: bs.AtomArray = structure[structure.label_asym_id == asym_id]
+        chain_id: str = sub_structure[0].chain_id
         (
             sequence,
             atom_positions,

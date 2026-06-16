@@ -4,7 +4,7 @@
 # A world model of protein biology: ESMC, ESMFold2, & ESM Atlas
 
 
-[ESMC & ESMFold2 Preprint](https://biohub.ai/papers/esm_protein.pdf) &sdot;  [Atlas](https://biohub.ai/esm/protein/atlas) &sdot; [Tutorials](https://github.com/Biohub/esm/tree/main/cookbook/tutorials) &sdot; [Slack](https://bit.ly/esm-slack)<br>
+[ESMC & ESMFold2 Preprint](https://www.biorxiv.org/content/10.64898/2026.06.03.729735) &sdot;  [Atlas](https://biohub.ai/esm/protein/atlas) &sdot; [Tutorials](https://github.com/Biohub/esm/tree/main/cookbook/tutorials) &sdot; [Slack](https://bit.ly/esm-slack)<br>
 </div>
 
 We are releasing a world model for protein biology: a scientific engine for prediction, design, and discovery. Built on the latest generation of Evolutionary Scale Modeling (ESM), this system learns from the protein sequences produced by evolution and uses that knowledge to represent, map, predict, and design proteins across scales — from atomic interactions to evolutionary relationships spanning billions of years. The system includes three artifacts: ESMC, ESMFold2, and ESM Atlas.
@@ -25,7 +25,7 @@ We are releasing a world model for protein biology: a scientific engine for pred
 </div>
 
 
-ESMFold2 is validated in the lab across five therapeutic targets. Inversion of ESMFold2 enables generation of de novo minibinders and antibody-derived scFvs with high hit rates, nanomolar affinities, target specificity, and functional activity. We've released the full protocol from target sequence to ranked binder design in this [notebook](https://github.com/Biohub/esm/blob/main/cookbook/tutorials/binder_design.ipynb). For additional details, please refer to the [preprint](https://biohub.ai/papers/esm_protein.pdf).
+ESMFold2 is validated in the lab across five therapeutic targets. Inversion of ESMFold2 enables generation of de novo minibinders and antibody-derived scFvs with high hit rates, nanomolar affinities, target specificity, and functional activity. We've released the full protocol from target sequence to ranked binder design in this [notebook](https://github.com/Biohub/esm/blob/main/cookbook/tutorials/binder_design.ipynb). For additional details, please refer to the [preprint](https://www.biorxiv.org/content/10.64898/2026.06.03.729735).
 
 <div align="center">
   <img src="_assets/esmfold2_binder.png" width="60%"/>
@@ -320,7 +320,7 @@ If you use ESM in your work, please cite one of the following:
             and Pannu, Jassi and Bachas, Sharrol and Liu, Daniel S.
             and Sercu, Tom and Rives, Alexander},
   year   = {2026},
-  url    = {https://biohub.ai/papers/esm_protein.pdf},
+  url    = {https://www.biorxiv.org/content/10.64898/2026.06.03.729735},
   note   = {Preprint}
 }
 ```

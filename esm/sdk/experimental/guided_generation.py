@@ -114,7 +114,7 @@ class ESM3GuidedDecoding:
                     )
 
                 # Separate samples and their scores returned by the executor
-                samples, scores = zip(*results)  # type: ignore
+                samples, scores = zip(*results)
             else:
                 # ----------------------------------------------
                 # Local client: sequential sampling (single thread)
@@ -128,7 +128,7 @@ class ESM3GuidedDecoding:
 
             # Select best scoring sample
             scores_list = list(scores)
-            best_sample = samples[scores_list.index(max(scores_list))]  # type: ignore
+            best_sample = samples[scores_list.index(max(scores_list))]
             current_score = max(scores_list)
             protein_tensor = best_sample
 
@@ -168,7 +168,7 @@ class ESM3GuidedDecoding:
         track_tensor = getattr(protein_tensor, track)
         track_tokenizer = getattr(self.tokenizers, track)
         is_mask = track_tensor == track_tokenizer.mask_token_id
-        return is_mask.sum().item()  # type: ignore
+        return is_mask.sum().item()
 
     def randomly_unmask_positions(
         self,
@@ -189,7 +189,7 @@ class ESM3GuidedDecoding:
         num_masked_positions = is_mask.sum().item()
 
         if num_positions_to_unmask > num_masked_positions:
-            num_positions_to_unmask = num_masked_positions  # type: ignore
+            num_positions_to_unmask = num_masked_positions
 
         mask_indices = is_mask.nonzero(as_tuple=False)
         mask_indices = mask_indices[torch.randperm(mask_indices.size(0))]

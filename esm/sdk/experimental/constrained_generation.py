@@ -176,7 +176,7 @@ class ESM3GuidedDecodingWithConstraints(ESM3GuidedDecoding):
 
                 if isinstance(results, Exception):
                     raise results
-                samples, rewards, gh_lists, val_lists = zip(*results)  # type: ignore
+                samples, rewards, gh_lists, val_lists = zip(*results)
             else:
                 samples, rewards, gh_lists, val_lists = [], [], [], []
                 for _ in range(num_samples_per_step):

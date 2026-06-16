@@ -25,6 +25,7 @@ from biotite.structure.io.pdbx import (
 
 from esm.utils import residue_constants
 from esm.utils.structure.metrics import compute_lddt, compute_rmsd
+from esm.utils.structure.mmcif_parsing import PLDDT_B_FACTOR_SCALE, round_mmcif_columns
 from esm.utils.structure.protein_complex import ProteinComplex, ProteinComplexMetadata
 
 
@@ -489,7 +490,7 @@ class MolecularComplex:
                 _raw = (
                     _col.as_array(str)
                     if hasattr(_col, "as_array")
-                    else np.array(list(_col), dtype=str)  # type: ignore[arg-type]
+                    else np.array(list(_col), dtype=str)
                 )
                 # biotite's get_structure(model=1) filters to model 1 AND
                 # removes alternate conformations. We must apply the same
@@ -500,7 +501,7 @@ class MolecularComplex:
                     _models = (
                         _mc.as_array(str)
                         if hasattr(_mc, "as_array")
-                        else np.array(list(_mc), dtype=str)  # type: ignore[arg-type]
+                        else np.array(list(_mc), dtype=str)
                     )
                     keep &= _models == "1"
                 if "label_alt_id" in atom_site:
@@ -508,7 +509,7 @@ class MolecularComplex:
                     _alts = (
                         _ac.as_array(str)
                         if hasattr(_ac, "as_array")
-                        else np.array(list(_ac), dtype=str)  # type: ignore[arg-type]
+                        else np.array(list(_ac), dtype=str)
                     )
                     keep &= np.isin(_alts, [".", "?", "", "A"])
                 filtered = _raw[keep]
@@ -529,8 +530,8 @@ class MolecularComplex:
                         entity_types, "__iter__"
                     ):
                         # Type annotation to help pyright understand these are iterable
-                        entity_ids_list = list(entity_ids)  # type: ignore
-                        entity_types_list = list(entity_types)  # type: ignore
+                        entity_ids_list = list(entity_ids)
+                        entity_types_list = list(entity_types)
                         for eid, etype in zip(entity_ids_list, entity_types_list):
                             entity_info[eid] = etype
         except Exception:
@@ -634,7 +635,7 @@ class MolecularComplex:
 
                 # Add confidence score (B-factor if available, otherwise 1.0)
                 bfactor = getattr(atoms[0], "b_factor", 50.0) if atoms else 50.0
-                confidence_scores.append(min(bfactor / 100.0, 1.0))
+                confidence_scores.append(min(bfactor / PLDDT_B_FACTOR_SCALE, 1.0))
 
         # Convert to numpy arrays
         if not flat_positions:
@@ -783,6 +784,111 @@ class MolecularComplex:
                 },
             )
 
+        # Add _entity_poly + _entity_poly_seq (SEQRES) for OST chain-grouping.
+        # Without these, OST's ligand scorer aborts with "Extracting chem grouping
+        # from mmCIF file requires all SEQRES information set" on every polymer
+        # chain — this is what cost us ~1234 runs_n_poses targets in the first
+        # OST pass. Iterate the polymer entities; one ``_entity_poly`` row per
+        # entity, one ``_entity_poly_seq`` row per residue.
+        entity_to_chains: dict[int, list[str]] = {}
+        for chain_id, eid in chain_to_entity.items():
+            entity_to_chains.setdefault(eid, []).append(chain_id)
+
+        ep_eids: list[str] = []
+        ep_types: list[str] = []
+        ep_strand_ids: list[str] = []
+        ep_seq_codes: list[str] = []  # one-letter where possible, else (XXX)
+        eps_eids: list[str] = []
+        eps_nums: list[str] = []
+        eps_mons: list[str] = []
+        eps_het: list[str] = []
+
+        for eid in sorted(entity_sequences.keys()):
+            seq = entity_sequences[eid]
+            has_protein = any(t in residue_constants.restype_3to1 for t in seq)
+            has_na = any(
+                t in ("A", "T", "G", "C", "U", "DA", "DT", "DG", "DC") for t in seq
+            )
+            if not (has_protein or has_na):
+                continue  # non-polymer entity, OST doesn't need SEQRES
+
+            if has_protein:
+                # Detect L-peptide vs D — OF3 only outputs L for now.
+                ep_types.append("polypeptide(L)")
+                one_letter = "".join(
+                    residue_constants.restype_3to1.get(t, "(X)") for t in seq
+                )
+            else:
+                # Distinguish DNA vs RNA by presence of "U" or "T".
+                if any(t in ("U",) for t in seq):
+                    ep_types.append("polyribonucleotide")
+                elif any(t in ("DA", "DT", "DG", "DC") for t in seq):
+                    ep_types.append("polydeoxyribonucleotide")
+                else:
+                    ep_types.append("polyribonucleotide")
+                one_letter = "".join(
+                    "T"
+                    if t == "DT"
+                    else "A"
+                    if t == "DA"
+                    else "G"
+                    if t == "DG"
+                    else "C"
+                    if t == "DC"
+                    else t
+                    for t in seq
+                )
+
+            ep_eids.append(str(eid))
+            chains = sorted(entity_to_chains.get(eid, []))
+            ep_strand_ids.append(",".join(chains) if chains else "?")
+            ep_seq_codes.append(one_letter)
+
+            for num, t in enumerate(seq, start=1):
+                eps_eids.append(str(eid))
+                eps_nums.append(str(num))
+                # ``_entity_poly_seq.mon_id`` is the 3-letter (or CCD) code.
+                # Non-canonical residues come through as the raw token already.
+                eps_mons.append(t)
+                eps_het.append("n")
+
+        if ep_eids:
+            cif_file.block["entity_poly"] = CIFCategory(
+                name="entity_poly",
+                columns={
+                    "entity_id": CIFColumn(
+                        data=CIFData(array=np.array(ep_eids), dtype=np.str_)
+                    ),
+                    "type": CIFColumn(
+                        data=CIFData(array=np.array(ep_types), dtype=np.str_)
+                    ),
+                    "pdbx_strand_id": CIFColumn(
+                        data=CIFData(array=np.array(ep_strand_ids), dtype=np.str_)
+                    ),
+                    "pdbx_seq_one_letter_code_can": CIFColumn(
+                        data=CIFData(array=np.array(ep_seq_codes), dtype=np.str_)
+                    ),
+                },
+            )
+        if eps_eids:
+            cif_file.block["entity_poly_seq"] = CIFCategory(
+                name="entity_poly_seq",
+                columns={
+                    "entity_id": CIFColumn(
+                        data=CIFData(array=np.array(eps_eids), dtype=np.str_)
+                    ),
+                    "num": CIFColumn(
+                        data=CIFData(array=np.array(eps_nums), dtype=np.str_)
+                    ),
+                    "mon_id": CIFColumn(
+                        data=CIFData(array=np.array(eps_mons), dtype=np.str_)
+                    ),
+                    "hetero": CIFColumn(
+                        data=CIFData(array=np.array(eps_het), dtype=np.str_)
+                    ),
+                },
+            )
+
     def to_mmcif(self) -> str:
         """Write MolecularComplex to mmcif string using biotite.
 
@@ -841,10 +947,10 @@ class MolecularComplex:
                 names = standard_names[: end - start]
                 # Pad if needed
                 while len(names) < (end - start):
-                    names.append(f"X{len(names)+1}")
+                    names.append(f"X{len(names) + 1}")
             else:
                 # Fallback: generate names for ligands/nucleic acids
-                names = [f"C{i+1}" for i in range(end - start)]
+                names = [f"C{i + 1}" for i in range(end - start)]
 
             # Vectorized assignment for this token's atoms
             atom_res_ids[start:end] = res_id
@@ -855,7 +961,7 @@ class MolecularComplex:
                 atom_hetero[start:end] = self.atom_hetero[start:end]
             else:
                 atom_hetero[start:end] = not is_protein
-            atom_bfactors[start:end] = self.plddt[token_idx] * 100.0
+            atom_bfactors[start:end] = self.plddt[token_idx] * PLDDT_B_FACTOR_SCALE
             atom_names[start:end] = names
             atom_entity_ids[start:end] = chain_to_entity.get(chain_id_str, 1)
 
@@ -870,6 +976,10 @@ class MolecularComplex:
         atom_array.atom_name = np.array(atom_names, dtype="U4")
         atom_array.add_annotation("b_factor", dtype=float)
         atom_array.b_factor = atom_bfactors
+        atom_array.add_annotation("occupancy", dtype=float)
+        atom_array.occupancy = np.ones(
+            n_atoms, dtype=np.float32
+        )  # Necessary for BioPython MMCIFParser
         atom_array.add_annotation("entity_id", dtype=int)
         atom_array.entity_id = atom_entity_ids
 
@@ -893,7 +1003,7 @@ class MolecularComplex:
                 if hasattr(label_asym_ids, "as_array"):
                     chain_ids_list = label_asym_ids.as_array(str).tolist()
                 elif hasattr(label_asym_ids, "__iter__"):
-                    chain_ids_list = list(label_asym_ids)  # type: ignore[arg-type]
+                    chain_ids_list = list(label_asym_ids)
                 else:
                     chain_ids_list = []
                 updated_entity_ids = [
@@ -906,6 +1016,10 @@ class MolecularComplex:
 
         # Add _entity category for OST compatibility
         self._add_entity_information(cif_file, entity_sequences)
+
+        # biotite echoes unmasked float columns at full precision
+        # so we round every float column to conventional mmCIF precision
+        round_mmcif_columns(cif_file)
 
         # Convert to string
         output = io.StringIO()

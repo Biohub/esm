@@ -9,7 +9,7 @@
 """
 Code for binder design with ESMFold2 and ESMC.
 
-As described in [Language Modeling Materializes a World Model of Protein Biology](https://biohub.ai/papers/esm_protein.pdf).
+As described in [Language Modeling Materializes a World Model of Protein Biology](https://www.biorxiv.org/content/10.64898/2026.06.03.729735).
 """
 
 import logging
@@ -1051,7 +1051,7 @@ def _apply_torch_compile(model: torch.nn.Module) -> None:
     def _maybe_compile_module(module: torch.nn.Module) -> None:
         if not isinstance(module, compile_targets):
             return
-        module.forward = torch.compile(module.forward)  # pyright: ignore
+        module.forward = torch.compile(module.forward)  # ty:ignore[invalid-assignment]
 
     model.apply(_maybe_compile_module)
 
@@ -1206,7 +1206,9 @@ def main(
         app.load(use_scaling_critics)
         run_fn = app.design
     else:
-        app = ESMFold2DesignModal(use_scaling_critics=use_scaling_critics)
+        app = ESMFold2DesignModal(
+            use_scaling_critics=use_scaling_critics  # ty:ignore[unknown-argument]
+        )
         run_fn = app.design.remote
 
     seq, trajectory, results = run_fn(

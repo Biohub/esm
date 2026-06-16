@@ -320,20 +320,38 @@ class ESMProteinError(Exception, ProteinType):
 ## High Level Endpoint Types
 @define
 class GenerationConfig:
+    """
+    track (str): Track to generate: sequence, structure, secondary_structure, sasa,
+        or function.
+    invalid_ids (Sequence[int]): Token indices that should not be sampled.
+    schedule (str): Unmasking schedule for generation. Controls the number of tokens
+        to unmask during each round of iterative generation.
+    strategy (str): Unmasking strategy to use. Controls which tokens to unmask
+        during each round of iterative generation. 'random' will unmask a correct
+        number of tokens randomly. 'entropy' will unmask the tokens with the lowest
+        logit entropy first. Default was random. Updated on 02/14/2025.
+    num_steps (int): Number of steps for generation. There is diminishing return for
+        decoding steps more than 20. Note that this needs to be less than or equal
+        to the sequence length. Default was 8. Updated on 02/14/2025.
+    temperature (float): Temperature for sampling. Default was 1.0. Updated on
+        02/14/2025.
+    temperature_annealing (bool): Whether temperature should be annealed during
+        generation. Default was False. Updated on 02/14/2025.
+    top_p (float): Top-p sampling.
+    condition_on_coordinates_only (bool): Use coordinates instead of structure
+        tokens as generation conditioning.
+    only_compute_backbone_rmsd (bool): Only compute the RMSD of the backbone atoms.
+        Affects the returned crmsd.
+    """
+
     track: str = ""
     invalid_ids: Sequence[int] = []
-    # Controls the number of tokens to unmask during each round of iterative generation.
     schedule: str = attr.field(
         validator=attr.validators.in_(["cosine", "linear"]), default="cosine"
     )
-    # Controls which tokens to unmask during each round of iterative generation.
-    # "random" will unmask a correct number of tokens randomly.
-    # "entropy" will unmask the tokens with the lowest logit entropy first.
     strategy: str = attr.field(
         validator=attr.validators.in_(["random", "entropy"]), default="random"
     )
-    # Setting default to 20, as there is diminishing return for decoding steps more than 20.
-    # Note that this needs to be less than or equal to the sequence length.
     num_steps: int = 20
     temperature: float = 1.0
     temperature_annealing: bool = True
@@ -356,21 +374,50 @@ class GenerationConfig:
 
 @define
 class InverseFoldingConfig:
+    """
+    invalid_ids (Sequence[int]): Token indices that should not be sampled.
+    temperature (float): Temperature for sampling. For inverse folding models, we
+        recommend getting diverse predictions by changing the seed and not by
+        increasing the temperature.
+    """
+
     invalid_ids: Sequence[int] = []
     temperature: float = 0.1
 
 
 @define
 class FoldingConfig:
+    """
+    include_distogram (bool): (ESMFold2) Whether to include distogram predictions in
+        the response.
+    include_pae (bool): (ESMFold2) Whether to include Predicted Aligned Error (PAE)
+        matrix in the response.
+    include_pair_chains_iptm (bool): (ESMFold2) Whether to include pair-chain IPTM
+        predictions in the response.
+    num_sampling_steps (int): (ESMFold2) Diffusion ODE solver steps. Lower for
+        speed, higher for quality.
+    num_loops (int): (ESMFold2) Number of trunk loops for iterative refinement.
+    lm_dropout (float): (ESMFold2) Dropout probability on LM pair embeddings. When >
+        0, dropout is applied.
+    lm_mask_pct (float | None): (ESMFold2) Fraction of sequence residues randomly
+        masked before the PLM backbone. If not provided, defaults to 0.1 for
+        ESMFOLD2_FAST and 0.0 for ESMFOLD2
+    msa_max_depth (int | None): (ESMFold2) Number of MSA rows randomly subsampled
+        each loop. Set to null to disable (sets msa_subsample_at_inference to
+        False).
+    msa_column_mask_rate (float): (ESMFold2) Fraction of MSA columns randomly masked
+        in non-query rows for inference-time diversity.
+    include_embeddings (bool): (ESMFold2) Whether to include sequence and pair
+        embeddings in the response.
+    """
+
     include_distogram: bool = False
     include_pae: bool = False
     include_pair_chains_iptm: bool = False
     num_sampling_steps: int = 100
     num_loops: int = 20
     lm_dropout: float = 0.3
-    lm_mask_pct: float | None = (
-        None  # If not provided, defaults to 0.1 for ESMFOLD2_FAST and 0.0 for ESMFOLD2
-    )
+    lm_mask_pct: float | None = None
     msa_max_depth: int | None = 1024
     msa_column_mask_rate: float = 0.1
     include_embeddings: bool = False
@@ -379,6 +426,14 @@ class FoldingConfig:
 ## Low Level Endpoint Types
 @define
 class SamplingTrackConfig:
+    """
+    temperature (float): Temperature for sampling.
+    top_p (float): Sample from logits within the top-p probability.
+    only_sample_masked_tokens (bool): Only sample for masked tokens.
+    invalid_ids (Sequence[int]): Token indices that should not be sampled.
+    topk_logprobs (int): Number of top ranking prediction and logprobs to return.
+    """
+
     temperature: float = 1.0
     top_p: float = 1.0
     only_sample_masked_tokens: bool = True
@@ -388,6 +443,21 @@ class SamplingTrackConfig:
 
 @define
 class SamplingConfig:
+    """
+    sequence (SamplingTrackConfig | None): Sampling configuration for the sequence
+        track.
+    structure (SamplingTrackConfig | None): Sampling configuration for the structure
+        track.
+    secondary_structure (SamplingTrackConfig | None): Sampling configuration for the
+        secondary structure track.
+    sasa (SamplingTrackConfig | None): Sampling configuration for the SASA track.
+    function (SamplingTrackConfig | None): Sampling configuration for the function
+        annotation track.
+    return_per_residue_embeddings (bool): Whether to return per-residue embeddings.
+    return_mean_embedding (bool): Whether to return the embedding mean-pooled over
+        the sequence length.
+    """
+
     sequence: SamplingTrackConfig | None = attr.field(
         default=None, metadata={"max_topk": C.MAX_TOPK_SEQUENCE}
     )
@@ -410,6 +480,14 @@ class SamplingConfig:
 
 @define
 class ForwardTrackData:
+    """
+    sequence (torch.Tensor | None): Sequence track logits.
+    structure (torch.Tensor | None): Structure track logits.
+    secondary_structure (torch.Tensor | None): Secondary structure track logits.
+    sasa (torch.Tensor | None): Solvent accessible surface area (SASA) track logits.
+    function (torch.Tensor | None): Function annotations logits.
+    """
+
     sequence: torch.Tensor | None = None
     structure: torch.Tensor | None = None
     secondary_structure: torch.Tensor | None = None
@@ -419,6 +497,39 @@ class ForwardTrackData:
 
 @define
 class LogitsConfig:
+    """
+    sequence (bool): Return sequence logits.
+    structure (bool): Return structure logits.
+    secondary_structure (bool): Return secondary structure logits.
+    sasa (bool): Return sasa logits.
+    function (bool): Return function logits.
+    residue_annotations (bool): Return residue annotations logits.
+    return_embeddings (bool): Whether embeddings should be returned.
+    return_hidden_states (bool): Whether to return per-residue hidden states. With
+        ith_hidden_layer=-1, returns all layers as a tensor of shape [n_layers + 1,
+        B, L, D]. With ith_hidden_layer!= -1, returns the selected layer as a tensor
+        of shape [1, B, L, D].
+    return_mean_embedding (bool): Whether mean embeddings should be returned.
+    return_mean_hidden_states (bool): Whether hidden states mean-pooled along the
+        sequence length (L) dimension should be returned. Returns a tensor of shape
+        [B, n_layers + 1, D].
+    ith_hidden_layer (int): Valid values for ith_hidden_layer are 0 to
+        max_ith_hidden_layer (inclusive), where index 0 is the embedding layer. -1
+        returns all layers, but is not supported for ESMC 6B or any ESM3 model. Here
+        is the max_ith_hidden_layer for each ESMC and ESM3 model (except ESM3
+        Large).
+        | Model Name                    | max_ith_hidden_layer           |
+        |-------------------------------|--------------------------------|
+        | esmc-300-2024-12              | 30                             |
+        | esmc-600-2024-12              | 36                             |
+        | esmc-6b-2024-12               | 80                             |
+        | esm3-small-2024-03            | 48                             |
+        | esm3-small-2024-08            | 48                             |
+        | esm3-medium-2024-03           | 96                             |
+        | esm3-medium-2024-08           | 96                             |
+    sae_config (SAEConfig | None): SAE config. Only applies to ESMC models.
+    """
+
     # Logits.
     sequence: bool = False
 
@@ -439,15 +550,22 @@ class LogitsConfig:
     return_mean_hidden_states: bool = False
     ith_hidden_layer: int = -1
 
-    # SAE config only applies to ESMC models
     sae_config: SAEConfig | None = None
 
 
 @define
 class SAEConfig:
+    """
+    models (list[str]): List of SAE models with specific layer and codebook size.
+    normalize_features (bool): Normalize computed features before return. Default to
+        True.
+    model (str | None): Deprecated, use 'models' instead. SAE model with specific
+        layer and codebook size.
+    """
+
     models: list[str] = attr.Factory(list)
     normalize_features: bool = True
-    model: str | None = None  # deprecated, use models
+    model: str | None = None
 
     def __attrs_post_init__(self):
         if self.model is not None:
@@ -474,6 +592,24 @@ class SAEConfig:
 
 @define
 class LogitsOutput:
+    """
+    logits (ForwardTrackData | None): Per-track categorical logits, populated for each
+        track requested via LogitsConfig.
+    embeddings (torch.Tensor | None): Per-residue embeddings (final hidden state).
+        Returned when LogitsConfig.return_embeddings is set.
+    mean_embedding (torch.Tensor | None): Embedding mean-pooled over the sequence
+        length. Returned when LogitsConfig.return_mean_embedding is set.
+    residue_annotation_logits (torch.Tensor | None): Residue annotation logits. These
+        are multi-hot (bernoulli), so they are kept separate from `logits` (which holds
+        categorical per-track logits).
+    hidden_states (torch.Tensor | None): Hidden states for the requested layer(s).
+        Returned when LogitsConfig.return_hidden_states is set.
+    mean_hidden_state (torch.Tensor | None): Hidden states mean-pooled over the
+        sequence length. Returned when LogitsConfig.return_mean_hidden_states is set.
+    sae_outputs (dict[str, torch.Tensor] | None): SAE activations keyed by SAE model
+        name. Returned when LogitsConfig.sae_config is set.
+    """
+
     logits: ForwardTrackData | None = None
     embeddings: torch.Tensor | None = None
     mean_embedding: torch.Tensor | None = None
@@ -484,22 +620,38 @@ class LogitsOutput:
     residue_annotation_logits: torch.Tensor | None = None
     hidden_states: torch.Tensor | None = None
     mean_hidden_state: torch.Tensor | None = None
-    # sae_outputs keys are sae model names and values are sparse representations of the sae activations
     sae_outputs: dict[str, torch.Tensor] | None = None
 
 
 @define
 class ForwardAndSampleOutput(LogitsOutput):
+    """Output of forward_and_sample. Extends LogitsOutput with the sampled tokens and
+    per-position sampling statistics (each ForwardTrackData holds one value per track).
+
+    protein_tensor (ESMProteinTensor): The sampled tokens.
+    entropy (ForwardTrackData | None): Per-position entropy of the predicted
+        distribution, per track.
+    prob (ForwardTrackData | None): Probability of the sampled token at each position.
+    logprob (ForwardTrackData | None): Log-probability of the sampled token at each
+        position.
+    top_prob (ForwardTrackData | None): Highest token probability at each position.
+    topk_logprob (ForwardTrackData | None): Log-probabilities of the top-k tokens at
+        each position. Populated when PerTrackSamplingConfig.topk_logprobs is set.
+    topk_tokens (ForwardTrackData | None): Token ids of the top-k tokens at each
+        position. Populated when PerTrackSamplingConfig.topk_logprobs is set.
+    per_residue_embedding (torch.Tensor | None): Per-residue embeddings. Returned when
+        SamplingConfig.return_per_residue_embeddings is set.
+    mean_embedding (torch.Tensor | None): Embedding mean-pooled over the sequence
+        length. Returned when SamplingConfig.return_mean_embedding is set.
+    """
+
     protein_tensor: ESMProteinTensor = ESMProteinTensor()
 
     entropy: ForwardTrackData | None = None
-    # Probability of sampled token
     prob: ForwardTrackData | None = None
     logprob: ForwardTrackData | None = None
-    # Top probability at this position
     top_prob: ForwardTrackData | None = None
     topk_logprob: ForwardTrackData | None = None
-    # Which tokens correspond to top probability
     topk_tokens: ForwardTrackData | None = None
     per_residue_embedding: torch.Tensor | None = None
     mean_embedding: torch.Tensor | None = None

@@ -45,7 +45,7 @@ class EsmSequenceTokenizer(PreTrainedTokenizerFast, EsmTokenizerBase):
         # This is where we configure the automatic addition of special tokens when we call
         # tokenizer(text, add_special_tokens=True). Note that you can also configure how two
         # sequences are merged if you want.
-        tokenizer.post_processor = TemplateProcessing(  # type: ignore
+        tokenizer.post_processor = TemplateProcessing(
             single="<cls> $A <eos>",
             special_tokens=[
                 ("<cls>", tokenizer.token_to_id("<cls>")),

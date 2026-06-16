@@ -52,10 +52,10 @@ def get_esmc_model_tokenizers() -> EsmSequenceTokenizer:
 def get_invalid_tokenizer_ids(tokenizer: EsmTokenizerBase) -> list[int]:
     if isinstance(tokenizer, EsmSequenceTokenizer):
         return [
-            tokenizer.mask_token_id,  # type: ignore
-            tokenizer.pad_token_id,  # type: ignore
-            tokenizer.cls_token_id,  # type: ignore
-            tokenizer.eos_token_id,  # type: ignore
+            tokenizer.mask_token_id,
+            tokenizer.pad_token_id,
+            tokenizer.cls_token_id,
+            tokenizer.eos_token_id,
         ]
     else:
         return [

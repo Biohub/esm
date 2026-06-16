@@ -8,9 +8,9 @@ from torch import nn
 from esm.layers.rotary import RotaryEmbedding, TritonRotaryEmbedding
 
 try:
-    from flash_attn import flash_attn_varlen_qkvpacked_func  # type: ignore
+    from flash_attn import flash_attn_varlen_qkvpacked_func
 except (ImportError, RuntimeError):
-    flash_attn_varlen_qkvpacked_func = None
+    flash_attn_varlen_qkvpacked_func = None  # ty:ignore[invalid-assignment]
 
 
 class MultiHeadAttention(nn.Module):
@@ -135,7 +135,8 @@ class FlashMultiHeadAttention(MultiHeadAttention):
         )
         qkv_N3HD = self.rotary(qkv_N3HD, cu_seqlens, max_seqlen)
 
-        context_NHD = flash_attn_varlen_qkvpacked_func(  # type: ignore
+        assert flash_attn_varlen_qkvpacked_func is not None
+        context_NHD = flash_attn_varlen_qkvpacked_func(
             qkv_N3HD, cu_seqlens, max_seqlen, softmax_scale=self.d_head**-0.5
         )
         context_ND = einops.rearrange(context_NHD, "n h d -> n (h d)")

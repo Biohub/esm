@@ -68,7 +68,7 @@ def slice_python_object_as_numpy(
         case _:
             sliced_obj = obj.__class__(sliced_obj)  # type: ignore
 
-    return sliced_obj  # type: ignore
+    return sliced_obj
 
 
 def slice_any_object(
@@ -265,7 +265,7 @@ def unbinpack(
     return stack_variable_length_tensors(unpacked_tensors, pad_value)
 
 
-def fp32_autocast_context(device_type: str) -> ContextManager[Any]:  # type: ignore
+def fp32_autocast_context(device_type: str) -> ContextManager[Any]:
     """
     Returns an autocast context manager that disables downcasting by AMP.
 
@@ -276,12 +276,12 @@ def fp32_autocast_context(device_type: str) -> ContextManager[Any]:  # type: ign
         An autocast context manager with the specified behavior.
     """
     if device_type == "cpu":
-        return torch.amp.autocast(device_type, enabled=False)  # type: ignore
+        return torch.amp.autocast(device_type, enabled=False)
     elif device_type == "mps":
         # For MPS, just return a no-op context manager (nullcontext) since MPS does not support autocast.
         return nullcontext()
     elif device_type == "cuda":
-        return torch.amp.autocast(device_type, dtype=torch.float32)  # type: ignore
+        return torch.amp.autocast(device_type, dtype=torch.float32)
     else:
         raise ValueError(f"Unsupported device type: {device_type}")
 
@@ -475,7 +475,7 @@ def concat_objects(objs: Sequence[Any], separator: Any | None = None):
     """
     match objs[0]:
         case Concatable():
-            return objs[0].__class__.concat(objs)  # type: ignore
+            return objs[0].__class__.concat(objs)
         case str():
             assert isinstance(
                 separator, str

@@ -13,43 +13,49 @@ from esm.utils.misc import fp32_autocast_context
 
 class Rotation(ABC):
     @classmethod
-    def identity(cls, shape: tuple[int, ...], **tensor_kwargs) -> Self: ...
+    def identity(
+        cls, shape: tuple[int, ...], **tensor_kwargs
+    ) -> Self: ...  # ty:ignore[empty-body]
 
     @classmethod
-    def random(cls, shape: tuple[int, ...], **tensor_kwargs) -> Self: ...
+    def random(
+        cls, shape: tuple[int, ...], **tensor_kwargs
+    ) -> Self: ...  # ty:ignore[empty-body]
 
-    def __getitem__(self, idx: T.Any) -> Self: ...
+    def __getitem__(self, idx: T.Any) -> Self: ...  # ty:ignore[empty-body]
 
     @property
-    def tensor(self) -> torch.Tensor:
+    def tensor(self) -> torch.Tensor:  # ty:ignore[empty-body]
         # We claim that this should be zero-cost abstraction that returns the raw tensor backing this
         # object. The raw tensor should always have exactly 1 more dim than self.shape, which should be
         # implemented using reshaping
         ...
 
     @property
-    def shape(self) -> torch.Size:
+    def shape(self) -> torch.Size:  # ty:ignore[empty-body]
         # The "shape" of the rotation, as if it was a torch.tensor object
         # This means that 1x4 quaternions are treated as size (1,) for example
         ...
 
-    def as_matrix(self) -> RotationMatrix: ...
+    def as_matrix(self) -> RotationMatrix: ...  # ty:ignore[empty-body]
 
-    def as_quat(self, normalize: bool = False) -> RotationQuat: ...
+    def as_quat(
+        self, normalize: bool = False
+    ) -> RotationQuat: ...  # ty:ignore[empty-body]
 
-    def compose(self, other: Self) -> Self:
+    def compose(self, other: Self) -> Self:  # ty:ignore[empty-body]
         # To be safe, we force users to explicitly convert between rotation types.
         ...
 
-    def convert_compose(self, other: Self) -> Self:
+    def convert_compose(self, other: Self) -> Self:  # ty:ignore[empty-body]
         # This function will automatically convert between types of rotations
         ...
 
-    def apply(self, p: torch.Tensor) -> torch.Tensor:
+    def apply(self, p: torch.Tensor) -> torch.Tensor:  # ty:ignore[empty-body]
         # rotates points by this rotation object
         ...
 
-    def invert(self) -> Self: ...
+    def invert(self) -> Self: ...  # ty:ignore[empty-body]
 
     @property
     def dtype(self) -> torch.dtype:
@@ -292,7 +298,8 @@ class Affine3D:
             kwargs = tensor_kwargs
             shape = shape_or_affine
         return Affine3D(
-            torch.zeros((*shape, 3), **kwargs), rotation_type.identity(shape, **kwargs)
+            torch.zeros((*shape, 3), **kwargs),  # ty:ignore[no-matching-overload]
+            rotation_type.identity(shape, **kwargs),
         )
 
     @staticmethod
@@ -406,7 +413,7 @@ class Affine3D:
                 rot = RotationMatrix(t[..., :-3].unflatten(-1, (3, 3)))
             case _:
                 raise RuntimeError(
-                    f"Cannot detect rotation fromat from {t.shape[-1] -3}-d flat vector"
+                    f"Cannot detect rotation fromat from {t.shape[-1] - 3}-d flat vector"
                 )
         return Affine3D(trans, rot)
 
