@@ -17,8 +17,9 @@ import math
 import os
 import random
 import string
+import time
 from dataclasses import dataclass
-from functools import cache, partial
+from functools import cache
 from typing import Any
 
 import biotite.structure
@@ -27,15 +28,7 @@ import numpy as np
 import torch
 import torch.nn.functional as F
 import torch.optim as optim
-from torch.distributed.algorithms._checkpoint.checkpoint_wrapper import (
-    CheckpointImpl,
-    apply_activation_checkpointing,
-    checkpoint_wrapper,
-)
 from transformers.models.esmc.modeling_esmc import ESMCForMaskedLM
-from transformers.models.esmc.modeling_esmc import (
-    UnifiedTransformerBlock as TransformerBlock,
-)
 from transformers.models.esmc.tokenization_esmc import ESMCTokenizer
 from transformers.models.esmfold2.modeling_esmfold2_common import (
     CUE_AVAILABLE,
@@ -64,6 +57,7 @@ from esm.models.esmfold2.constants import (
     PROTEIN_3TO1,
     RES_TYPE_TO_CCD,
 )
+from esm.utils.structure.mmcif_parsing import PLDDT_B_FACTOR_SCALE
 from esm.utils.structure.protein_chain import ProteinChain
 from esm.utils.structure.protein_complex import ProteinComplex
 
@@ -71,6 +65,9 @@ os.environ["HF_XET_HIGH_PERFORMANCE"] = "1"
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s: %(message)s")
 logger = logging.getLogger(__name__)
 logger.setLevel(logging.INFO)
+
+TrajectoryStep = dict[str, torch.Tensor | float]
+Trajectory = dict[int, TrajectoryStep]
 
 
 # ---- Constants ----
@@ -97,13 +94,15 @@ LOG_INTERVAL = 5
 LEARNING_RATE = 0.1
 TEMPERATURE_MIN = 1e-2
 ESMC_MASK_FRACTION = 0.15
-CHECKPOINT_LM = False
-COMPILE = False
+LM_LOSS_BATCH_SIZE = 128
+LM_MASK_PASSES = 4
+BYTES_PER_GIB = 1024**3
+COMPILE = True
 # NOTE - This significantly reduces VRAM usage.
-# On config (target_name=cd45", binder_name="trastuzumab_framework_vhvl, batch_size=1)
+# On config (target_name="cd45", binder_name="trastuzumab_framework_vhvl", batch_size=1)
 # this reduces VRAM from 51GB -> 27GB.  And enables increasing batch size up to 6.
 # We are testing this setting in silico, and may change the default to True, in the future.
-REUSE_ESMC = False
+REUSE_ESMC = True
 
 
 # ---- Prompts ----
@@ -384,6 +383,20 @@ def _entropy_to_confidence(mean_entropy: float) -> float:
     return float(max(0.0, min(1.0, 1.0 - mean_entropy / math.log(51))))
 
 
+def _is_antibody_sequence(binder_sequence: str) -> bool:
+    """Return True if ANARCI recognizes binder_sequence as antibody variable domain(s)."""
+    from abnumber.common import _anarci_align
+
+    sequence = binder_sequence.replace(MUTABLE_TOKEN, "A")
+    result = _anarci_align(
+        sequences=[sequence], scheme="chothia", allowed_species=None
+    )[0]
+    if not result:
+        return False
+    valid_chain_types = {"H", "K", "L"}
+    return all(chain_type in valid_chain_types for _, chain_type, *_ in result)
+
+
 def _cdr_indices(binder_sequence: str) -> list[int]:
     """0-based binder indices for all Chothia CDRs."""
     from abnumber import Chain
@@ -646,6 +659,9 @@ def build_complex(
     inputs: dict[str, torch.Tensor], output: dict[str, Any]
 ) -> ProteinComplex:
     """Build ProteinComplex from model output."""
+    plddt_per_atom = output.get("plddt_per_atom")
+    if plddt_per_atom is not None:
+        plddt_per_atom = plddt_per_atom[0].cpu().numpy() * PLDDT_B_FACTOR_SCALE
     atom_arr = to_atom_array(
         coords=output["sample_atom_coords"][0].cpu().numpy(),
         atom_to_token=inputs["atom_to_token"][0].cpu().numpy(),
@@ -656,9 +672,13 @@ def build_complex(
         ref_atom_name_chars=inputs["ref_atom_name_chars"][0].cpu().numpy(),
         ref_element=inputs["ref_element"][0].cpu().numpy(),
         atom_attention_mask=inputs["atom_attention_mask"][0].cpu().numpy(),
+        plddt_per_atom=plddt_per_atom,
     )
     return ProteinComplex.from_chains(
-        [ProteinChain.from_atomarray(a) for a in biotite.structure.chain_iter(atom_arr)]
+        [
+            ProteinChain.from_atomarray(a, is_predicted=True)
+            for a in biotite.structure.chain_iter(atom_arr)
+        ]
     )
 
 
@@ -714,8 +734,8 @@ def compute_esmc_pseudoperplexity_nll(
         device=device,
     )
     tokenizer = ESMCTokenizer()
-    input_ids[:, 0, tokenizer.cls_token_id] = 1
-    input_ids[:, -1, tokenizer.eos_token_id] = 1
+    input_ids[:, 0, tokenizer.cls_token_id] = 1  # pyright: ignore
+    input_ids[:, -1, tokenizer.eos_token_id] = 1  # pyright: ignore
     input_ids[:, 1:-1, 4:24] = input_esm.to(model_dtype)
 
     if score_mask.ndim == 1:
@@ -731,7 +751,8 @@ def compute_esmc_pseudoperplexity_nll(
     mask_token[esmc_model.config.mask_token_id] = 1
     esmc = esmc_model.esmc
 
-    losses = []
+    all_masked_sequences = []
+    all_pass_masks = []
     for batch_idx in range(binder_design.size(0)):
         position_indices = score_mask[batch_idx].nonzero(as_tuple=False).flatten()
         num_positions = int(position_indices.numel())
@@ -755,28 +776,35 @@ def compute_esmc_pseudoperplexity_nll(
         mask_rows, mask_cols = pass_masks.nonzero(as_tuple=True)
         masked_sequences[mask_rows, mask_cols + 1] = mask_token
 
-        target_weights = target_esm[batch_idx]
-        masked_nlls = []
-        for start in range(0, n_passes, batch_size):
-            stop = min(start + batch_size, n_passes)
-            chunk = masked_sequences[start:stop]
-            with torch.autocast(
-                device_type="cuda", dtype=torch.bfloat16, enabled=device.type == "cuda"
-            ):
-                hidden, *_ = esmc.transformer(
-                    chunk @ esmc.embed.weight.to(chunk.dtype),
-                    sequence_id=None,
-                    layers_to_collect=[],
-                    output_attentions=False,
-                )
-                logits = esmc_model.lm_head(hidden)
-            log_probs = logits.log_softmax(dim=-1)[:, 1:-1, 4:24]
-            nlls = -(log_probs * target_weights.to(log_probs.dtype).unsqueeze(0)).sum(
-                dim=-1
-            )
-            masked_nlls.append(nlls[pass_masks[start:stop]])
+        all_masked_sequences.append(masked_sequences)
+        all_pass_masks.append(pass_masks)
 
-        losses.append(torch.cat(masked_nlls, dim=0).mean())
+    logit_chunks = []
+    masked_sequence_rows = torch.cat(all_masked_sequences, dim=0)
+    for start in range(0, masked_sequence_rows.size(0), batch_size):
+        chunk = masked_sequence_rows[start : start + batch_size]
+        with torch.autocast(
+            device_type="cuda", dtype=torch.bfloat16, enabled=device.type == "cuda"
+        ):
+            hidden, *_ = esmc.transformer(
+                chunk @ esmc.embed.weight.to(chunk.dtype),
+                sequence_id=None,
+                layers_to_collect=[],
+                output_attentions=False,
+            )
+            logit_chunks.append(esmc_model.lm_head(hidden))
+    logits = torch.cat(logit_chunks, dim=0)
+
+    losses = []
+    for batch_idx, pass_masks in enumerate(all_pass_masks):
+        start = batch_idx * n_passes
+        stop = start + n_passes
+        target_weights = target_esm[batch_idx]
+        log_probs = logits[start:stop].log_softmax(dim=-1)[:, 1:-1, 4:24]
+        nlls = -(log_probs * target_weights.to(log_probs.dtype).unsqueeze(0)).sum(
+            dim=-1
+        )
+        losses.append(nlls[pass_masks].mean())
 
     return torch.stack(losses, dim=0)
 
@@ -801,14 +829,14 @@ def design_binder(
     inversion_models: dict[str, ESMFold2ExperimentalModel],
     hf_critic_models: dict[str, ESMFold2ExperimentalModel],
     esmc_model: ESMCForMaskedLM,
-    target_name: str | None,
+    target_name: str,
     target_sequence: str | None,
-    binder_name: str | None,
+    binder_name: str,
     binder_sequence: str | None,
     is_antibody: bool | None,
     seed: int,
     batch_size: int = 1,
-) -> tuple[list[str], dict[int, dict[str, torch.Tensor]], list[dict]]:
+) -> tuple[list[str], Trajectory, list[dict]]:
     """
     Algorithm 11 Gradient-Guided Binder Sequence Optimization.
 
@@ -820,28 +848,25 @@ def design_binder(
     ``distogram_binding_confidence`` / ``cdr_distogram_binding_confidence`` come
     from the distogram in all cases.
     """
-    # Vet inputs
-    assert (target_name is None) ^ (
-        target_sequence is None
-    ), "Provide either target name or sequence."
-    assert (binder_name is None) ^ (
-        binder_sequence is None
-    ), "Provide either binder name or sequence."
-
     # Setup
     device = "cuda"
-    if target_name is not None:
+    if target_name in TARGET_SEQUENCES:
+        if target_sequence is not None:
+            raise ValueError(
+                f"{target_name!r} is a preset target; omit target_sequence."
+            )
         target_sequence = TARGET_SEQUENCES[target_name]
-    else:
-        assert target_sequence is not None
+    elif target_sequence is None:
+        raise ValueError(
+            f"{target_name!r} is not a preset target; provide target_sequence."
+        )
     target_one_hot = sequence_to_one_hot(target_sequence, device=device)
 
-    if binder_name is None:
-        assert binder_sequence is not None
-        # If no binder_name and is_antibody is not specified, assume False.
-        if is_antibody is None:
-            is_antibody = False
-    else:
+    if binder_name in BINDER_PROMPT_FACTORIES:
+        if binder_sequence is not None:
+            raise ValueError(
+                f"{binder_name!r} is a preset binder; omit binder_sequence."
+            )
         binder_prompt_factor = BINDER_PROMPT_FACTORIES[binder_name]
         if is_antibody is not None:
             assert (
@@ -849,6 +874,12 @@ def design_binder(
             ), "Conflict in is_antibody settings."
         is_antibody = binder_prompt_factor.is_antibody
         binder_sequence = binder_prompt_factor.sample(seed=seed)
+    elif binder_sequence is None:
+        raise ValueError(
+            f"{binder_name!r} is not a preset binder; provide binder_sequence."
+        )
+    elif is_antibody is None:
+        is_antibody = _is_antibody_sequence(binder_sequence)
 
     binder_length = len(binder_sequence)
 
@@ -864,8 +895,8 @@ def design_binder(
         )
         gradient_mask = build_gradient_mask(binder_sequence, batch_size=batch_size)
 
-    # step -> {loss_name: [B] tensor on CPU}
-    trajectory: dict[int, dict[str, torch.Tensor]] = {}
+    # step -> {loss_name: [B] tensor on CPU, metric_name: float}
+    trajectory: Trajectory = {}
     global_step = 0
 
     def run_step(
@@ -875,6 +906,8 @@ def design_binder(
         calculate_confidence: bool,
     ) -> tuple[torch.Tensor, list[str], list[float] | None]:
         nonlocal global_step
+        torch.cuda.reset_peak_memory_stats()
+        start = time.time()
         optimizer.zero_grad()
 
         random.seed(seed + global_step)
@@ -907,8 +940,8 @@ def design_binder(
                 esmc_model=esmc_model,
                 binder_design=design,
                 score_mask=score_mask,
-                batch_size=4,
-                n_passes=4,
+                batch_size=LM_LOSS_BATCH_SIZE,
+                n_passes=LM_MASK_PASSES,
             )
         plm_grad = torch.autograd.grad(plm_loss.mean(), logits)[0]
 
@@ -922,12 +955,20 @@ def design_binder(
         optimizer.step()
 
         step = global_step
-        step_losses = {k: v.detach().cpu() for k, v in losses.items()}
+        step_losses: TrajectoryStep = {k: v.detach().cpu() for k, v in losses.items()}
         step_losses["plm_loss"] = plm_loss.detach().cpu()
         step_losses["total_loss"] = (structure_loss + plm_loss).detach().cpu()
+        step_losses["time"] = time.time() - start
+        step_losses["peak_allocated_gib"] = (
+            torch.cuda.max_memory_allocated() / BYTES_PER_GIB
+        )
+        step_losses["peak_reserved_gib"] = (
+            torch.cuda.max_memory_reserved() / BYTES_PER_GIB
+        )
         trajectory[step] = step_losses
         loss_str = "  ".join(
-            f"{k}={v.mean().item():.4f}" for k, v in step_losses.items()
+            f"{k}={v.mean().item() if torch.is_tensor(v) else v:.4f}"
+            for k, v in step_losses.items()
         )
         if step % LOG_INTERVAL == 0:
             logger.info(f"  step {step:3d}  |  {loss_str}  T={temperature:.4f}")
@@ -959,6 +1000,8 @@ def design_binder(
     # Score
     critic_results: list[dict] = []
     target_length = len(target_sequence.replace("|", ""))
+    final_total_loss = trajectory[global_step - 1]["total_loss"]
+    assert isinstance(final_total_loss, torch.Tensor)
     for batch_idx in range(batch_size):
         best_seq = best_sequences[batch_idx]
         binder_seq = best_seq.split("|")[-1]
@@ -991,9 +1034,7 @@ def design_binder(
                     "batch_idx": batch_idx,
                     "designed_sequence": best_seq,
                     "complex": pred_complex,
-                    "final_loss": trajectory[global_step - 1]["total_loss"][
-                        batch_idx
-                    ].item(),
+                    "final_loss": final_total_loss[batch_idx].item(),
                     "iptm": iptm,
                     "logits": logits[batch_idx].detach().cpu(),
                     **iptm_proxy_scores,
@@ -1007,9 +1048,7 @@ def design_binder(
                     "is_antibody": is_antibody,
                     "batch_idx": batch_idx,
                     "designed_sequence": best_sequences[batch_idx],
-                    "final_loss": trajectory[global_step - 1]["total_loss"][
-                        batch_idx
-                    ].item(),
+                    "final_loss": final_total_loss[batch_idx].item(),
                     "logits": logits[batch_idx].detach().cpu(),
                 }
             )
@@ -1019,23 +1058,23 @@ def design_binder(
 
 # ---- Model Loading ----
 
-_ESMC = None
+_ESMC_CACHE: dict[str, torch.nn.Module] = {}
 
 
 def _load_hf_model(
     critic_name: str, lm_dropout: float, cache_esmc: bool, device: str
 ) -> Any:
-    """Loads ESMFold2 from huggingface.  Will cache ESMC-6B among
+    """Loads ESMFold2 from huggingface. Will cache ESMC by checkpoint ID among
     all non-scaling checkpoints, to save on VRAM and load time."""
-    global _ESMC
     repo_id = f"biohub/{critic_name}"
     model = ESMFold2ExperimentalModel.from_pretrained(repo_id, load_esmc=not cache_esmc)
     if cache_esmc:
-        if _ESMC is None:
-            model.load_esmc(model.config.esmc_id)
-            _ESMC = model._esmc
-        else:
-            model._esmc = _ESMC
+        esmc_id = model.config.esmc_id
+        if esmc_id not in _ESMC_CACHE:
+            model.load_esmc(esmc_id)
+            assert model._esmc is not None
+            _ESMC_CACHE[esmc_id] = model._esmc
+        model._esmc = _ESMC_CACHE[esmc_id]
     model.configure_lm_dropout(lm_dropout, force_lm_dropout_during_inference=True)
     model.set_kernel_backend("cuequivariance" if CUE_AVAILABLE else None)
     return model.to(device=device).eval().requires_grad_(False)
@@ -1046,7 +1085,7 @@ def _apply_torch_compile(model: torch.nn.Module) -> None:
     torch._dynamo.config.cache_size_limit = 512
     torch._dynamo.config.accumulated_cache_size_limit = 512
 
-    compile_targets = (ESMFold2MSAEncoder, PairUpdateBlock, TransformerBlock)
+    compile_targets = (ESMFold2MSAEncoder, PairUpdateBlock)
 
     def _maybe_compile_module(module: torch.nn.Module) -> None:
         if not isinstance(module, compile_targets):
@@ -1102,32 +1141,27 @@ class ESMFold2Design:
             self.lm_name, torch_dtype=torch.float32
         )
         if REUSE_ESMC:
+            reusable_esmc_model = self.inversion_models["ESMFold2-Experimental-Fast"]
+            assert reusable_esmc_model.config.esmc_id == self.lm_name, (
+                f"Cannot reuse ESMC trunk from {reusable_esmc_model.config.esmc_id!r} "
+                f"with LM head from {self.lm_name!r}."
+            )
+            assert reusable_esmc_model._esmc is not None
             del self.esmc_model.esmc
             torch.cuda.empty_cache()
-            self.esmc_model.esmc = self.inversion_models[
-                "ESMFold2-Experimental-Fast"
-            ]._esmc
+            self.esmc_model.esmc = reusable_esmc_model._esmc
         self.esmc_model = self.esmc_model.cuda().eval().requires_grad_(False)
-
-        if CHECKPOINT_LM:
-            apply_activation_checkpointing(
-                self.esmc_model,
-                checkpoint_wrapper_fn=partial(
-                    checkpoint_wrapper, checkpoint_impl=CheckpointImpl.NO_REENTRANT
-                ),
-                check_fn=lambda module: isinstance(module, TransformerBlock),
-            )
 
     def design(
         self,
-        target_name: str | None = None,
+        target_name: str,
+        binder_name: str,
         target_sequence: str | None = None,
-        binder_name: str | None = None,
         binder_sequence: str | None = None,
         is_antibody: bool | None = None,
         seed: int = 0,
         batch_size: int = 1,
-    ) -> tuple[list[str], dict[int, dict[str, torch.Tensor]], list[dict]]:
+    ) -> tuple[list[str], Trajectory, list[dict]]:
         return design_binder(
             self.inversion_models,
             self.hf_critic_models,
@@ -1150,10 +1184,50 @@ def get_base_image():
         modal.Image.micromamba(python_version="3.12")
         .run_commands("apt update && apt install -y git build-essential")
         .micromamba_install(
-            "anarci>=2020.04.03", "hmmer=3.4", channels=["conda-forge", "bioconda"]
+            "anarci>=2020.04.03",
+            "hmmer=3.4",
+            "cuda-version=12.8",
+            "cuda-libraries-dev=12.8",
+            "cuda-nvcc=12.8",
+            "cmake",
+            "ninja",
+            channels=["conda-forge", "bioconda"],
         )
-        .pip_install("abnumber", "esm@git+https://github.com/Biohub/esm.git@main")
-        .env({"HF_HOME": "/models", "HF_XET_HIGH_PERFORMANCE": "1"})
+        .pip_install(
+            "torch==2.8.0",
+            "triton==3.4.0",
+            index_url="https://download.pytorch.org/whl/cu128",
+        )
+        .pip_install(
+            "flash-attn==2.8.3",
+            "transformer-engine[core-cu12,pytorch]==2.13.0",
+            "xformers==0.0.32.post1",
+            extra_options="--no-build-isolation",
+            env={
+                "CPATH": (
+                    "/opt/conda/lib/python3.12/site-packages/nvidia/cudnn/include:"
+                    "/opt/conda/lib/python3.12/site-packages/nvidia/nccl/include:"
+                    "/opt/conda/lib/python3.12/site-packages/nvidia/nvtx/include"
+                ),
+                "LIBRARY_PATH": (
+                    "/opt/conda/lib/python3.12/site-packages/nvidia/cudnn/lib:"
+                    "/opt/conda/lib/python3.12/site-packages/nvidia/nccl/lib:"
+                    "/opt/conda/lib/python3.12/site-packages/nvidia/nvtx/lib"
+                ),
+                "MAX_JOBS": "8",
+                "NVTE_FRAMEWORK": "pytorch",
+            },
+        )
+        .pip_install(
+            "abnumber", "esm@git+https://github.com/Biohub/esm.git@main", "modal"
+        )
+        .env(
+            {
+                "HF_HOME": "/models",
+                "HF_XET_HIGH_PERFORMANCE": "1",
+                "XFORMERS_IGNORE_FLASH_VERSION_CHECK": "1",
+            }
+        )
     )
 
 
@@ -1166,15 +1240,17 @@ app = modal.App(
 )
 
 
-# If use_scaling_checkpoints is True, `memory` should be increased to 60 * 1024.
-@app.cls(gpu="H100", timeout=60 * 60, cpu=16, memory=10 * 1024)
+# NOTE - Currently the memory usage is quite high, inflating costs.
+# In an update coming soon, scaling critics will be loaded on demand
+# to avoid needing this large amount of RAM.
+@app.cls(gpu="H100", timeout=60 * 60, cpu=16, memory=80 * 1024)
 class ESMFold2DesignModal(ESMFold2Design):
     """Modal entrypoint. Hero critics are HF experimental exports with
     confidence heads. Set ``use_scaling_critics=True`` to also load the
     15-checkpoint scaling-experiment ensemble (distogram binding confidence only).
     """
 
-    use_scaling_critics: bool = modal.parameter(default=False)
+    use_scaling_critics: bool = modal.parameter(default=True)
 
     @modal.enter()
     def load(self):
@@ -1187,11 +1263,11 @@ class ESMFold2DesignModal(ESMFold2Design):
 
 @app.local_entrypoint()
 def main(
-    target_name: str | None = None,
+    target_name: str,
+    binder_name: str,
     target_sequence: str | None = None,
-    binder_name: str | None = None,
     binder_sequence: str | None = None,
-    use_scaling_critics: bool = False,
+    use_scaling_critics: bool = True,
     is_antibody: bool | None = None,
     local: bool = False,
     seed: int = 0,
@@ -1242,5 +1318,5 @@ if __name__ == "__main__":
         seed=0,
         batch_size=1,
         local=True,
-        use_scaling_critics=False,
+        use_scaling_critics=True,
     )

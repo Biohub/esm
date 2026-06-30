@@ -114,7 +114,6 @@ class ProteinImporter:
     def add_entry_to_ui(self, protein_id: str):
         entry_button = widgets.Button(description="Remove")
         entry_label = widgets.Label(value=protein_id)
-        entry_label.tag = protein_id
         entry_container = widgets.HBox([entry_button, entry_label])
 
         def delete_entry(b):

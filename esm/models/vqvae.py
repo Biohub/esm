@@ -280,7 +280,7 @@ class StructureTokenEncoder(nn.Module):
                 (coords.shape[0], coords.shape[1]), device=coords.device
             ).long()
 
-        with torch.no_grad(), torch.cuda.amp.autocast(enabled=False):
+        with torch.no_grad(), torch.amp.autocast("cuda", enabled=False):
             ca = coords[..., 1, :]
             edges, edge_mask = knn_graph(
                 ca, coord_mask, padding_mask, sequence_id, no_knn=knn

@@ -38,6 +38,7 @@ class MolecularComplexResult:
     ptm: float | None = None
     iptm: float | None = None
     pae: torch.Tensor | None = None
+    pde: torch.Tensor | None = None
     distogram: torch.Tensor | None = None
     pair_chains_iptm: torch.Tensor | None = None
     output_embedding_sequence: torch.Tensor | None = None
@@ -45,6 +46,8 @@ class MolecularComplexResult:
     residue_index: torch.Tensor | None = None
     entity_id: torch.Tensor | None = None
     sae_features: np.ndarray | None = None  # [L, n_features]
+    # Atom-expanded token count L
+    num_tokens: int | None = None
 
 
 @dataclass

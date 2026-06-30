@@ -33,6 +33,7 @@ class RNAInput:
     id: str | list[str]
     sequence: str
     modifications: list[Modification] | None = None
+    msa: MSAInput = None
 
 
 @dataclass
@@ -197,6 +198,7 @@ def deserialize_structure_prediction_input(
                     id=chain["id"],
                     sequence=chain["sequence"],
                     modifications=_mods(chain),
+                    msa=_msa(chain),
                 )
             )
         elif t == "dna":

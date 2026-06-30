@@ -40,7 +40,7 @@ def _a3m_msa(tmp_path) -> MSA:
     """Build the shared `_A3M` fixture as an MSA (insertion-stripped, deletions set)."""
     p = tmp_path / "m.a3m"
     _write_a3m(p, gz=False)
-    return MSA.from_a3m(str(p))
+    return MSA.from_a3m(str(p), remove_insertions=True)
 
 
 def test_a3m_deletion_counts_vectorized():
@@ -63,7 +63,7 @@ def test_from_a3m_records_deletions(tmp_path):
 def test_from_a3m_gz(tmp_path):
     p = tmp_path / "m.a3m.gz"
     _write_a3m(p, gz=True)
-    msa = MSA.from_a3m(str(p))
+    msa = MSA.from_a3m(str(p), remove_insertions=True)
     assert msa.deletions is not None
     np.testing.assert_array_equal(msa.deletions, _EXPECTED_DELETIONS)
 

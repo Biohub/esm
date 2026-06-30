@@ -54,16 +54,16 @@ Codebase, model weights, and model variants for ESMC are available through [Hugg
 
 There are two primary ways of running the ESM models: through the [**Biohub Platform**](https://biohub.ai/) or locally with Hugging Face. The Biohub Platform enables users to easily run inference with ESM models with minimal setup. Users interested in customizing or fine-tuning ESM models can use the models from Hugging Face.
 
-### Running ESMC Locally
-<a name="running-esmc-locally"></a>
+### Running ESMC Through Hugging Face
+<a name="running-esmc-through-hugging-face"></a>
 
-Install `esm` from GitHub (a PyPI release is coming soon):
+First, install `esm` from GitHub (a PyPI release is coming soon):
 
 ```
 pip install esm@git+https://github.com/Biohub/esm.git@main
 ```
 
-The following code demonstrates how to run ESMC locally
+Then use the following code to run ESMC using the Transformers library via Hugging Face:
 
 ```python
 import torch
@@ -144,6 +144,16 @@ The sparse autoencoder used in the Atlas and analyzed in the paper, `ESMC-6B-sae
 
 Codebase, model weights, and model variants for ESMC SAEs are available through [Hugging Face](https://huggingface.co/collections/biohub/esmc-saes-for-hidden-states-all-layers).
 
+### Running SAEs Through Hugging Face
+
+First, install `esm` from GitHub (a PyPI release is coming soon):
+
+```
+pip install esm@git+https://github.com/Biohub/esm.git@main
+```
+
+Then use the following code to set up an ESMC SAE using the Transformers library via Hugging Face:
+
 ```python
 import torch
 from transformers import AutoModel, AutoTokenizer
@@ -170,11 +180,13 @@ output["sae_outputs"]["layer60"]  # sparse.coo tensor
 print(output["sae_outputs"]["layer60"].shape)
 
 ```
+### Running SAEs Through The Biohub Platform
 
-For tutorials on how to use ESMC SAEs, see our [tutorials](https://github.com/Biohub/esm/tree/main/cookbook/tutorials).
+For a tutorial on using SAEs using the Biohub Platform, see [here](https://github.com/Biohub/esm/blob/main/cookbook/tutorials/esmc_sae_feature_interpretation.ipynb).
 
 ## ESMFold2
 <a name="esmfold2"></a>
+
 
 [ESMFold2](https://huggingface.co/biohub/ESMFold2) is a state-of-the-art protein structure prediction model that combines ESMC (6B parameter) language model embeddings with a diffusion-based structure prediction architecture.
 
@@ -182,7 +194,16 @@ The model predicts high-resolution, all-atom 3D protein structures directly from
 
 Codebase, model weights, and model variants for ESMFold2 are available through [Hugging Face](https://huggingface.co/biohub/ESMFold2)
 
-### Running ESMFold2 Locally
+### Running ESMFold2 Through Hugging Face
+<a name="running-esmfold2-through-hugging-face"></a>
+
+First, install `esm` from GitHub (a PyPI release is coming soon):
+
+```
+pip install esm@git+https://github.com/Biohub/esm.git@main
+```
+
+Then use the following code to run ESMFold2 locally using the Transformers library via Hugging Face:
 
 ```python
 from esm.models.esmfold2 import (

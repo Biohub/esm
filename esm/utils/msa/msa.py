@@ -76,7 +76,7 @@ class MSA(SequentialDataclass):
     def from_a3m(
         cls,
         path: PathOrBuffer,
-        remove_insertions: bool = True,
+        remove_insertions: bool = False,
         max_sequences: int | None = None,
     ) -> MSA:
         entries = []
@@ -180,21 +180,25 @@ class MSA(SequentialDataclass):
         :meth:`from_a3m`) alongside the sequences, so the feature survives even when the
         default ``remove_insertions`` strips the lowercase insertions out of the
         sequences. With ``json_serializable=True`` the array is returned as a list.
-        Headers are not serialized.
         """
         dct: dict[str, Any] = {"sequences": self.sequences}
         if self.deletions is not None:
             dct["deletions"] = (
                 self.deletions.tolist() if json_serializable else self.deletions
             )
+        if any(self.headers):
+            dct["headers"] = self.headers
         return dct
 
     @classmethod
     def from_state_dict(cls, dct: dict[str, Any]) -> MSA:
-        """Inverse of :meth:`state_dict`; sequences are taken verbatim."""
+        """Inverse of :meth:`state_dict`; sequences and (when present) headers are taken
+        verbatim."""
         deletions = dct.get("deletions")
+        sequences = dct["sequences"]
+        headers = dct.get("headers") or ["" for _ in sequences]
         return cls(
-            entries=[FastaEntry("", seq) for seq in dct["sequences"]],
+            entries=[FastaEntry(h, seq) for h, seq in zip(headers, sequences)],
             deletions=None
             if deletions is None
             else np.asarray(deletions, dtype=np.float32),

@@ -498,26 +498,29 @@ class ForwardTrackData:
 @define
 class LogitsConfig:
     """
-    sequence (bool): Return sequence logits.
-    structure (bool): Return structure logits.
-    secondary_structure (bool): Return secondary structure logits.
-    sasa (bool): Return sasa logits.
-    function (bool): Return function logits.
-    residue_annotations (bool): Return residue annotations logits.
-    return_embeddings (bool): Whether embeddings should be returned.
-    return_hidden_states (bool): Whether to return per-residue hidden states. With
-        ith_hidden_layer=-1, returns all layers as a tensor of shape [n_layers + 1,
-        B, L, D]. With ith_hidden_layer!= -1, returns the selected layer as a tensor
-        of shape [1, B, L, D].
-    return_mean_embedding (bool): Whether mean embeddings should be returned.
-    return_mean_hidden_states (bool): Whether hidden states mean-pooled along the
-        sequence length (L) dimension should be returned. Returns a tensor of shape
-        [B, n_layers + 1, D].
-    ith_hidden_layer (int): Valid values for ith_hidden_layer are 0 to
-        max_ith_hidden_layer (inclusive), where index 0 is the embedding layer. -1
-        returns all layers, but is not supported for ESMC 6B or any ESM3 model. Here
-        is the max_ith_hidden_layer for each ESMC and ESM3 model (except ESM3
-        Large).
+    sequence (bool): (ESM3, ESMC) Return sequence logits.
+    structure (bool): (not supported on Forge/Biohub Platform) Return structure
+        logits.
+    secondary_structure (bool): (not supported on Forge/Biohub Platform) Return
+        secondary structure logits.
+    sasa (bool): (not supported on Forge/Biohub Platform) Return sasa logits.
+    function (bool): (not supported on Forge/Biohub Platform) Return function
+        logits.
+    residue_annotations (bool): (ESM3) Return residue annotations logits.
+    return_embeddings (bool): (ESM3, ESMC) Whether embeddings should be returned.
+    return_hidden_states (bool): (ESMC, ESM3 except Large) Whether to return per-
+        residue hidden states. With ith_hidden_layer=-1, returns all layers as a
+        tensor of shape [n_layers + 1, B, L, D]. With ith_hidden_layer!= -1, returns
+        the selected layer as a tensor of shape [1, B, L, D]. ESM3 requires
+        ith_hidden_layer to be specified.
+    return_mean_embedding (bool): (ESM3, ESMC) Whether mean embeddings should be
+        returned.
+    return_mean_hidden_states (bool): (ESMC, ESM3 except Large) Whether hidden
+        states mean-pooled along the sequence length (L) dimension should be
+        returned. Returns a tensor of shape [B, n_layers + 1, D].
+    ith_hidden_layer (int): (ESM3, ESMC) Valid values are 0 to max_ith_hidden_layer
+        (inclusive), where index 0 is the embedding layer. -1 returns all layers,
+        but is not supported for ESMC 6B or any ESM3 model.
         | Model Name                    | max_ith_hidden_layer           |
         |-------------------------------|--------------------------------|
         | esmc-300-2024-12              | 30                             |
@@ -527,7 +530,8 @@ class LogitsConfig:
         | esm3-small-2024-08            | 48                             |
         | esm3-medium-2024-03           | 96                             |
         | esm3-medium-2024-08           | 96                             |
-    sae_config (SAEConfig | None): SAE config. Only applies to ESMC models.
+    sae_config (SAEConfig | None): (ESMC) SAE config for requesting sparse
+        autoencoder features.
     """
 
     # Logits.
