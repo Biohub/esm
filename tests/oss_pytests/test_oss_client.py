@@ -3,7 +3,7 @@ import os
 import pytest
 import torch
 
-from esm.sdk import client  # pyright: ignore
+from esm.sdk import client, esmc_client  # pyright: ignore
 from esm.sdk.api import (  # pyright: ignore
     ESMProtein,
     ESMProteinTensor,
@@ -58,19 +58,19 @@ def test_oss_esmc_client():
 
     sequence = "MALWMRLLPLLALLALAVPDPAAA"
     model = "esmc-300m-2024-12"
-    esmc_client = client(model=model, url=URL, token=API_TOKEN)
+    esmc = esmc_client(model=model, url=URL, token=API_TOKEN)
 
     protein = ESMProtein(sequence)
-    encoded_protein = esmc_client.encode(input=protein)
+    encoded_protein = esmc.encode(input=protein)
     assert isinstance(encoded_protein, ESMProteinTensor)
 
-    decoded_protein = esmc_client.decode(input=encoded_protein)
+    decoded_protein = esmc.decode(input=encoded_protein)
     assert isinstance(decoded_protein, ESMProtein)
 
     logits_config = LogitsConfig(
         sequence=True, return_embeddings=True, return_hidden_states=True
     )
-    result = esmc_client.logits(input=encoded_protein, config=logits_config)
+    result = esmc.logits(input=encoded_protein, config=logits_config)
     assert isinstance(result, LogitsOutput)
     assert result.logits is not None
     assert isinstance(result.logits.sequence, torch.Tensor)
