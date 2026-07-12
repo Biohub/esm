@@ -23,8 +23,8 @@ def retry_if_specific_error(exception):
         429,
         500,
         502,
+        503,
         504,
-        500,
     }
 
 
