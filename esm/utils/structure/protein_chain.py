@@ -1244,7 +1244,9 @@ class ProteinChain:
         atom37_positions = self.atom37_positions.copy()
         atom37_mask = self.atom37_mask.copy()
 
-        inferred_cbeta_positions = self.inferred_cbeta
+        # Copy so the in-place glycine NaN-fill below does not mutate the cached
+        # `inferred_cbeta` array (and everything derived from it, e.g. pdist_CB).
+        inferred_cbeta_positions = self.inferred_cbeta.copy()
         if not infer_cbeta_for_glycine:
             inferred_cbeta_positions[np.array(list(self.sequence)) == "G", :] = np.nan
 
