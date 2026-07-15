@@ -45,6 +45,17 @@ dependencies = [
   "dna_features_viewer",
   "accelerate",
 ]
+
+[project.optional-dependencies]
+# ESMFold2 "fused" kernel backend (set_kernel_backend("fused"))
+# inference kernels for tri-mul / LN+SwiGLU / dropout-residual.
+fast = ["triton>=3,<4"]
+# ESMFold2 context-parallel ESM-C tensor parallelism (wrap_model_with_cp(tp_esmc=True)).
+fold-cp = ["transformer-engine[pytorch]>=2,<3"]
+# "cuequivariance" kernel backend — pick the build matching your CUDA toolkit.
+cueq12 = ["cuequivariance-torch", "cuequivariance-ops-torch-cu12"]
+cueq13 = ["cuequivariance-torch", "cuequivariance-ops-torch-cu13"]
+
 # Pytest
 [tool.pytest.ini_options]
 addopts = """
