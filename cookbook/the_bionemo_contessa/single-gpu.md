@@ -1,143 +1,180 @@
 # Single-GPU ESMFold2 — kernel backends
 
+The reference implementation in pure PyTorch is accurate but not the fastest way to run ESMFold2.
+Most of the single-GPU runtime sits in a few repeated pair-representation operations, and there are alternate **kernel backends** that keep the same weights and outputs while swapping in faster implementations of those hot paths.
+The result is the same ESMFold2 model, but with different speed, warm-up, and dependency trade-offs.
+
 ESMFold2 runs the expensive Pairformer/attention math through a selectable
 **kernel backend**, chosen with:
 
 ```python
+model = ESMFold2Model.from_pretrained("biohub/ESMFold2").cuda().eval()
 model.set_kernel_backend(None | "fused" | "cuequivariance")
 ```
 
-This fans out to every module that runs Pairformer-style blocks (`folding_trunk`,
+This propagates out to every module that runs Pairformer-style blocks (`folding_trunk`,
 `lm_encoder`, `parcae_coda`, `confidence_head`, `structure_head`). It only swaps the
-*implementation* of a few hot ops — the **triangle multiplicative update** (the
-dominant `L×L` Pairformer op), the transition FFN (LayerNorm+SwiGLU), the
-dropout-residual, and the attention pair-bias. Weights are untouched and the three
-backends are numerically equivalent to bf16 rounding (same pLDDT/pTM). They trade
-**speed, memory, first-call compilation, and dependencies** — not accuracy.
+*implementation* of a few hot ops. Weights are untouched and the three
+backends are numerically equivalent to bf16 rounding (same pLDDT/pTM).
 
 > This page covers the single-GPU backends. For multi-GPU context parallelism see
 > `fold-cp.md` (`wrap_model_with_cp`), which is an orthogonal choice.
 
+## Table of contents
+
+- [The three backends](#the-three-backends)
+- [None (default experience)](#none-default-experience)
+- [cuEquivariance](#cuequivariance)
+- [Fused](#fused)
+- [Performance summary](#performance-summary)
+- [Decision guide](#decision-guide)
+
 ## The three backends
 
-| | `None` | `"fused"` | `"cuequivariance"` |
+| | None | fused | cuequivariance |
 |---|---|---|---|
-| Implementation | pure PyTorch | vendored **Triton** kernels | **cuEquivariance** kernel |
-| Ops accelerated | none (reference) | tri-mul **+ LN+SwiGLU + dropout-residual + pair-bias** | **tri-mul only** (rest = reference) |
+| Implementation | PyTorch | Triton kernels | [cuEquivariance](https://github.com/nvidia/cuequivariance) |
+| Accelerated Operations | none (reference) | tri-mul + LN+SwiGLU + dropout-residual + pair-bias | tri-mul |
 | Extra dependency | none | `triton>=3` | `cuequivariance-torch` (CUDA-matched build) |
-| First-call compilation | none | **yes — Triton JIT + autotune, per shape** | **no — ships precompiled kernels** |
-| Steady-state speed | slowest (reference) | **fastest** | fast (tri-mul only) |
-| Missing-dependency behavior | n/a | **silent no-op** → reference path | **raises** at `set_kernel_backend` |
-| Runtime fallback | n/a | per-op reference fallback | logs + falls back to chunked einsum if the kernel throws |
+| Training / autograd | yes | inference-only | yes |
+| First-call compilation | none | yes — Triton JIT + autotune | no — precompiled kernels |
 
-## What to install
+## None (default experience)
 
-Optional extras are declared on the `esm` package:
+### Dependencies
 
-```bash
-pip install "esm[fast]"      # -> triton>=3,<4         (the "fused" backend)
-pip install "esm[cueq12]"    # -> cuequivariance build for CUDA 12   (stub — fill in)
-pip install "esm[cueq13]"    # -> cuequivariance build for CUDA 13   (stub — fill in)
+None beyond this ESM package
+
+### Usage
+
+```python
+model = ESMFold2Model.from_pretrained("biohub/ESMFold2").cuda().eval()
+model.set_kernel_backend(None) # optional
 ```
 
-- **`None`** needs nothing — it's always available and is the reference/fallback.
-- **`"fused"`** needs **Triton 3** (`esm[fast]`). It's GPU-only (Triton JIT-compiles
-  to PTX) and inference-only (falls back to reference under autograd). If Triton is
-  not importable, `set_kernel_backend("fused")` installs nothing and silently runs
-  the reference path — so if `"fused"` is unexpectedly slow, check that Triton
-  imported.
-- **`"cuequivariance"`** needs `cuequivariance-torch` matched to your CUDA toolkit
-  (`esm[cueq12]` / `esm[cueq13]` — currently stubs, fill in the right build). If it's
-  not installed, `set_kernel_backend("cuequivariance")` **raises** (unlike `"fused"`,
-  which degrades silently).
+### Performance
 
-## Performance (measured, L=1168, single H100, **steady-state after warm-up**)
+Fold a 644-residue protein using the default backend with [esmfold2-none.py](esmfold2-none.py) on a single H100 SXM
 
-| backend | elapsed | pLDDT | note |
-|---|---|---|---|
-| `None` | 216.8 s | 0.793 | reference; ~7× slower |
-| `"fused"` | 28.9 s | 0.793 | fastest steady-state |
-| `"cuequivariance"` | 36.3 s | 0.793 | ~6× over reference; tri-mul only |
+```shell
+python esmfold2-none.py
 
-Identical pLDDT confirms the backends are numerically equivalent. `"fused"` edges
-out `"cuequivariance"` because it accelerates the *whole* block (FFN + dropout +
-tri-mul), whereas `"cuequivariance"` only replaces the tri-mul and leaves the rest
-on the reference path.
+/usr/local/lib/python3.12/dist-packages/torch/jit/_script.py:1487: DeprecationWarning: `torch.jit.script` is deprecated. Please switch to `torch.compile` or `torch.export`.
+  warnings.warn(
+🚨 No checkpoint found for ESMCForSequenceClassification.forward. Please add a `checkpoint` arg to `auto_docstring` or add one in ESMCConfig's docstring
+🚨 No checkpoint found for ESMCForTokenClassification.forward. Please add a `checkpoint` arg to `auto_docstring` or add one in ESMCConfig's docstring
+Loading checkpoint shards: 100%|█████████████████████████████████| 6/6 [00:00<00:00, 151.51it/s]
+Loading CCD dictionary from /root/.cache/huggingface/hub/models--biohub--ESMFold2/snapshots/1ebf0e3481a5184eb6171d40615c79e384b48796/ccd.pkl
+pLDDT mean: 0.751, pTM: 0.458, ipTM: 0.096
+Elapsed: 58.02 sec
+Max VRAM: 19682.0 MB
+```
 
-## Memory
+## cuEquivariance
 
-Peak VRAM is **roughly the same across all three backends** at a given length — the
-model dtype (bf16) dominates, and the kernel choice is a second-order effect:
+[cuEquivariance](https://github.com/nvidia/cuequivariance) is NVIDIA’s precompiled CUDA kernel backend for ESMFold2’s triangle-multiplication hot path, giving a large single-GPU speedup without Triton JIT or accuracy changes.
 
-| backend | peak VRAM (L=1168) |
-|---|---|
-| `None` | ~48.3 GB |
-| `"cuequivariance"` | ~48.3 GB |
-| `"fused"` | ~48.4 GB (marginally higher — Triton autotune scratch) |
+### Dependencies
 
-So **pick the backend for speed and compilation behavior, not memory.** (To reduce
-memory at a given length you want context parallelism — `fold-cp.md` — not a
-different kernel backend.)
+* `cuequivariance-torch`
+* Depending on your CUDA version
+  * `cuequivariance-ops-torch-cu13`
+  * `cuequivariance-ops-torch-cu12`
 
-## The compilation trade-off
+Install the CUDA-matched extra:
 
-There are **two** distinct one-time costs on the first fold(s) — don't conflate them
-(measured with `esmc_jit_bench.py`):
+```bash
+pip install "esm[cueq12]"  # CUDA 12 build
+```
+or
+```bash
+pip install "esm[cueq13]"  # CUDA 13 build
+```
 
-1. **A process-global first-fold cost (~10 s), paid once by *any* backend.** The very
-   first fold in a process pays cuDNN/cuBLAS algorithm selection, flash-attn init,
-   allocator growth, and the first ESM-C / atom-encoder / diffusion run. This is
-   **not** a backend property — whichever backend you run first absorbs it. Both
-   `"fused"` and `"cuequivariance"` pay it once; `None` too.
+You can figure out which one you need with `nvidia-smi`
 
-2. **A backend-specific kernel init on first use (~2 s), paid once by *both*
-   backends.** The first fold with a given backend either JIT-compiles the Triton
-   kernel set (`"fused"`) or loads the precompiled cuEquivariance kernels
-   (`"cuequivariance"`). Measured ~2.2 s for each.
+```shell
+$ nvidia-smi
 
-3. **A per-new-sequence-length cost — this is the only place the backends differ:**
-   - **`"fused"` (Triton)** recompiles its shape-specialized kernels for each new
-     length → **~0.5 s** per new length.
-   - **`"cuequivariance"`** is precompiled / shape-independent → **~0 s** (~0.2 s).
-   - **`None`** compiles nothing.
+Thu Jul 16 13:03:23 2026
++---------------------------------------------------------------------------------------+
+| NVIDIA-SMI 535.216.03             Driver Version: 535.216.03   CUDA Version: 13.2     |
+|-----------------------------------------+----------------------+----------------------+
+```
 
-Measured with `esmc_jit_bench.py` (cost = first-fold minus warm, after the global
-warm-up), two lengths:
+In this case, the CUDA Version is 13.2, so you would need to install `esm[cueq13]`.
 
-| backend | L=772 (first use) | L=1024 (new length) |
-|---|---|---|
-| `"cuequivariance"` | ~2.2 s (one-time init) | **~0.2 s** |
-| `"fused"` | ~2.2 s (one-time init) | **~0.5 s** |
+### Usage
 
-So the earlier worry that fused pays "seconds-to-minutes per shape" was wrong: the
-big cost is the shared ~10 s global first fold, both backends then pay a ~2 s
-one-time init, and fused's *extra* per-new-length compile is only ~0.5 s (cueq ~0).
-The steady-state timings in the first table exclude all of this (measured after
-warm-up).
+```python
+model = ESMFold2Model.from_pretrained("biohub/ESMFold2").cuda().eval()
+model.set_kernel_backend("cuequivariance")
+```
 
-- **`apply_torch_compile()` does not stack with the Triton kernels** — call
-  `set_kernel_backend(None)` before compiling. (torch.compile adds its *own* compile
-  cost with the same warm-up caveat.)
+### Performance
+
+Fold a 644-residue protein using the cuEquivariance backend with [esmfold2-cueq.py](esmfold2-cueq.py) on a single H100 SXM
+
+```shell
+python esmfold2-cueq.py
+
+pLDDT mean: 0.751, pTM: 0.459, ipTM: 0.096
+Elapsed: 19.90 sec
+Max VRAM: 19680.1 MB
+```
+
+## Fused
+
+The "fused" backend uses Triton, a Python-based language for writing custom GPU kernels, to fuse several ESMFold2 hot-path operations into fewer CUDA launches for the fastest single-GPU inference while preserving the same model weights and outputs.
+
+### Dependencies
+
+The "fused" backend needs Triton 3. It's GPU-only (Triton JIT-compiles to PTX) and **inference-only** (falls back to reference under autograd).
+
+```bash
+pip install "esm[fused]"  # triton>=3,<4
+```
+
+> If Triton is not importable, `set_kernel_backend("fused")` silently runs the reference path. Check that Triton can be imported if `"fused"` is unexpectedly slow.
+
+### Usage
+
+```python
+model = ESMFold2Model.from_pretrained("biohub/ESMFold2").cuda().eval()
+model.set_kernel_backend("fused")
+```
+
+### Performance
+
+Fold a 644-residue protein using the "fused" backend with [esmfold2-fused.py](esmfold2-fused.py) on a single H100 SXM
+
+```shell
+python esmfold2-fused.py
+
+pLDDT mean: 0.750, pTM: 0.458, ipTM: 0.096
+Elapsed: 16.56 sec
+Max VRAM: 19795.1 MB
+```
+
+## Performance summary
+
+These results fold the same 644-residue `7ysz` input used in the per-backend
+examples above.
+
+| backend | elapsed | max VRAM | pLDDT | pTM | ipTM | speedup vs `None` |
+|---|---:|---:|---:|---:|---:|---:|
+| `None` | 58.02 s | 19682.0 MB | 0.751 | 0.458 | 0.096 | 1.0× |
+| "cuequivariance" | 19.90 s | 19680.1 MB | 0.751 | 0.459 | 0.096 | 2.9× |
+| "fused" | 16.56 s | 19795.1 MB | 0.750 | 0.458 | 0.096 | 3.5× |
 
 ## Decision guide
 
-- **Default / fastest throughput →** `"fused"` (`esm[fast]`). Fastest steady state,
-  and the incremental per-new-length compile is only ~0.5 s — cheap even for one-shot
-  or variable-length workloads once the global first fold + ~2 s init are paid.
-- **No Triton available, or you want zero per-shape compile (e.g. huge length
-  variety) →** `"cuequivariance"` (`esm[cueq12]`/`esm[cueq13]`) — precompiled, ~0 s
-  compile, steady state a bit slower than fused.
-- **No extra deps, portability, or a bit-exact reference for debugging →** `None`.
+If you want:
 
-> Tip: whatever backend you pick, do **one throwaway warm-up fold** at startup to pay
-> the ~10 s global cost off the critical path (that's what the benchmark's warm-up
-> fold does).
+- **Fastest throughput →** `"fused"`.
+  - Fastest steady state, and the incremental per-new-length compile is only ~0.5 s
+- **Huge length variety →** `"cuequivariance"`
+  — precompiled, steady state a bit slower than fused.
+- **Bit-exact reference for debugging →** `None`.
 
-## Gotchas recap
-
-- `"fused"` missing Triton → silent reference fallback (looks like `None` speed).
-- `"cuequivariance"` missing the package → raises immediately.
-- `"cuequivariance"` has a *runtime* safety net: if the kernel throws (odd
-  shape/dtype), it logs a warning and uses the chunked einsum for that call.
-- `"fused"` is inference-only and GPU-only; under autograd or on CPU it falls back.
-- Backends are **not additive** on the tri-mul — `set_kernel_backend` selects one path.
+> Tip: For any benchmarking, include a warm-up fold at startup to pay the ~10s global cost

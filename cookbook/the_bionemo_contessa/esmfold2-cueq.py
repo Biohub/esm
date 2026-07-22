@@ -5,7 +5,6 @@ import torch
 from transformers.models.esmfold2.modeling_esmfold2 import ESMFold2Model
 from esm.models.esmfold2 import (
     ESMFold2InputBuilder,
-    LigandInput,
     ProteinInput,
     StructurePredictionInput,
 )
@@ -22,8 +21,6 @@ spi = StructurePredictionInput(  # 7ysz
                 "KQAIGGEVNIIFGTAVNEHLDDEMIVTVIATGFDGSHHHHHH"
             ),
         ),
-        LigandInput(id=["C1", "E1"], ccd=["GDP"]),
-        LigandInput(id="D1", ccd=["TRS"]),
     ]
 )
 
@@ -43,7 +40,5 @@ peak_mib = torch.cuda.max_memory_allocated() / (1024**2)
 
 print(f"pLDDT mean: {float(result.plddt.mean()):.3f}, "
       f"pTM: {float(result.ptm):.3f}, ipTM: {float(result.iptm):.3f}")
-print(f"Elapsed: {end - start} sec")
-print(f"Max VRAM: {peak_mib} MB")
-with open("esmfold2_output.cif", "w") as f:
-    f.write(result.complex.to_mmcif())
+print(f"Elapsed: {end - start:.2f} sec")
+print(f"Max VRAM: {peak_mib:.1f} MB")

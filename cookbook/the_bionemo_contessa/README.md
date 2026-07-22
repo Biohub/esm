@@ -1,74 +1,66 @@
 # The BioNeMo Contessa — ESMFold2 folding examples
 
-Three scripts that fold protein/ligand complexes with `ESMFold2Model`, showing
-when a single GPU suffices and when **context parallelism (CP)** is needed to fit
-a large complex. All use the `cuequivariance` backend, `bf16` ESM-C,
-`torch.inference_mode()`, and the same fold settings (`num_loops=10`,
-`num_sampling_steps=50`, `num_diffusion_samples=1`, `seed=0`).
+This cookbook shows how to run Biohub's ESMFold2 structure-prediction model with
+[NVIDIA BioNeMo libraries and methods](https://github.com/NVIDIA-BioNeMo). It
+covers single-GPU accelerated kernel backends for faster inference and context
+parallelism (CP) for inputs whose `L x L` pair representation does not fit on one
+GPU.
 
-Tested on 1× and 4× H100 80GB GPUs.
+Tested on 1x and 4x H100 80GB GPUs.
 
 | Script | Input | GPUs | Result |
 | --- | --- | --- | --- |
-| `cuequivariance.py` | 7ysz (1 protein chain ×2, GDP + TRS ligands) | 1 | Folds successfully |
-| `cuequivariance_cp.py` | 5xgo (1 protein chain ×12, CL ligand) | n² (e.g. 4) | Folds successfully via CP |
-| `will_fail.py` | 5xgo (same as CP) | 1 | **OOMs** — too large for one GPU |
+| `esmfold2-none.py` | 7ysz (1 protein chain ×2) | 1 | Reference single-GPU path |
+| `esmfold2-cueq.py` | 7ysz (1 protein chain ×2) | 1 | cuEquivariance backend |
+| `esmfold2-fused.py` | 7ysz (1 protein chain ×2) | 1 | Triton fused backend |
+| `esmfold2-cp.py` | 7ysz (1 protein chain ×2) | 4 | Same fold API with CP setup |
+| `cuequivariance_cp.py` | 5xgo (1 protein chain ×12, CL ligand) | 4 | Larger input via CP |
+| `will_fail.py` | 5xgo (same as CP) | 1 | **OOMs** — too large for 1xH100 |
 
 ## Environment setup
 
-Start from the NVIDIA PyTorch container, then install the dependencies (the
-active commands in [`install.sh`](../../../install.sh)):
+Start from the NVIDIA PyTorch container, then install the dependencies:
 
 ```bash
-docker run --gpus all -it --rm nvcr.io/nvidia/pytorch:26.03-py3
+docker run --gpus all -it --rm nvcr.io/nvidia/pytorch:26.03-py3 bash -l
 
-pip install git+https://github.com/Biohub/esm.git@main
-pip install cuequivariance-torch cuequivariance-ops-torch-cu13
-pip uninstall -y transformers
-pip install git+https://github.com/zyndagj/transformers.git@zyndagj/foldcp_support
+# Main ESM package
+pip install "git+https://github.com/Biohub/esm.git@main"
+# fused dependency
+pip install "esm[fused] @ git+https://github.com/Biohub/esm.git@main"
+# cuEquivariance dependency (cueq12 also exists)
+pip install "esm[cueq13] @ git+https://github.com/Biohub/esm.git@main"
+# fold-cp dependency for larger inputs
+pip install "esm[fold-cp] @ git+https://github.com/Biohub/esm.git@main"
 ```
 
-The `zyndagj/foldcp_support` transformers branch ships `ESMFold2Model` and its CP
-utilities. (Commented-out lines in `install.sh` show an alternative `uv`
-virtualenv setup.)
+## Single-GPU accelerated backends
 
-## `cuequivariance.py` — single-GPU baseline
-
-Folds a small complex (7ysz) on one GPU and writes `esmfold2_output.cif`.
+[single-gpu.md](single-gpu.md) compares the three single-GPU backend choices:
+`None` for the pure PyTorch reference path, `"cuequivariance"` for NVIDIA
+cuEquivariance triangle-multiplication kernels, and `"fused"` for Triton kernels
+that fuse several ESMFold2 hot-path operations. These backends keep the same model
+weights and outputs while trading dependencies, warm-up behavior, and speed.
 
 ```bash
-python cuequivariance.py
+python esmfold2-none.py
+python esmfold2-cueq.py
+python esmfold2-fused.py
 ```
 
-## `cuequivariance_cp.py` — context-parallel for large complexes
+## Fold-CP for larger inputs
 
-Folds a large 12-chain complex (5xgo) by sharding across an **n×n CP grid** of
-GPUs. Both the trunk *and* the MSA encoder are sharded via `wrap_model_with_cp`
-(trunk-only sharding still OOMs on the full L×L pair). Launch with `torchrun` on
-a **perfect-square** number of GPUs (1, 4, 9, …); output goes to
-`esmfold2_cp_output.cif`.
+[fold-cp.md](fold-cp.md) documents how `wrap_model_with_cp(model, dm, ...)`
+spreads one ESMFold2 fold across a square grid of GPUs using the [Fold-CP methodology](https://github.com/NVIDIA-BioNeMo/boltz-cp).
+CP shards the large `L x L` pair activations so longer proteins and complexes fit in memory; it is a
+capability feature rather than a general speedup.
+
+Launch CP examples with `torchrun` on a perfect-square number of GPUs.
 
 ```bash
-PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True torchrun --nproc-per-node=4 cuequivariance_cp.py
+torchrun --nproc-per-node=4 esmfold2-cp.py
+
+# Larger 5xgo example.
+PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True \
+  torchrun --nproc-per-node=4 cuequivariance_cp.py
 ```
-
-> **CP is a capability enabler, not a speedup.** Splitting the L×L pair across
-> GPUs lets you fold complexes too large for one GPU, but the per-layer cross-rank
-> communication means it won't fold faster than a single GPU that already fits the
-> complex. Reach for CP on out-of-memory, not for performance.
-
-## `will_fail.py` — what happens without CP
-
-The single-GPU script run on the large 5xgo complex (same input as the CP
-script). The 12-chain L×L pair representation exceeds one GPU's memory, so it
-OOMs — the fix is the CP sharding in `cuequivariance_cp.py`.
-
-```bash
-python will_fail.py   # expected to OOM
-```
-
-## Outputs
-
-Successful runs write an mmCIF file (`esmfold2_output.cif` /
-`esmfold2_cp_output.cif`) and print `pLDDT mean`, `pTM`, `ipTM`, elapsed time,
-and peak VRAM.
