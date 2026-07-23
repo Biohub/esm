@@ -574,6 +574,7 @@ class ProteinChain:
         # https://www.mdpi.com/2073-4352/11/12/1539
         # NOTE(@zeming): due to the approximation we make here, that atoms never overlap, you might get >1 globularity
         mask = self.atom37_mask.any(-1)
+        assert isinstance(mask, np.ndarray)
         points = self.atom37_positions[self.atom37_mask]
         sequence = [aa for aa, m in zip(self.sequence, mask) if m]
         A, _ = self._mvee(points, tol=1e-3)

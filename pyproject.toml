@@ -44,6 +44,10 @@ dependencies = [
   "pygtrie",
   "dna_features_viewer",
   "accelerate",
+  # Fork adding numpy-2 support on top of upstream v2.1.2. That upstream release
+  # renamed the RMSD keys (iRMSD/LRMSD) and dropped the DockQ_F1 output, which
+  # protein_complex.py recomputes from F1.
+  "dockq @ git+https://github.com/nrontsis/DockQ.git@ba4df5adaad7c77fd60851d0b7b05f2b77061ba2",
 ]
 # Pytest
 [tool.pytest.ini_options]
@@ -86,9 +90,7 @@ upload-wheel = "python -m twine upload --repository pypi"
 
 [tool.pixi.feature.dev.dependencies]
 matplotlib = "*"
-# Pin the lint/test env to numpy<2: the numpy 2.x type stubs trip ty false positives
-# (savez/zip) that don't reflect runtime behavior. Runtime deps stay numpy-unconstrained.
-numpy = ">=1.26.0,<2.0.0"
+numpy = ">=2.0.0,<2.4"
 pre-commit = "*"
 pytest = "*"
 pytest-cov = "*"

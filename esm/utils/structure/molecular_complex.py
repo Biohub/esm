@@ -697,6 +697,96 @@ class MolecularComplex:
             atom_hetero=atom_hetero,
         )
 
+    @classmethod
+    def from_atomarray(
+        cls, atom_arr: bs.AtomArray, id: str = "complex"
+    ) -> "MolecularComplex":
+        """Build a MolecularComplex from a biotite AtomArray, keeping ALL atoms.
+
+        This is the inverse of :meth:`to_mmcif` (which expands the flat
+        token/atom arrays into an ``AtomArray``): it groups the AtomArray's atoms
+        into tokens by ``(chain_id, res_id)`` in array order and rebuilds the flat
+        ``atom_positions`` / ``atom_elements`` / ``atom_names`` / ``atom_hetero``
+        arrays plus the token-level ``token_to_atoms`` / ``chain_id`` /
+        ``sequence`` / ``plddt`` arrays. Unlike ``ProteinChain.from_atomarray``
+        it retains every atom (e.g. the phosphate atoms of a phosphorylated
+        residue), not just the atom37 protein set.
+
+        Args:
+            atom_arr: biotite AtomArray. Atoms of a residue are assumed contiguous
+                (as produced by ``evolutionaryscale.structure.utils.to_atom_array``).
+            id: identifier to assign to the complex.
+
+        Returns:
+            MolecularComplex with flat atom arrays and token-based indexing.
+        """
+        n_atoms = len(atom_arr)
+        coords = np.asarray(atom_arr.coord, dtype=np.float32)
+        chain_labels = np.asarray(atom_arr.chain_id, dtype=object)
+        res_ids = np.asarray(atom_arr.res_id)
+        res_names = np.asarray(atom_arr.res_name, dtype=object)
+        atom_names = np.asarray(atom_arr.atom_name, dtype=object)
+        elements = np.asarray(atom_arr.element, dtype=object)
+
+        annotations = atom_arr.get_annotation_categories()
+        hetero = (
+            np.asarray(atom_arr.hetero, dtype=bool)
+            if "hetero" in annotations
+            else np.zeros(n_atoms, dtype=bool)
+        )
+        b_factor = (
+            np.asarray(atom_arr.b_factor, dtype=np.float32)
+            if "b_factor" in annotations
+            else np.zeros(n_atoms, dtype=np.float32)
+        )
+
+        # Numeric chain ids assigned in order of first appearance so that
+        # metadata.chain_lookup round-trips through to_mmcif.
+        chain_label_to_numeric: dict[str, int] = {}
+        for lbl in chain_labels:
+            if lbl not in chain_label_to_numeric:
+                chain_label_to_numeric[lbl] = len(chain_label_to_numeric)
+
+        sequence: list[str] = []
+        token_to_atoms: list[list[int]] = []
+        token_chain_ids: list[int] = []
+        token_plddt: list[float] = []
+
+        def _close_token(start: int, end: int) -> None:
+            token_to_atoms.append([start, end])
+            sequence.append(str(res_names[start]))
+            token_chain_ids.append(chain_label_to_numeric[chain_labels[start]])
+            token_plddt.append(float(b_factor[start:end].mean()) / PLDDT_B_FACTOR_SCALE)
+
+        token_start = 0
+        prev_key: tuple[Any, int] | None = None
+        for i in range(n_atoms):
+            key = (chain_labels[i], int(res_ids[i]))
+            if i > 0 and key != prev_key:
+                _close_token(token_start, i)
+                token_start = i
+            prev_key = key
+        if n_atoms > 0:
+            _close_token(token_start, n_atoms)
+
+        chain_lookup = {num: lbl for lbl, num in chain_label_to_numeric.items()}
+        metadata = MolecularComplexMetadata(
+            entity_lookup={}, chain_lookup=chain_lookup, assembly_composition=None
+        )
+
+        return cls(
+            id=id,
+            sequence=sequence,
+            atom_positions=coords,
+            atom_elements=elements,
+            token_to_atoms=np.array(token_to_atoms, dtype=np.int32).reshape(-1, 2),
+            chain_id=np.array(token_chain_ids, dtype=np.int64),
+            plddt=np.array(token_plddt, dtype=np.float32),
+            metadata=metadata,
+            atom_names=atom_names,
+            atom_hetero=hetero,
+        )
+
     def _get_entity_mapping(
         self,
     ) -> tuple[dict[str, list[str]], dict[str, int], dict[int, tuple[str, ...]]]:

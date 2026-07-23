@@ -22,6 +22,8 @@ from dataclasses import dataclass
 from functools import cache
 from typing import Any
 
+os.environ.setdefault("CUBLAS_WORKSPACE_CONFIG", ":4096:8")
+
 import biotite.structure
 import modal
 import numpy as np
@@ -31,7 +33,10 @@ import torch.optim as optim
 from transformers.models.esmc.modeling_esmc import ESMCForMaskedLM
 from transformers.models.esmc.tokenization_esmc import ESMCTokenizer
 from transformers.models.esmfold2.modeling_esmfold2_common import (
+    BACKEND_CUEQ,
+    BACKEND_FUSED,
     CUE_AVAILABLE,
+    TRITON_KERNELS_AVAILABLE,
     PairUpdateBlock,
 )
 from transformers.models.esmfold2.modeling_esmfold2_common import (
@@ -88,7 +93,7 @@ MUTABLE_TOKEN = "#"
 BinderPromptStr = str
 
 # Design
-LOSS_WEIGHTS = {"intra_contact": 0.5, "inter_contact": 0.5, "glob": 0.2}
+LOSS_WEIGHTS = {"intra_contact": 0.5, "inter_contact": 0.5, "glob": 0.2, "epitope": 0.5}
 STEPS = 150
 LOG_INTERVAL = 5
 LEARNING_RATE = 0.1
@@ -338,8 +343,113 @@ def compute_globularity_loss(
     return F.elu(rg_term - rg_th)
 
 
+def get_epitope_mask(
+    target_sequence: str,
+    binder_length: int,
+    target_hotspot_ids: list[str],
+    batch_size: int,
+    device: torch.device,
+) -> torch.Tensor:
+    """Full-complex mask for sequence-local target hotspot residue IDs."""
+    target_length = len(target_sequence)
+    epitope_mask = torch.zeros(
+        target_length + binder_length, dtype=torch.bool, device=device
+    )
+    for hotspot_id in target_hotspot_ids:
+        assert len(hotspot_id) >= 2, (
+            f"Hotspot residue ID {hotspot_id!r} must have form <residue><idx>, "
+            "for example L150."
+        )
+        residue = hotspot_id[0]
+        hotspot_idx_text = hotspot_id[1:]
+        assert residue in PROTEIN_1TO3, (
+            f"Hotspot residue ID {hotspot_id!r} starts with unknown residue "
+            f"{residue!r}."
+        )
+        assert hotspot_idx_text.isdecimal(), (
+            f"Hotspot residue ID {hotspot_id!r} must have form <residue><idx>, "
+            "for example L150."
+        )
+        hotspot_idx = int(hotspot_idx_text)
+        assert 1 <= hotspot_idx <= target_length, (
+            f"Hotspot residue {hotspot_id!r} is out of range for target sequence "
+            f"length {target_length}. Hotspots are 1-indexed within the provided "
+            "target sequence."
+        )
+        target_residue = target_sequence[hotspot_idx - 1]
+        assert target_residue == residue, (
+            f"Hotspot residue ID {hotspot_id!r} does not match target sequence: "
+            f"target residue at 1-indexed position {hotspot_idx} is "
+            f"{target_residue!r}."
+        )
+        epitope_mask[hotspot_idx - 1] = True
+    return epitope_mask[None].repeat(batch_size, 1)
+
+
+def compute_epitope_loss(
+    distogram_logits: torch.Tensor,
+    epitope_mask: torch.Tensor,
+    target_length: int,
+    binder_length: int,
+    bin_distance: torch.Tensor,
+    epitope_contact_distance: float = 12.0,
+) -> torch.Tensor:
+    """Encourage binder contacts to the requested target hotspot residues.
+
+    Converts full-complex distogram logits into contact probabilities below
+    ``epitope_contact_distance``, then penalizes each hotspot by the best few
+    binder contacts. The target is assumed to occupy the first ``target_length``
+    positions of the complex and the binder the final ``binder_length`` positions.
+
+    Parameters
+    ----------
+    distogram_logits
+        Full-complex distogram logits with shape ``(B, L, L, num_bins)``.
+    epitope_mask
+        Boolean full-complex mask with shape ``(B, L)`` and true values at
+        target hotspot positions.
+    target_length
+        Number of target residues at the start of the complex sequence.
+    binder_length
+        Number of binder residues at the end of the complex sequence.
+    bin_distance
+        Distance represented by each distogram bin.
+    epitope_contact_distance
+        Distance threshold used to define a hotspot-binder contact.
+
+    Returns
+    -------
+    torch.Tensor
+        Per-example epitope losses with shape ``(B,)``.
+    """
+
+    B, L, L2, _ = distogram_logits.shape
+    assert L == L2, (L, L2)
+    assert L == target_length + binder_length, (L, target_length, binder_length)
+
+    binder_mask = torch.zeros((B, L), dtype=torch.bool, device=distogram_logits.device)
+    binder_mask[:, target_length:] = True
+
+    positive_mask = bin_distance < epitope_contact_distance
+    assert binder_mask.shape == (B, L), f"Binder mask: {binder_mask.shape} != {B, L}"
+    assert epitope_mask.shape == (B, L), f"Epitope mask: {epitope_mask.shape} != {B, L}"
+    # NOTE - this could be made bidirectional.
+    epitope_binder_mask = epitope_mask[:, :, None] & binder_mask[:, None, :]
+
+    probabilities = torch.softmax(distogram_logits, dim=-1)
+    positive_probs = torch.sum(probabilities * positive_mask, dim=-1)
+    contact_measure = -torch.log(positive_probs + 1e-8)
+
+    epitope_loss = masked_min_k(contact_measure, mask=epitope_binder_mask, k=5)
+    return masked_average(epitope_loss, mask=epitope_mask)
+
+
 def compute_structure_losses(
-    distogram_logits: torch.Tensor, binder_length: int
+    distogram_logits: torch.Tensor,
+    binder_length: int,
+    target_sequence: str | None = None,
+    target_hotspot_ids: list[str] | None = None,
+    epitope_contact_distance: float = 12.0,
 ) -> dict[str, torch.Tensor]:
     """Compute structural losses and a weighted total."""
 
@@ -359,6 +469,34 @@ def compute_structure_losses(
     total = total + LOSS_WEIGHTS["intra_contact"] * losses["intra_contact_loss"]
     total = total + LOSS_WEIGHTS["inter_contact"] * losses["inter_contact_loss"]
     total = total + LOSS_WEIGHTS["glob"] * losses["glob_loss"]
+    if target_hotspot_ids is not None:
+        target_length = distogram_logits.shape[1] - binder_length
+        assert (
+            target_sequence is not None
+        ), "target_sequence is required when target_hotspot_ids is provided."
+        assert (
+            "|" not in target_sequence
+        ), "Epitope loss only supports one target chain."
+        assert len(target_sequence) == target_length, (
+            f"Target sequence length {len(target_sequence)} does not match distogram "
+            f"target length {target_length}."
+        )
+        epitope_mask = get_epitope_mask(
+            target_sequence=target_sequence,
+            binder_length=binder_length,
+            target_hotspot_ids=target_hotspot_ids,
+            batch_size=B,
+            device=distogram_logits.device,
+        )
+        losses["epitope_loss"] = compute_epitope_loss(
+            distogram_logits=distogram_logits,
+            epitope_mask=epitope_mask,
+            target_length=target_length,
+            binder_length=binder_length,
+            bin_distance=bin_distance,
+            epitope_contact_distance=epitope_contact_distance,
+        )
+        total = total + LOSS_WEIGHTS["epitope"] * losses["epitope_loss"]
     losses["total_loss"] = total
     return losses
 
@@ -829,6 +967,7 @@ def design_binder(
     inversion_models: dict[str, ESMFold2ExperimentalModel],
     hf_critic_models: dict[str, ESMFold2ExperimentalModel],
     esmc_model: ESMCForMaskedLM,
+    scaling_critic_names: list[str] | None,
     target_name: str,
     target_sequence: str | None,
     binder_name: str,
@@ -836,6 +975,8 @@ def design_binder(
     is_antibody: bool | None,
     seed: int,
     batch_size: int = 1,
+    target_hotspot_ids: list[str] | None = None,
+    epitope_contact_distance: float = 12.0,
 ) -> tuple[list[str], Trajectory, list[dict]]:
     """
     Algorithm 11 Gradient-Guided Binder Sequence Optimization.
@@ -847,6 +988,9 @@ def design_binder(
     Hero critics expose iPTM; scaling critics contribute distogram scores only.
     ``distogram_binding_confidence`` / ``cdr_distogram_binding_confidence`` come
     from the distogram in all cases.
+
+    ``target_hotspot_ids`` enables epitope loss and is interpreted as 1-indexed
+    residue IDs within the provided target sequence, for example ``["L150"]``.
     """
     # Setup
     device = "cuda"
@@ -927,7 +1071,11 @@ def design_binder(
         )
         sequences: list[str] = fold_result["seq_list"]
         losses = compute_structure_losses(
-            fold_result["distogram_logits"], binder_length
+            fold_result["distogram_logits"],
+            binder_length,
+            target_sequence=target_sequence,
+            target_hotspot_ids=target_hotspot_ids,
+            epitope_contact_distance=epitope_contact_distance,
         )
         structure_loss = losses["total_loss"]
         structure_grad = torch.autograd.grad(structure_loss.mean(), logits)[0]
@@ -1002,44 +1150,64 @@ def design_binder(
     target_length = len(target_sequence.replace("|", ""))
     final_total_loss = trajectory[global_step - 1]["total_loss"]
     assert isinstance(final_total_loss, torch.Tensor)
-    for batch_idx in range(batch_size):
+
+    def score_critic(
+        critic_name: str,
+        critic_model: ESMFold2ExperimentalModel,
+        batch_idx: int,
+        is_scaling_critic: bool,
+    ) -> None:
         best_seq = best_sequences[batch_idx]
         binder_seq = best_seq.split("|")[-1]
         binder_design = sequence_to_one_hot(binder_seq)[..., 2:22]
-        for critic_name, critic_model in hf_critic_models.items():
-            is_scaling_critic = "ESMFold2-Experimental-Fast-base" in critic_name
-            if is_scaling_critic:
-                critic_model.cuda()
-            final_fold = fold_and_get_distogram(
-                critic_model,
-                target_sequence,
-                target_one_hot,
-                binder_design,
-                num_loops=3,
-                num_sampling_steps=200,
-                calculate_confidence=True,
-                seed=seed,
-            )
-            if is_scaling_critic:
-                critic_model.cpu()
-            pred_complex = build_complex(final_fold["inputs"], final_fold["output"])
-            iptm_proxy_scores = compute_distogram_iptm_proxy(
-                final_fold["distogram_logits"], target_length, binder_seq, is_antibody
-            )
-            iptm = final_fold["iptm"].item() if final_fold["iptm"] is not None else None
-            critic_results.append(
-                {
-                    "is_antibody": is_antibody,
-                    "critic_name": critic_name,
-                    "batch_idx": batch_idx,
-                    "designed_sequence": best_seq,
-                    "complex": pred_complex,
-                    "final_loss": final_total_loss[batch_idx].item(),
-                    "iptm": iptm,
-                    "logits": logits[batch_idx].detach().cpu(),
-                    **iptm_proxy_scores,
-                }
-            )
+        final_fold = fold_and_get_distogram(
+            critic_model,
+            target_sequence,
+            target_one_hot,
+            binder_design,
+            num_loops=3,
+            num_sampling_steps=1 if is_scaling_critic else 200,
+            calculate_confidence=not is_scaling_critic,
+            seed=seed,
+        )
+        pred_complex = (
+            None
+            if is_scaling_critic
+            else build_complex(final_fold["inputs"], final_fold["output"])
+        )
+        iptm_proxy_scores = compute_distogram_iptm_proxy(
+            final_fold["distogram_logits"], target_length, binder_seq, is_antibody
+        )
+        iptm_tensor = final_fold.get("iptm")
+        iptm = iptm_tensor.item() if iptm_tensor is not None else None
+        critic_results.append(
+            {
+                "is_antibody": is_antibody,
+                "critic_name": critic_name,
+                "is_scaling_critic": is_scaling_critic,
+                "batch_idx": batch_idx,
+                "designed_sequence": best_seq,
+                "complex": pred_complex,
+                "final_loss": final_total_loss[batch_idx].item(),
+                "iptm": iptm,
+                "logits": logits[batch_idx].detach().cpu(),
+                **iptm_proxy_scores,
+            }
+        )
+        del final_fold
+
+    for critic_name, critic_model in hf_critic_models.items():
+        for batch_idx in range(batch_size):
+            score_critic(critic_name, critic_model, batch_idx, is_scaling_critic=False)
+
+    for critic_name in scaling_critic_names or []:
+        critic_model = _load_hf_model(
+            critic_name, lm_dropout=0.25, cache_esmc=False, device="cuda"
+        )
+        for batch_idx in range(batch_size):
+            score_critic(critic_name, critic_model, batch_idx, is_scaling_critic=True)
+        del critic_model
+        torch.cuda.empty_cache()
 
     if not critic_results:
         for batch_idx in range(batch_size):
@@ -1076,7 +1244,12 @@ def _load_hf_model(
             _ESMC_CACHE[esmc_id] = model._esmc
         model._esmc = _ESMC_CACHE[esmc_id]
     model.configure_lm_dropout(lm_dropout, force_lm_dropout_during_inference=True)
-    model.set_kernel_backend("cuequivariance" if CUE_AVAILABLE else None)
+    kernel_backend = None
+    if TRITON_KERNELS_AVAILABLE:
+        kernel_backend = BACKEND_FUSED
+    elif CUE_AVAILABLE:
+        kernel_backend = BACKEND_CUEQ
+    model.set_kernel_backend(kernel_backend)
     return model.to(device=device).eval().requires_grad_(False)
 
 
@@ -1110,6 +1283,7 @@ class ESMFold2Design:
     scaling_critic_hf_paths: list[str] = []
 
     def load(self, use_scaling_critics: bool):
+        self.scaling_critic_hf_paths = []
         if use_scaling_critics:
             self.scaling_critic_hf_paths = [
                 f"ESMFold2-Experimental-Fast-base{size}-step{step}k"
@@ -1131,10 +1305,6 @@ class ESMFold2Design:
         for name in self.hero_critic_hf_paths:
             self.hf_critic_models[name] = _load_hf_model(
                 name, lm_dropout=0.25, cache_esmc=True, device="cuda"
-            )
-        for name in self.scaling_critic_hf_paths:
-            self.hf_critic_models[name] = _load_hf_model(
-                name, lm_dropout=0.25, cache_esmc=False, device="cpu"
             )
 
         self.esmc_model = ESMCForMaskedLM.from_pretrained(
@@ -1161,11 +1331,14 @@ class ESMFold2Design:
         is_antibody: bool | None = None,
         seed: int = 0,
         batch_size: int = 1,
+        target_hotspot_ids: list[str] | None = None,
+        epitope_contact_distance: float = 12.0,
     ) -> tuple[list[str], Trajectory, list[dict]]:
         return design_binder(
             self.inversion_models,
             self.hf_critic_models,
             self.esmc_model,
+            self.scaling_critic_hf_paths,
             target_name=target_name,
             target_sequence=target_sequence,
             binder_name=binder_name,
@@ -1173,6 +1346,8 @@ class ESMFold2Design:
             is_antibody=is_antibody,
             seed=seed,
             batch_size=batch_size,
+            target_hotspot_ids=target_hotspot_ids,
+            epitope_contact_distance=epitope_contact_distance,
         )
 
 
@@ -1251,9 +1426,12 @@ class ESMFold2DesignModal(ESMFold2Design):
     """
 
     use_scaling_critics: bool = modal.parameter(default=True)
+    deterministic: bool = modal.parameter(default=False)
 
     @modal.enter()
     def load(self):
+        if self.deterministic:
+            torch.use_deterministic_algorithms(True, warn_only=True)
         return super().load(self.use_scaling_critics)
 
     @modal.method()
@@ -1272,6 +1450,8 @@ def main(
     local: bool = False,
     seed: int = 0,
     batch_size: int = 1,
+    target_hotspot_ids: list[str] | None = None,
+    epitope_contact_distance: float = 12.0,
 ):
     if local:
         assert not use_scaling_critics, (
@@ -1295,6 +1475,8 @@ def main(
         is_antibody=is_antibody,
         seed=seed,
         batch_size=batch_size,
+        target_hotspot_ids=target_hotspot_ids,
+        epitope_contact_distance=epitope_contact_distance,
     )
 
     avg_final_loss = sum(r["final_loss"] for r in results) / len(results)

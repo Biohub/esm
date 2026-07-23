@@ -122,6 +122,18 @@ class ProteinComplexMetadata:
     assembly_composition: dict[str, list[str]] | None = None
 
 
+def _dockq_f1(f1: float, interface_rms: float, ligand_rms: float) -> float:
+    """DockQ's DockQ_F1: the DockQ formula with F1 substituted for fnat.
+
+    DockQ v2.1.2 dropped the DockQ_F1 output, so recompute it with the upstream
+    ``dockq_formula``. Imported lazily because DockQ is an optional dependency,
+    only needed when scoring.
+    """
+    from DockQ.DockQ import dockq_formula
+
+    return dockq_formula(f1, interface_rms, ligand_rms)
+
+
 @dataclass
 class DockQSingleScore:
     native_chains: tuple[str, str]
@@ -893,16 +905,19 @@ class ProteinComplex:
             interfaces.append(current_interface)
 
         def parse_dict(d: dict[str, Any]) -> DockQSingleScore:
+            interface_rms = float(d["iRMSD"])
+            ligand_rms = float(d["LRMSD"])
+            f1 = float(d["F1"])
             return DockQSingleScore(
                 native_chains=tuple(d["Native chains"]),
                 DockQ=float(d["DockQ"]),
-                interface_rms=float(d["irms"]),
-                ligand_rms=float(d["Lrms"]),  # Note the capitalization difference
+                interface_rms=interface_rms,
+                ligand_rms=ligand_rms,
                 fnat=float(d["fnat"]),
                 fnonnat=float(d["fnonnat"]),
                 clashes=float(d["clashes"]),
-                F1=float(d["F1"]),
-                DockQ_F1=float(d["DockQ_F1"]),
+                F1=f1,
+                DockQ_F1=_dockq_f1(f1, interface_rms, ligand_rms),
             )
 
         inv_mapping = {

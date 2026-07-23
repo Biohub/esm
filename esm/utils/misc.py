@@ -364,6 +364,13 @@ def maybe_tensor(x, convert_none_to_nan: bool = False) -> torch.Tensor | None:
     return torch.tensor(x)
 
 
+def to_float32(x):
+    """Upcast reduced-precision activations to float32"""
+    if isinstance(x, torch.Tensor) and x.is_floating_point():
+        return x.to(torch.float32)
+    return x
+
+
 def maybe_list(x, convert_nan_to_none: bool = False) -> list | None:
     if x is None:
         return None
