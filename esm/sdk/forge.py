@@ -36,7 +36,7 @@ from esm.utils.constants.models import (
     ESMFOLD2_FAST,
     ESMFOLD2_MAX_MSA_SEQS,
 )
-from esm.utils.misc import deserialize_tensors, maybe_list, maybe_tensor
+from esm.utils.misc import deserialize_tensors, maybe_list, maybe_tensor, to_float32
 from esm.utils.msa import MSA
 from esm.utils.structure.input_builder import (
     ProteinInput,
@@ -105,7 +105,7 @@ class SequenceStructureForgeInferenceClient(_BaseForgeInferenceClient):
         url: str = "https://biohub.ai",
         model: str | None = None,
         token: str = "",
-        request_timeout: int | None = None,
+        request_timeout: int | None = 120,
         min_retry_wait: int = 1,
         max_retry_wait: int = 10,
         max_retry_attempts: int = 5,
@@ -117,7 +117,7 @@ class SequenceStructureForgeInferenceClient(_BaseForgeInferenceClient):
             url: URL of the Forge/Biohub Platform server.
             model: Name of the model to be used for folding / inv folding.
             token: API token.
-            request_timeout: Override the system default request timeout, in seconds.
+            request_timeout: Override the system default request timeout (120s), in seconds.
         """
         super().__init__(
             model=model or "",
@@ -500,7 +500,7 @@ class ESM3ForgeInferenceClient(ESM3InferenceClient, _BaseForgeInferenceClient):
         model: str,
         url: str = "https://biohub.ai",
         token: str = "",
-        request_timeout: int | None = None,
+        request_timeout: int | None = 120,
         min_retry_wait: int = 1,
         max_retry_wait: int = 10,
         max_retry_attempts: int = 5,
@@ -1151,7 +1151,7 @@ class ESMCForgeInferenceClient(ESMCInferenceClient, _BaseForgeInferenceClient):
         model: str,
         url: str = "https://biohub.ai",
         token: str = "",
-        request_timeout: int | None = None,
+        request_timeout: int | None = 60,
         min_retry_wait: int = 1,
         max_retry_wait: int = 10,
         max_retry_attempts: int = 5,
@@ -1222,11 +1222,13 @@ class ESMCForgeInferenceClient(ESMCInferenceClient, _BaseForgeInferenceClient):
             )
             sae_outputs = cast(dict[str, torch.Tensor] | None, sae_outputs)
         output = LogitsOutput(
-            logits=ForwardTrackData(sequence=_maybe_logits(data, "sequence")),
-            embeddings=maybe_tensor(data["embeddings"]),
-            mean_embedding=data["mean_embedding"],
-            hidden_states=maybe_tensor(data["hidden_states"]),
-            mean_hidden_state=maybe_tensor(data["mean_hidden_state"]),
+            logits=ForwardTrackData(
+                sequence=to_float32(_maybe_logits(data, "sequence"))
+            ),
+            embeddings=to_float32(maybe_tensor(data["embeddings"])),
+            mean_embedding=to_float32(data["mean_embedding"]),
+            hidden_states=to_float32(maybe_tensor(data["hidden_states"])),
+            mean_hidden_state=to_float32(maybe_tensor(data["mean_hidden_state"])),
             sae_outputs=sae_outputs,
         )
         return output

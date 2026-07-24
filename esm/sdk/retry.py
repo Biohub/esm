@@ -7,7 +7,7 @@ from tenacity import (
     retry_if_exception,
     retry_if_result,
     stop_after_attempt,
-    wait_incrementing,
+    wait_random_exponential,
 )
 
 from esm.sdk.api import ESMProteinError
@@ -20,11 +20,11 @@ def retry_if_specific_error(exception):
     We only retry on specific errors.
     """
     return isinstance(exception, ESMProteinError) and exception.error_code in {
-        429,
-        500,
-        502,
-        504,
-        500,
+        429,  # Too Many Requests
+        500,  # Internal Server Error
+        502,  # Bad Gateway
+        503,  # Service Unavailable
+        504,  # Gateway Timeout
     }
 
 
@@ -56,8 +56,9 @@ def retry_decorator(func):
             retry_error_callback=return_last_value,
             retry=retry_if_result(retry_if_specific_error)
             | retry_if_exception(retry_if_specific_error),
-            wait=wait_incrementing(
-                increment=1, start=instance.min_retry_wait, max=instance.max_retry_wait
+            # Full-jitter exponential backoff
+            wait=wait_random_exponential(
+                multiplier=instance.min_retry_wait, max=instance.max_retry_wait
             ),
             stop=stop_after_attempt(instance.max_retry_attempts),
             before_sleep=log_retry_attempt,
@@ -73,8 +74,9 @@ def retry_decorator(func):
             retry_error_callback=return_last_value,
             retry=retry_if_result(retry_if_specific_error)
             | retry_if_exception(retry_if_specific_error),
-            wait=wait_incrementing(
-                increment=1, start=instance.min_retry_wait, max=instance.max_retry_wait
+            # Full-jitter exponential backoff
+            wait=wait_random_exponential(
+                multiplier=instance.min_retry_wait, max=instance.max_retry_wait
             ),
             stop=stop_after_attempt(instance.max_retry_attempts),
             before_sleep=log_retry_attempt,

@@ -109,6 +109,7 @@ class _BaseForgeInferenceClient:
         params: dict[str, Any] = {},
         headers: dict[str, str] = {},
         return_bytes: bool = False,
+        timeout: int | None = None,
     ):
         try:
             request, headers = self.prepare_request(
@@ -119,7 +120,7 @@ class _BaseForgeInferenceClient:
                 json=request,
                 params=params,
                 headers=headers,
-                timeout=self.request_timeout,
+                timeout=timeout if timeout is not None else self.request_timeout,
             )
             data = self.prepare_data(response, endpoint)
             return data
@@ -139,6 +140,7 @@ class _BaseForgeInferenceClient:
         params: dict[str, Any] = {},
         headers: dict[str, str] = {},
         return_bytes: bool = False,
+        timeout: int | None = None,
     ):
         try:
             request, headers = self.prepare_request(
@@ -149,7 +151,7 @@ class _BaseForgeInferenceClient:
                 json=request,
                 params=params,
                 headers=headers,
-                timeout=self.request_timeout,
+                timeout=timeout if timeout is not None else self.request_timeout,
             )
             data = self.prepare_data(response, endpoint)
             return data

@@ -74,7 +74,7 @@ environments:
       - conda: https://conda.anaconda.org/conda-forge/linux-64/matplotlib-base-3.10.5-py312he3d6523_0.conda
       - conda: https://conda.anaconda.org/conda-forge/linux-64/ncurses-6.5-h2d0b736_3.conda
       - conda: https://conda.anaconda.org/conda-forge/linux-64/nh3-0.2.21-py39h77e2912_1.conda
-      - conda: https://conda.anaconda.org/conda-forge/linux-64/numpy-1.26.4-py312heda63a1_0.conda
+      - conda: https://conda.anaconda.org/conda-forge/linux-64/numpy-2.3.5-py312h33ff503_1.conda
       - conda: https://conda.anaconda.org/conda-forge/linux-64/openjpeg-2.5.3-h55fea9a_1.conda
       - conda: https://conda.anaconda.org/conda-forge/linux-64/openssl-3.4.1-h7b32b05_0.conda
       - conda: https://conda.anaconda.org/conda-forge/linux-64/pandas-2.3.1-py312hf79963d_0.conda
@@ -102,6 +102,7 @@ environments:
       - conda: https://conda.anaconda.org/conda-forge/noarch/backports.tarfile-1.2.0-pyhd8ed1ab_1.conda
       - conda: https://conda.anaconda.org/conda-forge/noarch/certifi-2025.1.31-pyhd8ed1ab_0.conda
       - conda: https://conda.anaconda.org/conda-forge/noarch/charset-normalizer-3.4.1-pyhd8ed1ab_0.conda
+      - conda: https://conda.anaconda.org/conda-forge/noarch/colorama-0.4.6-pyhd8ed1ab_1.conda
       - conda: https://conda.anaconda.org/conda-forge/noarch/cpython-3.12.9-py312hd8ed1ab_1.conda
       - conda: https://conda.anaconda.org/conda-forge/noarch/cycler-0.12.1-pyhd8ed1ab_1.conda
       - conda: https://conda.anaconda.org/conda-forge/noarch/docutils-0.21.2-pyhd8ed1ab_1.conda
@@ -147,6 +148,7 @@ environments:
       - conda: https://conda.anaconda.org/conda-forge/noarch/zipp-3.21.0-pyhd8ed1ab_1.conda
       - pypi: .
       - pypi: git+https://github.com/Biohub/transformers.git?rev=main#3a8956fb4d4ea16b0ec8e71deef2c2909b6a5cbf
+      - pypi: git+https://github.com/nrontsis/DockQ.git?rev=ba4df5adaad7c77fd60851d0b7b05f2b77061ba2#ba4df5adaad7c77fd60851d0b7b05f2b77061ba2
       - pypi: https://files.pythonhosted.org/packages/00/78/9cbcc1c073b9d4918e925af1a059762265dc65004e020511b2a06fbfd020/pydssp-0.9.1-py3-none-any.whl
       - pypi: https://files.pythonhosted.org/packages/00/c0/8f5d070730d7836adc9c9b6408dec68c6ced86b304a9b26a14df072a6e8c/traitlets-5.14.3-py3-none-any.whl
       - pypi: https://files.pythonhosted.org/packages/02/e9/367e81e114deb92a6e0d5740f0bff4548af710be318af65265b9aad72237/botocore-1.40.9-py3-none-any.whl
@@ -183,6 +185,7 @@ environments:
       - pypi: https://files.pythonhosted.org/packages/7e/46/02ac5e262d4af18054b3e922b2baedbb2a03289ee792162de60a865defc5/accelerate-1.13.0-py3-none-any.whl
       - pypi: https://files.pythonhosted.org/packages/7e/f5/f66802a942d491edb555dd61e3a9961140fd64c90bce1eafd741609d334d/httpcore-1.0.9-py3-none-any.whl
       - pypi: https://files.pythonhosted.org/packages/80/cd/c607b6337ddcf55cc0249527819b727ef28481d7c56ace54cca69400c2b9/biotraj-1.2.2-cp312-cp312-manylinux_2_17_x86_64.manylinux2014_x86_64.whl
+      - pypi: https://files.pythonhosted.org/packages/81/b6/100d5811cb60bfc13626910cb48872b8ca53f1dcaf2127aac71185575a7f/parallelbar-2.5-py3-none-any.whl
       - pypi: https://files.pythonhosted.org/packages/87/20/199b8713428322a2f22b722c62b8cc278cc53dffa9705d744484b5035ee9/nvidia_nvtx_cu12-12.4.127-py3-none-manylinux2014_x86_64.whl
       - pypi: https://files.pythonhosted.org/packages/87/62/9773de14fe6c45c23649e98b83231fffd7b9892b6cf863251dc2afa73643/einops-0.8.1-py3-none-any.whl
       - pypi: https://files.pythonhosted.org/packages/8a/6d/44ad094874c6f1b9c654f8ed939590bdc408349f137f9b98a3a23ccec411/nvidia_curand_cu12-10.3.5.147-py3-none-manylinux2014_x86_64.whl
@@ -229,6 +232,7 @@ environments:
       - conda: https://conda.anaconda.org/conda-forge/noarch/ca-certificates-2025.8.3-hbd8a1cb_0.conda
       - conda: https://conda.anaconda.org/conda-forge/noarch/certifi-2025.8.3-pyhd8ed1ab_0.conda
       - conda: https://conda.anaconda.org/conda-forge/noarch/charset-normalizer-3.4.3-pyhd8ed1ab_0.conda
+      - conda: https://conda.anaconda.org/conda-forge/noarch/colorama-0.4.6-pyhd8ed1ab_1.conda
       - conda: https://conda.anaconda.org/conda-forge/noarch/cpython-3.12.11-py312hd8ed1ab_0.conda
       - conda: https://conda.anaconda.org/conda-forge/noarch/cycler-0.12.1-pyhd8ed1ab_1.conda
       - conda: https://conda.anaconda.org/conda-forge/noarch/docutils-0.22-pyhd8ed1ab_0.conda
@@ -324,7 +328,7 @@ environments:
       - conda: https://conda.anaconda.org/conda-forge/osx-arm64/matplotlib-base-3.10.5-py312h05635fa_0.conda
       - conda: https://conda.anaconda.org/conda-forge/osx-arm64/ncurses-6.5-h5e97a16_3.conda
       - conda: https://conda.anaconda.org/conda-forge/osx-arm64/nh3-0.3.0-py39h24c5d98_0.conda
-      - conda: https://conda.anaconda.org/conda-forge/osx-arm64/numpy-1.26.4-py312h8442bc7_0.conda
+      - conda: https://conda.anaconda.org/conda-forge/osx-arm64/numpy-2.3.5-py312he281c53_1.conda
       - conda: https://conda.anaconda.org/conda-forge/osx-arm64/openjpeg-2.5.3-h889cd5d_1.conda
       - conda: https://conda.anaconda.org/conda-forge/osx-arm64/openssl-3.5.2-he92f556_0.conda
       - conda: https://conda.anaconda.org/conda-forge/osx-arm64/pandas-2.3.1-py312h98f7732_0.conda
@@ -347,6 +351,7 @@ environments:
       - conda: https://conda.anaconda.org/conda-forge/osx-arm64/zstd-1.5.7-h6491c7d_2.conda
       - pypi: .
       - pypi: git+https://github.com/Biohub/transformers.git?rev=main#3a8956fb4d4ea16b0ec8e71deef2c2909b6a5cbf
+      - pypi: git+https://github.com/nrontsis/DockQ.git?rev=ba4df5adaad7c77fd60851d0b7b05f2b77061ba2#ba4df5adaad7c77fd60851d0b7b05f2b77061ba2
       - pypi: https://files.pythonhosted.org/packages/00/78/9cbcc1c073b9d4918e925af1a059762265dc65004e020511b2a06fbfd020/pydssp-0.9.1-py3-none-any.whl
       - pypi: https://files.pythonhosted.org/packages/00/c0/8f5d070730d7836adc9c9b6408dec68c6ced86b304a9b26a14df072a6e8c/traitlets-5.14.3-py3-none-any.whl
       - pypi: https://files.pythonhosted.org/packages/02/e9/367e81e114deb92a6e0d5740f0bff4548af710be318af65265b9aad72237/botocore-1.40.9-py3-none-any.whl
@@ -383,6 +388,7 @@ environments:
       - pypi: https://files.pythonhosted.org/packages/7e/46/02ac5e262d4af18054b3e922b2baedbb2a03289ee792162de60a865defc5/accelerate-1.13.0-py3-none-any.whl
       - pypi: https://files.pythonhosted.org/packages/7e/f5/f66802a942d491edb555dd61e3a9961140fd64c90bce1eafd741609d334d/httpcore-1.0.9-py3-none-any.whl
       - pypi: https://files.pythonhosted.org/packages/80/c4/f5af4c1ca8c1eeb2e92ccca14ce8effdeec651d5ab6053c589b074eda6e1/psutil-7.2.2-cp36-abi3-macosx_11_0_arm64.whl
+      - pypi: https://files.pythonhosted.org/packages/81/b6/100d5811cb60bfc13626910cb48872b8ca53f1dcaf2127aac71185575a7f/parallelbar-2.5-py3-none-any.whl
       - pypi: https://files.pythonhosted.org/packages/87/62/9773de14fe6c45c23649e98b83231fffd7b9892b6cf863251dc2afa73643/einops-0.8.1-py3-none-any.whl
       - pypi: https://files.pythonhosted.org/packages/8c/c9/bb114c158540ee17907ec470d01980957fdaf87b4aa07914c24eba87b9c6/safetensors-0.6.2-cp38-abi3-macosx_11_0_arm64.whl
       - pypi: https://files.pythonhosted.org/packages/8e/37/efad0257dc6e593a18957422533ff0f87ede7c9c6ea010a2177d738fb82f/pure_eval-0.2.3-py3-none-any.whl
@@ -507,7 +513,7 @@ environments:
       - conda: https://conda.anaconda.org/conda-forge/linux-64/mysql-libs-9.0.1-he0572af_6.conda
       - conda: https://conda.anaconda.org/conda-forge/linux-64/ncurses-6.5-h2d0b736_3.conda
       - conda: https://conda.anaconda.org/conda-forge/linux-64/nh3-0.2.21-py39h77e2912_1.conda
-      - conda: https://conda.anaconda.org/conda-forge/linux-64/numpy-1.26.4-py312heda63a1_0.conda
+      - conda: https://conda.anaconda.org/conda-forge/linux-64/numpy-2.3.5-py312h33ff503_1.conda
       - conda: https://conda.anaconda.org/conda-forge/linux-64/openjpeg-2.5.3-h55fea9a_1.conda
       - conda: https://conda.anaconda.org/conda-forge/linux-64/openldap-2.6.9-he970967_0.conda
       - conda: https://conda.anaconda.org/conda-forge/linux-64/openssl-3.4.1-h7b32b05_0.conda
@@ -635,6 +641,7 @@ environments:
       - conda: https://conda.anaconda.org/conda-forge/noarch/zipp-3.21.0-pyhd8ed1ab_1.conda
       - pypi: .
       - pypi: git+https://github.com/Biohub/transformers.git?rev=main#3a8956fb4d4ea16b0ec8e71deef2c2909b6a5cbf
+      - pypi: git+https://github.com/nrontsis/DockQ.git?rev=ba4df5adaad7c77fd60851d0b7b05f2b77061ba2#ba4df5adaad7c77fd60851d0b7b05f2b77061ba2
       - pypi: https://files.pythonhosted.org/packages/00/78/9cbcc1c073b9d4918e925af1a059762265dc65004e020511b2a06fbfd020/pydssp-0.9.1-py3-none-any.whl
       - pypi: https://files.pythonhosted.org/packages/00/c0/8f5d070730d7836adc9c9b6408dec68c6ced86b304a9b26a14df072a6e8c/traitlets-5.14.3-py3-none-any.whl
       - pypi: https://files.pythonhosted.org/packages/02/e9/367e81e114deb92a6e0d5740f0bff4548af710be318af65265b9aad72237/botocore-1.40.9-py3-none-any.whl
@@ -671,6 +678,7 @@ environments:
       - pypi: https://files.pythonhosted.org/packages/7e/46/02ac5e262d4af18054b3e922b2baedbb2a03289ee792162de60a865defc5/accelerate-1.13.0-py3-none-any.whl
       - pypi: https://files.pythonhosted.org/packages/7e/f5/f66802a942d491edb555dd61e3a9961140fd64c90bce1eafd741609d334d/httpcore-1.0.9-py3-none-any.whl
       - pypi: https://files.pythonhosted.org/packages/80/cd/c607b6337ddcf55cc0249527819b727ef28481d7c56ace54cca69400c2b9/biotraj-1.2.2-cp312-cp312-manylinux_2_17_x86_64.manylinux2014_x86_64.whl
+      - pypi: https://files.pythonhosted.org/packages/81/b6/100d5811cb60bfc13626910cb48872b8ca53f1dcaf2127aac71185575a7f/parallelbar-2.5-py3-none-any.whl
       - pypi: https://files.pythonhosted.org/packages/87/20/199b8713428322a2f22b722c62b8cc278cc53dffa9705d744484b5035ee9/nvidia_nvtx_cu12-12.4.127-py3-none-manylinux2014_x86_64.whl
       - pypi: https://files.pythonhosted.org/packages/87/62/9773de14fe6c45c23649e98b83231fffd7b9892b6cf863251dc2afa73643/einops-0.8.1-py3-none-any.whl
       - pypi: https://files.pythonhosted.org/packages/8a/6d/44ad094874c6f1b9c654f8ed939590bdc408349f137f9b98a3a23ccec411/nvidia_curand_cu12-10.3.5.147-py3-none-manylinux2014_x86_64.whl
@@ -834,7 +842,7 @@ environments:
       - conda: https://conda.anaconda.org/conda-forge/osx-arm64/matplotlib-base-3.10.5-py312h05635fa_0.conda
       - conda: https://conda.anaconda.org/conda-forge/osx-arm64/ncurses-6.5-h5e97a16_3.conda
       - conda: https://conda.anaconda.org/conda-forge/osx-arm64/nh3-0.3.0-py39h24c5d98_0.conda
-      - conda: https://conda.anaconda.org/conda-forge/osx-arm64/numpy-1.26.4-py312h8442bc7_0.conda
+      - conda: https://conda.anaconda.org/conda-forge/osx-arm64/numpy-2.3.5-py312he281c53_1.conda
       - conda: https://conda.anaconda.org/conda-forge/osx-arm64/openjpeg-2.5.3-h889cd5d_1.conda
       - conda: https://conda.anaconda.org/conda-forge/osx-arm64/openssl-3.5.2-he92f556_0.conda
       - conda: https://conda.anaconda.org/conda-forge/osx-arm64/pandas-2.3.1-py312h98f7732_0.conda
@@ -861,6 +869,7 @@ environments:
       - conda: https://conda.anaconda.org/conda-forge/osx-arm64/zstd-1.5.7-h6491c7d_2.conda
       - pypi: .
       - pypi: git+https://github.com/Biohub/transformers.git?rev=main#3a8956fb4d4ea16b0ec8e71deef2c2909b6a5cbf
+      - pypi: git+https://github.com/nrontsis/DockQ.git?rev=ba4df5adaad7c77fd60851d0b7b05f2b77061ba2#ba4df5adaad7c77fd60851d0b7b05f2b77061ba2
       - pypi: https://files.pythonhosted.org/packages/00/78/9cbcc1c073b9d4918e925af1a059762265dc65004e020511b2a06fbfd020/pydssp-0.9.1-py3-none-any.whl
       - pypi: https://files.pythonhosted.org/packages/00/c0/8f5d070730d7836adc9c9b6408dec68c6ced86b304a9b26a14df072a6e8c/traitlets-5.14.3-py3-none-any.whl
       - pypi: https://files.pythonhosted.org/packages/02/e9/367e81e114deb92a6e0d5740f0bff4548af710be318af65265b9aad72237/botocore-1.40.9-py3-none-any.whl
@@ -897,6 +906,7 @@ environments:
       - pypi: https://files.pythonhosted.org/packages/7e/46/02ac5e262d4af18054b3e922b2baedbb2a03289ee792162de60a865defc5/accelerate-1.13.0-py3-none-any.whl
       - pypi: https://files.pythonhosted.org/packages/7e/f5/f66802a942d491edb555dd61e3a9961140fd64c90bce1eafd741609d334d/httpcore-1.0.9-py3-none-any.whl
       - pypi: https://files.pythonhosted.org/packages/80/c4/f5af4c1ca8c1eeb2e92ccca14ce8effdeec651d5ab6053c589b074eda6e1/psutil-7.2.2-cp36-abi3-macosx_11_0_arm64.whl
+      - pypi: https://files.pythonhosted.org/packages/81/b6/100d5811cb60bfc13626910cb48872b8ca53f1dcaf2127aac71185575a7f/parallelbar-2.5-py3-none-any.whl
       - pypi: https://files.pythonhosted.org/packages/87/62/9773de14fe6c45c23649e98b83231fffd7b9892b6cf863251dc2afa73643/einops-0.8.1-py3-none-any.whl
       - pypi: https://files.pythonhosted.org/packages/8c/c9/bb114c158540ee17907ec470d01980957fdaf87b4aa07914c24eba87b9c6/safetensors-0.6.2-cp38-abi3-macosx_11_0_arm64.whl
       - pypi: https://files.pythonhosted.org/packages/8e/37/efad0257dc6e593a18957422533ff0f87ede7c9c6ea010a2177d738fb82f/pure_eval-0.2.3-py3-none-any.whl
@@ -2139,17 +2149,18 @@ packages:
   - pkg:pypi/nh3?source=hash-mapping
   size: 621078
   timestamp: 1741652643562
-- conda: https://conda.anaconda.org/conda-forge/linux-64/numpy-1.26.4-py312heda63a1_0.conda
-  sha256: fe3459c75cf84dcef6ef14efcc4adb0ade66038ddd27cadb894f34f4797687d8
-  md5: d8285bea2a350f63fab23bf460221f3f
+- conda: https://conda.anaconda.org/conda-forge/linux-64/numpy-2.3.5-py312h33ff503_1.conda
+  sha256: 76ad6a6f4761084b074a587fe1512956891f04b5250cec0fd39aca0f39ad122b
+  md5: 03baecffb72fa96fe234fd505908065f
   depends:
+  - python
+  - __glibc >=2.17,<3.0.a0
+  - libstdcxx >=14
+  - libgcc >=14
   - libblas >=3.9.0,<4.0a0
-  - libcblas >=3.9.0,<4.0a0
-  - libgcc-ng >=12
   - liblapack >=3.9.0,<4.0a0
-  - libstdcxx-ng >=12
-  - python >=3.12,<3.13.0a0
   - python_abi 3.12.* *_cp312
+  - libcblas >=3.9.0,<4.0a0
   constrains:
   - numpy-base <0a0
   license: BSD-3-Clause
@@ -2158,9 +2169,9 @@ packages:
   - pkg:pypi/numpy?source=hash-mapping
   run_exports:
     weak:
-    - numpy >=1.26.4,<2.0a0
-  size: 7484186
-  timestamp: 1707225809722
+    - numpy >=1.23,<3
+  size: 8820597
+  timestamp: 1766383409220
 - conda: https://conda.anaconda.org/conda-forge/linux-64/openjpeg-2.5.3-h55fea9a_1.conda
   sha256: 0b7396dacf988f0b859798711b26b6bc9c6161dca21bacfd778473da58730afa
   md5: 01243c4aaf71bde0297966125aea4706
@@ -4856,16 +4867,17 @@ packages:
   - pkg:pypi/nh3?source=hash-mapping
   size: 624089
   timestamp: 1752853325963
-- conda: https://conda.anaconda.org/conda-forge/osx-arm64/numpy-1.26.4-py312h8442bc7_0.conda
-  sha256: c8841d6d6f61fd70ca80682efbab6bdb8606dc77c68d8acabfbd7c222054f518
-  md5: d83fc83d589e2625a3451c9a7e21047c
+- conda: https://conda.anaconda.org/conda-forge/osx-arm64/numpy-2.3.5-py312he281c53_1.conda
+  sha256: 0377c031951fc7ac3023f4b832c4a075e0e562015060e6f87bd751b45a1ef5ab
+  md5: 5a064b1a93c26d2960bbc49fa1de524b
   depends:
+  - python
+  - libcxx >=19
+  - __osx >=11.0
+  - python 3.12.* *_cpython
+  - liblapack >=3.9.0,<4.0a0
   - libblas >=3.9.0,<4.0a0
   - libcblas >=3.9.0,<4.0a0
-  - libcxx >=16
-  - liblapack >=3.9.0,<4.0a0
-  - python >=3.12,<3.13.0a0
-  - python >=3.12,<3.13.0a0 *_cpython
   - python_abi 3.12.* *_cp312
   constrains:
   - numpy-base <0a0
@@ -4875,9 +4887,9 @@ packages:
   - pkg:pypi/numpy?source=hash-mapping
   run_exports:
     weak:
-    - numpy >=1.26.4,<2.0a0
-  size: 6073136
-  timestamp: 1707226249608
+    - numpy >=1.23,<3
+  size: 6706018
+  timestamp: 1766383302517
 - conda: https://conda.anaconda.org/conda-forge/osx-arm64/openjpeg-2.5.3-h889cd5d_1.conda
   sha256: 6013916893fcd9bc97c479279cfe4616de7735ec566bad0ee41bc729e14d31b2
   md5: ab581998c77c512d455a13befcddaac3
@@ -5278,6 +5290,7 @@ packages:
   - pygtrie
   - dna-features-viewer
   - accelerate
+  - dockq @ git+https://github.com/nrontsis/DockQ.git@ba4df5adaad7c77fd60851d0b7b05f2b77061ba2
   requires_python: '>=3.12,<3.13'
 - pypi: git+https://github.com/Biohub/transformers.git?rev=main#3a8956fb4d4ea16b0ec8e71deef2c2909b6a5cbf
   name: transformers
@@ -5741,6 +5754,15 @@ packages:
   - opentelemetry-exporter-otlp ; extra == 'open-telemetry'
   - opentelemetry-sdk ; extra == 'open-telemetry'
   requires_python: '>=3.9.0'
+- pypi: git+https://github.com/nrontsis/DockQ.git?rev=ba4df5adaad7c77fd60851d0b7b05f2b77061ba2#ba4df5adaad7c77fd60851d0b7b05f2b77061ba2
+  name: dockq
+  version: 2.1.3
+  requires_dist:
+  - numpy>=2.0
+  - biopython>=1.79
+  - networkx
+  - parallelbar
+  requires_python: '>=3.10'
 - pypi: https://files.pythonhosted.org/packages/00/78/9cbcc1c073b9d4918e925af1a059762265dc65004e020511b2a06fbfd020/pydssp-0.9.1-py3-none-any.whl
   name: pydssp
   version: 0.9.1
@@ -6838,6 +6860,14 @@ packages:
   - psutil ; extra == 'test'
   - netcdf4>=1.7.1 ; extra == 'test'
   requires_python: '>=3.10'
+- pypi: https://files.pythonhosted.org/packages/81/b6/100d5811cb60bfc13626910cb48872b8ca53f1dcaf2127aac71185575a7f/parallelbar-2.5-py3-none-any.whl
+  name: parallelbar
+  version: '2.5'
+  sha256: 2aba5064e313cdd2fe49350db512ed0d4bc779f43e370e51c44d2bac347af43e
+  requires_dist:
+  - tqdm
+  - colorama
+  - dill ; extra == 'dill'
 - pypi: https://files.pythonhosted.org/packages/87/20/199b8713428322a2f22b722c62b8cc278cc53dffa9705d744484b5035ee9/nvidia_nvtx_cu12-12.4.127-py3-none-manylinux2014_x86_64.whl
   name: nvidia-nvtx-cu12
   version: 12.4.127

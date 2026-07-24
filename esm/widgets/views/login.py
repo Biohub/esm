@@ -52,7 +52,7 @@ def create_login_ui(client_container: ClientInitContainer):
 
     # If not logged in, show login form
     forge_info = widgets.HTML(
-        value="<p>Copy a token from your <a href='https://biohub.ai/console'>Forge console page</a> and paste it below:</p>"
+        value="<p>Copy a token from your <a href='https://biohub.ai/developer-console/api-keys'>Biohub developer console</a> and paste it below:</p>"
     )
     forge_token_input = widgets.Text(
         description="Token:",
@@ -96,7 +96,7 @@ def create_login_ui(client_container: ClientInitContainer):
     )
 
     forge_model_selection_info = widgets.HTML(
-        value="<p>Enter the model name from the <a href='https://biohub.ai/console'>Forge console page</a> that you would like to use:</p>"
+        value="<p>Enter the model name from the <a href='https://biohub.ai/developer-console/rate-limits'>Biohub developer console</a> that you would like to use:</p>"
     )
 
     model_selection_header = widgets.HTML(value="<h3>Select a Model</h3>")
