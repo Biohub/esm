@@ -82,12 +82,14 @@ class MSA(SequentialDataclass):
         entries = []
         deletion_rows: list[np.ndarray] = []
         for header, raw in islice(read_sequences(path), max_sequences):
-            deletion_rows.append(a3m_deletion_counts(raw))
+            deletion_row = a3m_deletion_counts(raw)
+            if deletion_rows and len(deletion_row) != len(deletion_rows[0]):
+                raise ValueError(
+                    "A3M match-column count mismatch. "
+                    f"Expected: {len(deletion_rows[0])}, Received: {len(deletion_row)}"
+                )
+            deletion_rows.append(deletion_row)
             seq = remove_insertions_from_sequence(raw) if remove_insertions else raw
-            if entries:
-                assert (
-                    len(seq) == len(entries[0].sequence)
-                ), f"Sequence length mismatch. Expected: {len(entries[0].sequence)}, Received: {len(seq)}"
             entries.append(FastaEntry(header, seq))
         deletions = (
             np.stack(deletion_rows).astype(np.float32) if deletion_rows else None
@@ -159,7 +161,6 @@ class MSA(SequentialDataclass):
         ]
         return cls(entries)
 
-    # TODO(jmaccarl): set remove_insertions to True by default here to match other utils
     @classmethod
     def from_sequences(
         cls, sequences: list[str], remove_insertions: bool = False
@@ -177,9 +178,9 @@ class MSA(SequentialDataclass):
         """Serialize for the Forge wire / storage (mirrors ``ProteinComplex``).
 
         ``deletions`` carries the per-(row, match-column) a3m deletion counts (set by
-        :meth:`from_a3m`) alongside the sequences, so the feature survives even when the
-        default ``remove_insertions`` strips the lowercase insertions out of the
-        sequences. With ``json_serializable=True`` the array is returned as a list.
+        :meth:`from_a3m`) alongside the sequences, so the feature survives when
+        ``remove_insertions=True`` strips lowercase insertions. With
+        ``json_serializable=True`` the array is returned as a list.
         """
         dct: dict[str, Any] = {"sequences": self.sequences}
         if self.deletions is not None:

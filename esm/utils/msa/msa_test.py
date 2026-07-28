@@ -52,8 +52,17 @@ def test_a3m_deletion_counts_vectorized():
         )
 
 
+def test_from_a3m_preserves_insertions_by_default(tmp_path):
+    p = tmp_path / "m.a3m"
+    _write_a3m(p, gz=False)
+    msa = MSA.from_a3m(str(p))
+    assert msa.sequences == ["MKLNT", "MKaaLNT", "M-LNcT"]
+    assert msa.deletions is not None
+    np.testing.assert_array_equal(msa.deletions, _EXPECTED_DELETIONS)
+
+
 def test_from_a3m_records_deletions(tmp_path):
-    msa = _a3m_msa(tmp_path)  # remove_insertions=True (default)
+    msa = _a3m_msa(tmp_path)
     # stored sequences are insertion-stripped (equal length = query length)
     assert msa.sequences == ["MKLNT", "MKLNT", "M-LNT"]
     assert msa.deletions is not None
