@@ -419,8 +419,8 @@ class StructureTokenDecoder(nn.Module):
         # This might be broken for chainbreak tokens? We might align to the chainbreak
         ptm = compute_tm(
             pae_logits,  # type: ignore
-            aa_mask=~special_tokens_mask,  # ty:ignore[unknown-argument]
-            max_bin=self.max_pae_bin,  # ty:ignore[unknown-argument]
+            aa_mask=~special_tokens_mask,
+            max_bin=self.max_pae_bin,
         )
 
         plddt_logits = self.plddt_head(x)

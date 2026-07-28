@@ -428,7 +428,7 @@ class SequenceStructureForgeInferenceClient(_BaseForgeInferenceClient):
         self,
         coordinates: torch.Tensor,
         config: InverseFoldingConfig,
-        potential_sequence_of_concern: bool,
+        potential_sequence_of_concern: bool = False,
         sequence: str | None = None,
         model_name: str | None = None,
     ) -> ESMProtein | ESMProteinError:
@@ -464,7 +464,7 @@ class SequenceStructureForgeInferenceClient(_BaseForgeInferenceClient):
         self,
         coordinates: torch.Tensor,
         config: InverseFoldingConfig,
-        potential_sequence_of_concern: bool,
+        potential_sequence_of_concern: bool = False,
         sequence: str | None = None,
         model_name: str | None = None,
     ) -> ESMProtein | ESMProteinError:
