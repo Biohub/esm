@@ -136,7 +136,6 @@ if __name__ == "__main__":
         print(
             "To try this script with a Forge/Biohub Platform API, please run ESM_API_KEY=your_api_key python esm3.py"
         )
-        main(ESMC.from_pretrained("esm3_sm_open_v1"))
         model = ESMC.from_pretrained("esmc_300m")
         main(model)
         raw_forward(model)

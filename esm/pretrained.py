@@ -1,10 +1,12 @@
 import inspect
+import json
+from pathlib import Path
 from typing import Callable
 
 import torch
 import torch.nn as nn
 from accelerate import init_empty_weights
-from huggingface_hub import load_torch_model
+from huggingface_hub import load_state_dict_from_file
 
 from esm.models.esm3 import ESM3
 from esm.models.esmc import ESMC
@@ -72,7 +74,11 @@ def ESMC_300M_202412(device: torch.device | str = "cpu", use_flash_attn: bool = 
             tokenizer=get_esmc_model_tokenizers(),
             use_flash_attn=use_flash_attn,
         ).eval()
-    load_torch_model(model, data_root("esmc-300"))
+    state_dict = torch.load(
+        data_root("esmc-300") / "data/weights/esmc_300m_2024_12_v0.pth",
+        map_location=device,
+    )
+    model.load_state_dict(state_dict, assign=True)
     model = model.to(device)
     return model
 
@@ -86,9 +92,36 @@ def ESMC_600M_202412(device: torch.device | str = "cpu", use_flash_attn: bool = 
             tokenizer=get_esmc_model_tokenizers(),
             use_flash_attn=use_flash_attn,
         ).eval()
-    load_torch_model(model, data_root("esmc-600"))
+    state_dict = torch.load(
+        data_root("esmc-600") / "data/weights/esmc_600m_2024_12_v0.pth",
+        map_location=device,
+    )
+    model.load_state_dict(state_dict, assign=True)
     model = model.to(device)
     return model
+
+
+def _esmc_6b_state_dict(root: Path) -> dict[str, torch.Tensor]:
+    """Read the sharded ESMC 6B checkpoint under ESMC's own parameter names.
+
+    The published weights are exported from the HuggingFace ``ESMCForMaskedLM``
+    wrapper, which nests the backbone under ``esmc.`` and names the output head
+    ``lm_head``. ``ESMC`` holds those same modules at the top level, with the head
+    as ``sequence_head``.
+    """
+    index = json.loads((root / "model.safetensors.index.json").read_text())
+    shards: dict[str, torch.Tensor] = {}
+    for shard in sorted(set(index["weight_map"].values())):
+        shards.update(load_state_dict_from_file(root / shard))
+
+    state_dict = {}
+    for key, value in shards.items():
+        if key.startswith("esmc."):
+            key = key[len("esmc.") :]
+        elif key.startswith("lm_head."):
+            key = "sequence_head." + key[len("lm_head.") :]
+        state_dict[key] = value
+    return state_dict
 
 
 def ESMC_6B_202412(device: torch.device | str = "cpu", use_flash_attn: bool = True):
@@ -100,7 +133,8 @@ def ESMC_6B_202412(device: torch.device | str = "cpu", use_flash_attn: bool = Tr
             tokenizer=get_esmc_model_tokenizers(),
             use_flash_attn=use_flash_attn,
         ).eval()
-    load_torch_model(model, data_root("esmc-6b"))
+    state_dict = _esmc_6b_state_dict(data_root("esmc-6b"))
+    model.load_state_dict(state_dict, assign=True)
     model = model.to(device)
     return model
 
