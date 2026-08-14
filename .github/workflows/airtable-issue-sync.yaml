@@ -1,0 +1,30 @@
+name: Sync issues to Airtable
+
+on:
+  issues:
+    types: [opened, edited, reopened, closed, labeled, unlabeled]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: airtable-sync-${{ github.event.issue.number }}
+  cancel-in-progress: false
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Sync issue to Airtable
+        run: python .github/scripts/airtable_issue_sync.py
+        env:
+          AIRTABLE_TOKEN: ${{ secrets.AIRTABLE_TOKEN }}
+          AIRTABLE_BASE: ${{ vars.AIRTABLE_BASE }}
+          AIRTABLE_TABLE: ${{ vars.AIRTABLE_TABLE }}

@@ -1048,6 +1048,19 @@ class ProteinChain:
         atom_array = PDBFile.read(path).get_structure(
             model=1, extra_fields=["b_factor"]
         )
+        return cls._from_atomarray(
+            atom_array, id=file_id, chain_id=chain_id, is_predicted=is_predicted
+        )
+
+    @classmethod
+    def _from_atomarray(
+        cls,
+        atom_array: bs.AtomArray,
+        id: str,
+        chain_id: str = "detect",
+        is_predicted: bool = False,
+    ) -> "ProteinChain":
+        """Shared body of :meth:`from_pdb` and :meth:`from_atomarray`."""
         if chain_id == "detect":
             chain_id = atom_array.chain_id[0]
         atom_array = atom_array[
@@ -1076,9 +1089,6 @@ class ProteinChain:
         confidence = np.ones([num_res], dtype=np.float32)
 
         for i, res in enumerate(bs.residue_iter(atom_array)):
-            chain = atom_array[atom_array.chain_id == chain_id]
-            assert isinstance(chain, bs.AtomArray)
-
             res_index = res[0].res_id
             residue_index[i] = res_index
             insertion_code[i] = res[0].ins_code
@@ -1101,7 +1111,7 @@ class ProteinChain:
         assert all(sequence), "Some residue name was not specified correctly"
 
         return cls(
-            id=file_id,
+            id=id,
             sequence=sequence,
             chain_id=chain_id,
             entity_id=entity_id,
@@ -1151,16 +1161,14 @@ class ProteinChain:
         cls, atom_array: bs.AtomArray, id: str | None = None, is_predicted: bool = False
     ) -> "ProteinChain":
         """A simple converter from bs.AtomArray -> ProteinChain.
-        Uses PDB file format as intermediate."""
-        atom_array = atom_array.copy()
-        atom_array.box = None  # remove surrounding box, from_pdb won't handle this
-        pdb_file = PDBFile()
-        pdb_file.set_structure(atom_array)
 
-        buf = io.StringIO()
-        pdb_file.write(buf)
-        buf.seek(0)
-        return cls.from_pdb(buf, id=id, is_predicted=is_predicted)
+        Must NOT round-trip through PDB text: with a blank chain id the fixed-width
+        columns push the thousands digit of ``res_id`` into the chain-id field, so
+        residues numbered 1000 and above are silently dropped.
+        """
+        return cls._from_atomarray(
+            atom_array, id=id if id is not None else "null", is_predicted=is_predicted
+        )
 
     def get_normalization_frame(self) -> Affine3D:
         """Given a set of coordinates, compute a single frame.

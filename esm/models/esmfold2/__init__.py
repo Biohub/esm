@@ -1,3 +1,10 @@
+from typing import TYPE_CHECKING
+
+from esm.models.esmfold2.config import (
+    ESMFOLD2_EXPERIMENTAL_HF_REPO,
+    ESMFOLD2_HF_REPO,
+    EsmFold2Config,
+)
 from esm.models.esmfold2.conformers import load_ccd
 from esm.models.esmfold2.constants import ELEMENT_NUMBER_TO_SYMBOL
 from esm.models.esmfold2.prepare_input import ChainInfo, prepare_esmfold2_input
@@ -19,9 +26,31 @@ from esm.utils.structure.molecular_complex import (
     MolecularComplexResult,
 )
 
+if TYPE_CHECKING:
+    from esm.models.esmfold2.experimental import EsmFold2ExperimentalModel
+    from esm.models.esmfold2.model import EsmFold2Model
+
+
+def __getattr__(name: str) -> object:
+    if name == "EsmFold2ExperimentalModel":
+        from esm.models.esmfold2.experimental import EsmFold2ExperimentalModel
+
+        return EsmFold2ExperimentalModel
+    if name == "EsmFold2Model":
+        from esm.models.esmfold2.model import EsmFold2Model
+
+        return EsmFold2Model
+    raise AttributeError(name)
+
+
 __all__ = [
+    "ESMFOLD2_EXPERIMENTAL_HF_REPO",
+    "ESMFOLD2_HF_REPO",
     "ChainInfo",
     "CovalentBond",
+    "EsmFold2Config",
+    "EsmFold2ExperimentalModel",
+    "EsmFold2Model",
     "DistogramConditioning",
     "DNAInput",
     "ELEMENT_NUMBER_TO_SYMBOL",

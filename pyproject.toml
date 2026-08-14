@@ -55,8 +55,13 @@ addopts = """
   --cov=esm
 	--cov-report term-missing:skip-covered
 	-n auto
+	-m 'not gpu'
 	--ignore=tests/oss_pytests/test_oss_client.py
 """
+markers = [
+  "gpu: requires a CUDA device",
+  "merge_only: needs a real published checkpoint (network or staged weights)",
+]
 
 [tool.setuptools]
 package-dir = {"" = "."}
@@ -67,7 +72,7 @@ where = ["."]
 include = ["esm*"]
 
 [tool.setuptools.package-data]
-esm = ["data/*"]
+esm = ["data/*", "tests/reference/*.pkl.gz"]
 
 [tool.pixi.workspace]
 channels = ["conda-forge"]
@@ -160,13 +165,19 @@ unused-ignore-comment = "ignore"
 unused-type-ignore-comment = "ignore"
 
 [tool.ty.analysis]
-# ty can't introspect optional/compiled deps absent from this lint env (flash_attn is
-# GPU-only; zstd is a C-extension), so it falsely reports them unresolved. Treat as Any
+# ty can't introspect optional compiled deps absent from this CPU lint environment, so
+# it falsely reports them unresolved. Treat them as Any
 # rather than disabling unresolved-import, so genuinely-broken first-party imports still
 # surface.
 replace-imports-with-any = [
     "flash_attn",
     "flash_attn.**",
+    "transformer_engine",
+    "transformer_engine.**",
+    "xformers",
+    "xformers.**",
+    "cuequivariance_torch",
+    "cuequivariance_torch.**",
     "zstd",
 ]
 
