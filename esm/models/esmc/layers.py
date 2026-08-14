@@ -126,7 +126,9 @@ class EsmcRotaryEmbedding(nn.Module):
                 )
             else:
                 t = (
-                    torch.arange(seqlen, device=device, dtype=self.inv_freq.dtype)  # ty:ignore[no-matching-overload]
+                    torch.arange(
+                        seqlen, device=device, dtype=self.inv_freq.dtype
+                    )  # ty:ignore[no-matching-overload]
                     / self.scaling_factor
                 )
                 inv_freq = self.inv_freq

@@ -132,7 +132,9 @@ def _skip_if_unreachable(repo: str) -> str:
         RequestsConnectionError,
         Timeout,
     ) as exc:
-        pytest.skip(f"{repo} unreachable ({type(exc).__name__}); skipping")  # ty:ignore[too-many-positional-arguments]
+        pytest.skip(
+            f"{repo} unreachable ({type(exc).__name__}); skipping"
+        )  # ty:ignore[too-many-positional-arguments]
 
 
 #: Fixtures that resolve a real published checkpoint. Anything depending on one

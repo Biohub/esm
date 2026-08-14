@@ -31,14 +31,8 @@ from esm.models.esmc import (
     EsmcTokenizer,
 )
 from esm.models.esmc import model as model_module
-from esm.models.esmc.checkpoint_layout import (
-    native_to_published,
-    published_to_native,
-)
-from esm.models.esmc.kernels import (
-    FLASH_ATTN_INSTALLED,
-    TE_INSTALLED,
-)
+from esm.models.esmc.checkpoint_layout import native_to_published, published_to_native
+from esm.models.esmc.kernels import FLASH_ATTN_INSTALLED, TE_INSTALLED
 from esm.models.esmc.layers import (
     EsmcFlashMultiHeadAttention,
     EsmcLayerNormLinear,
@@ -1039,7 +1033,9 @@ def test_multi_chain_under_flash_attention_2_raises(tiny_esmc_config, esmc_token
     model documents a ValueError for it; a silent wrong answer would be worse.
     """
     if not FLASH_ATTN_INSTALLED:
-        pytest.skip("flash-attn is not installed")  # ty:ignore[too-many-positional-arguments]
+        pytest.skip(
+            "flash-attn is not installed"
+        )  # ty:ignore[too-many-positional-arguments]
 
     with torch.device("cuda"):
         model = EsmcForMaskedLM(
@@ -1150,7 +1146,9 @@ def test_cpu_builds_never_get_cuda_only_kernels(
         block = encoder.transformer.blocks[0]
         assert not encoder._use_flash_attn
         assert not isinstance(block.attn, EsmcFlashMultiHeadAttention)
-        assert isinstance(block.attn.layernorm_qkv, EsmcLayerNormLinear)  # ty:ignore[unresolved-attribute]
+        assert isinstance(
+            block.attn.layernorm_qkv, EsmcLayerNormLinear
+        )  # ty:ignore[unresolved-attribute]
         assert isinstance(block.ffn, EsmcLayerNormMLP)
 
     with torch.no_grad():
@@ -1193,7 +1191,9 @@ def test_state_dict_round_trips_under_transformer_engine(tiny_esmc_config):
     """TE adds ``_extra_state`` to ``state_dict`` and a hook strips it, so the
     loader has to be told not to expect it back."""
     if not TE_INSTALLED:
-        pytest.skip("TransformerEngine unavailable")  # ty:ignore[too-many-positional-arguments]
+        pytest.skip(
+            "TransformerEngine unavailable"
+        )  # ty:ignore[too-many-positional-arguments]
     with torch.device("cuda"):
         model = EsmcForMaskedLM(tiny_esmc_config).eval()
 
@@ -1222,13 +1222,15 @@ def test_gpu_dtypes(tiny_esmc_config, esmc_tokenizer, dtype, name):
 def test_fp8_backbone(esmc_300m_dir):
     """ESMC is commonly run fp8 as a folding backbone."""
     if not TE_INSTALLED:
-        pytest.skip("TransformerEngine unavailable")  # ty:ignore[too-many-positional-arguments]
+        pytest.skip(
+            "TransformerEngine unavailable"
+        )  # ty:ignore[too-many-positional-arguments]
     if torch.cuda.get_device_capability()[0] < 9:
-        pytest.skip("fp8 needs compute capability >= 9.0 (Hopper)")  # ty:ignore[too-many-positional-arguments]
+        pytest.skip(
+            "fp8 needs compute capability >= 9.0 (Hopper)"
+        )  # ty:ignore[too-many-positional-arguments]
 
-    from esm.models.esmfold2.model import (
-        _convert_te_modules_to_fp8_inplace,
-    )
+    from esm.models.esmfold2.model import _convert_te_modules_to_fp8_inplace
 
     model = EsmcModel.from_pretrained(
         esmc_300m_dir, device="cuda", dtype=torch.bfloat16
@@ -1255,7 +1257,9 @@ def test_flash_attention_2_dispatches_and_agrees_with_sdpa(
     compared sdpa against itself.
     """
     if not FLASH_ATTN_INSTALLED:
-        pytest.skip("flash-attn is not installed")  # ty:ignore[too-many-positional-arguments]
+        pytest.skip(
+            "flash-attn is not installed"
+        )  # ty:ignore[too-many-positional-arguments]
 
     reference = EsmcModel.from_pretrained(
         esmc_300m_dir, device="cuda", dtype=torch.bfloat16, attn_implementation="sdpa"
@@ -1384,7 +1388,9 @@ def test_every_gpu_build_reaches_the_reference(
     # signals a strict-key failure with RuntimeError, so catching that here would
     # turn a checkpoint regression into a green skip across every build.
     except ImportError as exc:
-        pytest.skip(f"build {dtype}/{attn}/{layers} unavailable: {exc}")  # ty:ignore[too-many-positional-arguments]
+        pytest.skip(
+            f"build {dtype}/{attn}/{layers} unavailable: {exc}"
+        )  # ty:ignore[too-many-positional-arguments]
 
     for name, sequence in SEQUENCES.items():
         case = reference_values()["cases"][name]

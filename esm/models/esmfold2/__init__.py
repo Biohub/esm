@@ -43,6 +43,10 @@ def __getattr__(name: str) -> object:
     raise AttributeError(name)
 
 
+def __dir__() -> list[str]:
+    return sorted(set(globals()) | set(__all__))
+
+
 __all__ = [
     "ESMFOLD2_EXPERIMENTAL_HF_REPO",
     "ESMFOLD2_HF_REPO",

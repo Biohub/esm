@@ -21,7 +21,7 @@ import os
 import warnings
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 
 from esm.models.esmc.config import EsmcConfig
 
@@ -248,7 +248,9 @@ class EsmFold2DiffusionModuleConfig:
 
     def __post_init__(self):
         if isinstance(self.atom_encoder, dict):
-            self.atom_encoder = EsmFold2DiffusionAtomEncoderConfig(**self.atom_encoder)  # ty:ignore[invalid-argument-type]
+            self.atom_encoder = EsmFold2DiffusionAtomEncoderConfig(
+                **cast(dict[str, Any], self.atom_encoder)
+            )
 
 
 @dataclass

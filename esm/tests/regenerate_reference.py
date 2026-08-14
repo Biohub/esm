@@ -21,11 +21,7 @@ from esm.tests.conftest import (
     SEQUENCES,
     staged_model_dir,
 )
-from esm.tests.esmc_test import (
-    PPL_MAX_POSITIONS,
-    REFERENCE_FILE,
-    pseudo_perplexity,
-)
+from esm.tests.esmc_test import PPL_MAX_POSITIONS, REFERENCE_FILE, pseudo_perplexity
 
 # One residue's logit row plus the argmax path moves on any real numerical
 # change, so there is no need to store the full logits tensor.

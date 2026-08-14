@@ -303,9 +303,9 @@ def _fused_gated_dual_gemm_bwd(
     M = x_2d.shape[0]
     N = w1.shape[0]
 
-    assert w1.dtype == w2.dtype == torch.bfloat16, (
-        f"weights must be bf16; got {w1.dtype}/{w2.dtype}"
-    )
+    assert (
+        w1.dtype == w2.dtype == torch.bfloat16
+    ), f"weights must be bf16; got {w1.dtype}/{w2.dtype}"
     assert x_2d.dtype == torch.bfloat16, "bwd only supports bf16 x"
 
     if grad_out_split is not None:
@@ -548,9 +548,9 @@ def _fused_gated_dual_gemm_fwd(
 
     assert w1.shape == w2.shape, f"w1 {w1.shape} ≠ w2 {w2.shape}"
     assert w1.shape[1] == K
-    assert w1.dtype == w2.dtype == torch.bfloat16, (
-        f"weights must be bf16; got {w1.dtype}/{w2.dtype}"
-    )
+    assert (
+        w1.dtype == w2.dtype == torch.bfloat16
+    ), f"weights must be bf16; got {w1.dtype}/{w2.dtype}"
 
     out_dtype = torch.bfloat16
     if transpose_out:

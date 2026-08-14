@@ -51,12 +51,8 @@ try:
     from esm.models.esmfold2.kernels import (
         FusedDropoutResidual as _FusedDropoutResidual,
     )
-    from esm.models.esmfold2.kernels import (
-        FusedLNLinearSwiGLU as _FusedLNLinearSwiGLU,
-    )
-    from esm.models.esmfold2.kernels import (
-        fused_pair_bias as _fused_pair_bias,
-    )
+    from esm.models.esmfold2.kernels import FusedLNLinearSwiGLU as _FusedLNLinearSwiGLU
+    from esm.models.esmfold2.kernels import fused_pair_bias as _fused_pair_bias
     from esm.models.esmfold2.kernels import (
         triangle_multiplicative_update_with_residual as _fused_trimul_with_residual,
     )

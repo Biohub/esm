@@ -345,9 +345,10 @@ def _launch_forward(
     """
     assert z.dim() == 4, f"z must be (B,Q,K,DIM_Z); got {z.shape}"
     B, Q, K, DIM_Z = z.shape
-    assert w_proj_z.shape == (num_heads, DIM_Z), (
-        f"w_proj_z {w_proj_z.shape} ≠ ({num_heads}, {DIM_Z})"
-    )
+    assert w_proj_z.shape == (
+        num_heads,
+        DIM_Z,
+    ), f"w_proj_z {w_proj_z.shape} ≠ ({num_heads}, {DIM_Z})"
 
     z = z.contiguous()
     w_proj_z = w_proj_z.contiguous()
@@ -655,9 +656,9 @@ def fused_attention_pair_bias(
     d_model = H * D
 
     if precomputed_bias is not None:
-        assert not torch.is_grad_enabled(), (
-            "precomputed_bias path is inference-only; autograd is not supported."
-        )
+        assert (
+            not torch.is_grad_enabled()
+        ), "precomputed_bias path is inference-only; autograd is not supported."
         bias = precomputed_bias
     else:
         if z is None or w_proj_z is None:

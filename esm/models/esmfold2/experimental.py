@@ -32,9 +32,7 @@ import torch.nn.functional as F
 from torch import Tensor
 
 from esm.models.esmc import EsmcModel
-from esm.models.esmc.checkpoint_layout import (
-    published_to_native_subtree,
-)
+from esm.models.esmc.checkpoint_layout import published_to_native_subtree
 from esm.models.esmfold2.config import EsmFold2Config
 from esm.models.esmfold2.layers import (
     CHAR_VOCAB_SIZE,
@@ -62,10 +60,7 @@ from esm.models.esmfold2.layers import (
 
 # Not circular: model.py's reference to this module is inside ``from_pretrained``.
 from esm.models.esmfold2.model import _IGNORED_FEATURE_KEYS
-from esm.models.hub import (
-    HubPreTrainedModel,
-    resolve_model_dir,
-)
+from esm.models.hub import HubPreTrainedModel, resolve_model_dir
 
 _EPS = 1e-5
 _NONPOLYMER_ID: int = 3
@@ -593,7 +588,9 @@ class EsmFold2ExperimentalModel(HubPreTrainedModel):
         self.pair_loop_proj = nn.Sequential(
             nn.LayerNorm(d_pair), nn.Linear(d_pair, d_pair, bias=False)
         )
-        nn.init.zeros_(self.pair_loop_proj[1].weight)  # ty:ignore[invalid-argument-type]
+        nn.init.zeros_(
+            self.pair_loop_proj[1].weight
+        )  # ty:ignore[invalid-argument-type]
 
         # Structure head
         self.structure_head = DiffusionStructureHead(config)
@@ -825,9 +822,7 @@ class EsmFold2ExperimentalModel(HubPreTrainedModel):
 
     @staticmethod
     def output_to_pdb(output: dict) -> str:
-        from esm.models.esmfold2.protein_utils import (
-            output_to_pdb as _output_to_pdb,
-        )
+        from esm.models.esmfold2.protein_utils import output_to_pdb as _output_to_pdb
 
         return _output_to_pdb(output)
 

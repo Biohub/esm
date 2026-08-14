@@ -17,10 +17,7 @@ import torch.nn as nn
 from safetensors.torch import save_file
 from torch.nn import BCEWithLogitsLoss, CrossEntropyLoss, MSELoss
 
-from esm.models.esmc.checkpoint_layout import (
-    native_to_published,
-    published_to_native,
-)
+from esm.models.esmc.checkpoint_layout import native_to_published, published_to_native
 from esm.models.esmc.config import EsmcConfig
 from esm.models.esmc.kernels import (
     FLASH_ATTN_INSTALLED,
@@ -28,15 +25,9 @@ from esm.models.esmc.kernels import (
     pad_input,
     unpad_input,
 )
-from esm.models.esmc.layers import (
-    EsmcRotaryEmbedding,
-    EsmcTransformerStack,
-)
+from esm.models.esmc.layers import EsmcRotaryEmbedding, EsmcTransformerStack
 from esm.models.esmc.sae import EsmcSaeLayer
-from esm.models.hub import (
-    HubPreTrainedModel,
-    resolve_model_dir,
-)
+from esm.models.hub import HubPreTrainedModel, resolve_model_dir
 
 _SAFETENSORS_INDEX = "model.safetensors.index.json"
 _SAFETENSORS_SINGLE = "model.safetensors"
@@ -339,9 +330,9 @@ class EsmcModel(EsmcPreTrainedModel):
 
     def _get_sae_layer_num_requested(self, model_name: str) -> int:
         match = self._SAE_KEY_RE.fullmatch(model_name)
-        assert match is not None, (
-            f"Unexpected SAE key {model_name!r}; expected 'layer{{N}}'."
-        )
+        assert (
+            match is not None
+        ), f"Unexpected SAE key {model_name!r}; expected 'layer{{N}}'."
         return int(match.group(1))
 
     def _validate_sae_inputs(self, input_ids: torch.Tensor) -> None:
@@ -452,7 +443,9 @@ class EsmcModel(EsmcPreTrainedModel):
             bool_mask = sequence_id >= 0
         else:
             if attention_mask is None:
-                attention_mask = input_ids != self.config.pad_token_id  # ty:ignore[invalid-assignment]
+                attention_mask = (
+                    input_ids != self.config.pad_token_id
+                )  # ty:ignore[invalid-assignment]
             assert attention_mask is not None
             bool_mask = attention_mask.bool()
 

@@ -49,16 +49,12 @@ import torch
 import triton
 import triton.language as tl
 
-from esm.models.esmfold2.kernels.fused_dual_gemm import (
-    fused_gated_dual_gemm_split,
-)
+from esm.models.esmfold2.kernels.fused_dual_gemm import fused_gated_dual_gemm_split
 from esm.models.esmfold2.kernels.fused_ln_residual import (
     fused_ln_transpose,
     fused_ln_with_residual_link,
 )
-from esm.models.esmfold2.kernels.trimul_einsum_triton import (
-    trimul_batched_einsum,
-)
+from esm.models.esmfold2.kernels.trimul_einsum_triton import trimul_batched_einsum
 
 # Static config — runtime autotune cold-start is unshippable for inference.
 _AUTOTUNE_CONFIGS = [
@@ -349,9 +345,9 @@ def _gated_gemm_with_residual_bwd(
     M, K = x1.shape
     N = w1.shape[0]
     assert x2.shape == x1.shape
-    assert w1.dtype == w2.dtype == torch.bfloat16, (
-        f"weights must be bf16; got {w1.dtype}/{w2.dtype}"
-    )
+    assert (
+        w1.dtype == w2.dtype == torch.bfloat16
+    ), f"weights must be bf16; got {w1.dtype}/{w2.dtype}"
     assert x1.dtype == torch.bfloat16 and x2.dtype == torch.bfloat16
 
     # Don't call .contiguous() unconditionally (avoids a full-tensor clone).

@@ -153,9 +153,9 @@ def _batched_einsum(
     assert a.shape == b.shape, f"a {a.shape} ≠ b {b.shape}"
     assert a.ndim == 4
     assert a.dtype == torch.bfloat16 and b.dtype == torch.bfloat16
-    assert a.is_contiguous() and b.is_contiguous(), (
-        "trimul einsum kernel requires contiguous (D,B,L,L) inputs"
-    )
+    assert (
+        a.is_contiguous() and b.is_contiguous()
+    ), "trimul einsum kernel requires contiguous (D,B,L,L) inputs"
 
     D, B, L_row, L_col = a.shape
     assert L_row == L_col, "L_row must equal L_col for stage-3 einsum"

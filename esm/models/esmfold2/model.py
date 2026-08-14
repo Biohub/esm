@@ -13,7 +13,7 @@ companion ``esm`` package.
 
 import math
 from contextlib import contextmanager
-from typing import cast
+from typing import Any, cast
 
 import torch
 import torch.nn as nn
@@ -32,9 +32,7 @@ except ImportError:
     TE_AVAILABLE = False
 
 from esm.models.esmc import EsmcModel
-from esm.models.esmc.checkpoint_layout import (
-    published_to_native_subtree,
-)
+from esm.models.esmc.checkpoint_layout import published_to_native_subtree
 from esm.models.esmfold2.config import EsmFold2Config
 from esm.models.esmfold2.layers import (
     CHAR_VOCAB_SIZE,
@@ -58,10 +56,7 @@ from esm.models.esmfold2.layers import (
     maybe_apply_msa_column_masking,
     maybe_subsample_msa,
 )
-from esm.models.hub import (
-    HubPreTrainedModel,
-    resolve_model_dir,
-)
+from esm.models.hub import HubPreTrainedModel, resolve_model_dir
 
 _EPS = 1e-6
 _NONPOLYMER_ID = 4
@@ -398,7 +393,9 @@ def _convert_te_modules_to_fp8_inplace(module: nn.Module) -> None:
                     new_mod = te.Linear(
                         in_f, out_f, bias=has_bias, params_dtype=dtype
                     ).to(device)
-                new_mod.weight.quantize_(w)  # ty:ignore[call-non-callable, unresolved-attribute]
+                new_mod.weight.quantize_(
+                    w
+                )  # ty:ignore[call-non-callable, unresolved-attribute]
                 if has_bias:
                     assert b is not None
                     new_mod.bias.data.copy_(b)  # ty:ignore[call-non-callable]
@@ -691,9 +688,7 @@ class EsmFold2Model(HubPreTrainedModel):
         if config is None:
             config = EsmFold2Config.from_pretrained(local_dir)
             if cls is EsmFold2Model and config.type == "experimental":
-                from esm.models.esmfold2.experimental import (
-                    EsmFold2ExperimentalModel,
-                )
+                from esm.models.esmfold2.experimental import EsmFold2ExperimentalModel
 
                 return EsmFold2ExperimentalModel.from_pretrained(
                     local_dir,
@@ -739,8 +734,8 @@ class EsmFold2Model(HubPreTrainedModel):
         """
         import torch._dynamo.config as dynamo_config
 
-        dynamo_config.cache_size_limit = 512  # ty:ignore[invalid-assignment]
-        dynamo_config.accumulated_cache_size_limit = 512  # ty:ignore[invalid-assignment]
+        setattr(dynamo_config, "cache_size_limit", 512)
+        setattr(dynamo_config, "accumulated_cache_size_limit", 512)
         # capture_scalar_outputs avoids graph breaks at .item() in atom-attention path.
         dynamo_config.capture_scalar_outputs = True
 
@@ -763,7 +758,7 @@ class EsmFold2Model(HubPreTrainedModel):
 
         def _maybe_compile(module: nn.Module) -> None:
             if isinstance(module, compile_targets):
-                module.forward = torch.compile(module.forward, **kwargs)  # ty:ignore[invalid-assignment]
+                module.forward = cast(Any, torch.compile(module.forward, **kwargs))
 
         self.apply(_maybe_compile)
 
@@ -1190,9 +1185,7 @@ class EsmFold2Model(HubPreTrainedModel):
 
     @staticmethod
     def output_to_pdb(output: dict) -> str:
-        from esm.models.esmfold2.protein_utils import (
-            output_to_pdb as _output_to_pdb,
-        )
+        from esm.models.esmfold2.protein_utils import output_to_pdb as _output_to_pdb
 
         return _output_to_pdb(output)
 
