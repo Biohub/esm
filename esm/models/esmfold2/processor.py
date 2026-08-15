@@ -332,6 +332,7 @@ class ESMFold2InputBuilder:
         num_loops: int = 20,
         num_sampling_steps: int = 200,
         num_diffusion_samples: int = 1,
+        confidence_chunk_size: int | None = None,
         seed: int | None = None,
         noise_scale: float | None = None,
         step_scale: float | None = None,
@@ -353,6 +354,10 @@ class ESMFold2InputBuilder:
             User-facing input specification.
         num_loops, num_sampling_steps, num_diffusion_samples : int
             Inference knobs forwarded to the model.
+        confidence_chunk_size : int, optional
+            Maximum number of diffusion samples processed together by the
+            confidence head. Lower values reduce peak memory without changing
+            outputs.
         seed : int, optional
             Seeds both input prep (SMILES conformer generation) and diffusion sampling.
         noise_scale, step_scale, max_inference_sigma, early_exit
@@ -402,6 +407,7 @@ class ESMFold2InputBuilder:
                         num_loops=num_loops,
                         num_sampling_steps=num_sampling_steps,
                         num_diffusion_samples=num_diffusion_samples,
+                        confidence_chunk_size=confidence_chunk_size,
                         early_exit=early_exit,
                         msa_max_depth=msa_max_depth,
                         msa_column_mask_rate=msa_column_mask_rate,
