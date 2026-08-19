@@ -9,7 +9,10 @@ from matplotlib import colormaps
 from PIL import Image
 
 from esm.sdk.api import FunctionAnnotation
-from esm.utils.function.interpro import InterPro, InterProEntryType
+from esm.utils.function.interpro import (
+    InterPro,
+    InterProEntryType,
+)
 
 
 @contextmanager

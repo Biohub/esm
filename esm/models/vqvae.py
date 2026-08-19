@@ -7,7 +7,10 @@ from esm.layers.structure_proj import Dim6RotStructureHead
 from esm.layers.transformer_stack import TransformerStack
 from esm.utils.constants import esm3 as C
 from esm.utils.misc import knn_graph
-from esm.utils.structure.affine3d import Affine3D, build_affine3d_from_coordinates
+from esm.utils.structure.affine3d import (
+    Affine3D,
+    build_affine3d_from_coordinates,
+)
 from esm.utils.structure.predicted_aligned_error import (
     compute_predicted_aligned_error,
     compute_tm,
@@ -378,9 +381,9 @@ class StructureTokenDecoder(nn.Module):
         chain_id = torch.zeros_like(structure_tokens, dtype=torch.int64)
 
         # check that BOS and EOS are set correctly
-        assert (
-            structure_tokens[:, 0].eq(self.special_tokens["BOS"]).all()
-        ), "First token in structure_tokens must be BOS token"
+        assert structure_tokens[:, 0].eq(self.special_tokens["BOS"]).all(), (
+            "First token in structure_tokens must be BOS token"
+        )
         assert (
             structure_tokens[
                 torch.arange(structure_tokens.shape[0]), attention_mask.sum(1) - 1
@@ -388,9 +391,9 @@ class StructureTokenDecoder(nn.Module):
             .eq(self.special_tokens["EOS"])
             .all()
         ), "Last token in structure_tokens must be EOS token"
-        assert (
-            (structure_tokens < 0).sum() == 0
-        ), "All structure tokens set to -1 should be replaced with BOS, EOS, PAD, or MASK tokens by now, but that isn't the case!"
+        assert (structure_tokens < 0).sum() == 0, (
+            "All structure tokens set to -1 should be replaced with BOS, EOS, PAD, or MASK tokens by now, but that isn't the case!"
+        )
 
         x = self.embed(structure_tokens)
         # !!! NOTE: Attention mask is actually unused here so watch out

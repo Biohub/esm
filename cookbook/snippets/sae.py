@@ -1,10 +1,15 @@
 import numpy as np
 import torch
+from esm.sdk import batch_executor
+from esm.sdk.api import (
+    ESMProtein,
+    ESMProteinError,
+    LogitsConfig,
+    SAEConfig,
+)
+from esm.sdk.forge import ESMCForgeInferenceClient
 
 from cookbook.snippets.sparse_utils import max_pool, remove_indexes
-from esm.sdk import batch_executor
-from esm.sdk.api import ESMProtein, ESMProteinError, LogitsConfig, SAEConfig
-from esm.sdk.forge import ESMCForgeInferenceClient
 
 
 def get_sae_features_single(

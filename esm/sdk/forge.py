@@ -2,11 +2,16 @@ from __future__ import annotations
 
 import asyncio
 import base64
+import gzip
+import io
 import pickle
+import tempfile
 import warnings
 from concurrent.futures import ThreadPoolExecutor
-from typing import Any, Sequence, TypeAlias, Union, cast
+from pathlib import Path
+from typing import Any, Literal, Sequence, TypeAlias, Union, cast
 
+import pandas as pd
 import torch
 
 from esm.sdk.api import (
@@ -27,7 +32,10 @@ from esm.sdk.api import (
     SamplingConfig,
     SamplingTrackConfig,
 )
-from esm.sdk.base_forge_client import _BaseForgeInferenceClient
+from esm.sdk.base_forge_client import (
+    _BaseForgeInferenceClient,
+)
+
 from esm.sdk.retry import retry_decorator
 from esm.utils.constants.api import MIMETYPE_ES_PICKLE
 from esm.utils.constants.models import (
@@ -36,7 +44,12 @@ from esm.utils.constants.models import (
     ESMFOLD2_FAST,
     ESMFOLD2_MAX_MSA_SEQS,
 )
-from esm.utils.misc import deserialize_tensors, maybe_list, maybe_tensor, to_float32
+from esm.utils.misc import (
+    deserialize_tensors,
+    maybe_list,
+    maybe_tensor,
+    to_float32,
+)
 from esm.utils.msa import MSA
 from esm.utils.structure.input_builder import (
     ProteinInput,
@@ -222,6 +235,8 @@ class SequenceStructureForgeInferenceClient(_BaseForgeInferenceClient):
 
         return request
 
+
+
     @retry_decorator
     async def async_fold(
         self,
@@ -256,7 +271,10 @@ class SequenceStructureForgeInferenceClient(_BaseForgeInferenceClient):
         )
 
         try:
-            data = await self._async_post("fold", request)
+            data = await self._async_post(
+                "fold",
+                request,
+            )
         except ESMProteinError as e:
             return e
 
@@ -297,7 +315,10 @@ class SequenceStructureForgeInferenceClient(_BaseForgeInferenceClient):
         )
 
         try:
-            data = self._post("fold", request)
+            data = self._post(
+                "fold",
+                request,
+            )
         except ESMProteinError as e:
             return e
 
@@ -322,7 +343,10 @@ class SequenceStructureForgeInferenceClient(_BaseForgeInferenceClient):
         )
 
         try:
-            data = await self._async_post("fold_all_atom", request)
+            data = await self._async_post(
+                "fold_all_atom",
+                request,
+            )
         except ESMProteinError as e:
             return e
 
@@ -347,7 +371,10 @@ class SequenceStructureForgeInferenceClient(_BaseForgeInferenceClient):
         )
 
         try:
-            data = self._post("fold_all_atom", request)
+            data = self._post(
+                "fold_all_atom",
+                request,
+            )
         except ESMProteinError as e:
             return e
 
@@ -492,6 +519,7 @@ class SequenceStructureForgeInferenceClient(_BaseForgeInferenceClient):
             return e
 
         return ESMProtein(sequence=data["sequence"])
+
 
 
 class ESM3ForgeInferenceClient(ESM3InferenceClient, _BaseForgeInferenceClient):
@@ -1358,3 +1386,7 @@ class ESMCForgeInferenceClient(ESMCInferenceClient, _BaseForgeInferenceClient):
         raise NotImplementedError(
             f"Can not get underlying remote model {self.model} from a Forge/Biohub Platform client."
         )
+
+
+
+

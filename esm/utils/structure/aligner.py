@@ -6,7 +6,9 @@ from typing import Any, ClassVar, Protocol, TypeVar
 import numpy as np
 import torch
 
-from esm.utils.structure.protein_structure import compute_affine_and_rmsd
+from esm.utils.structure.protein_structure import (
+    compute_affine_and_rmsd,
+)
 
 
 class Alignable(Protocol):

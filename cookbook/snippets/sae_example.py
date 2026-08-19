@@ -1,9 +1,10 @@
 import os
 
-from cookbook.snippets.sae import get_sae_features, get_sae_features_single
-from cookbook.snippets.sparse_utils import remove_indexes
 from esm.sdk.api import SAEConfig
 from esm.sdk.forge import ESMCForgeInferenceClient
+
+from cookbook.snippets.sae import get_sae_features, get_sae_features_single
+from cookbook.snippets.sparse_utils import remove_indexes
 
 # Create ESMC 600M client
 client = ESMCForgeInferenceClient(

@@ -1,6 +1,9 @@
 import os
 
-from esm.sdk.api import ESM3InferenceClient, ESMCInferenceClient
+from esm.sdk.api import (
+    ESM3InferenceClient,
+    ESMCInferenceClient,
+)
 from esm.sdk.forge import (
     ESM3ForgeInferenceClient,
     ESMCForgeInferenceClient,

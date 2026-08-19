@@ -4,7 +4,9 @@ import pygtrie
 from ipywidgets import widgets
 
 from esm.sdk.api import FunctionAnnotation
-from esm.tokenization.function_tokenizer import InterProQuantizedTokenizer
+from esm.tokenization.function_tokenizer import (
+    InterProQuantizedTokenizer,
+)
 
 TRIE: pygtrie.CharTrie | None = None
 

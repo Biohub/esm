@@ -2,8 +2,7 @@ import math
 import os
 
 import torch
-
-from esm.models.esmc import ESMC
+from esm.models.esmc import EsmcForMaskedLM, EsmcTokenizer
 from esm.sdk import batch_executor, esmc_client
 from esm.sdk.api import (
     ESMCInferenceClient,
@@ -13,7 +12,10 @@ from esm.sdk.api import (
     LogitsConfig,
     LogitsOutput,
 )
-from esm.sdk.forge import ESM3ForgeInferenceClient, ESMCForgeInferenceClient
+from esm.sdk.forge import (
+    ESM3ForgeInferenceClient,
+    ESMCForgeInferenceClient,
+)
 from esm.tokenization import get_esmc_model_tokenizers
 
 
@@ -25,16 +27,16 @@ def main(client: ESMCInferenceClient | ESM3ForgeInferenceClient):
 
     # Use logits endpoint. Using bf16 for inference optimization
     protein_tensor = client.encode(protein)
-    assert isinstance(
-        protein_tensor, ESMProteinTensor
-    ), f"Expected ESMProteinTensor but got error: {protein_tensor}"
+    assert isinstance(protein_tensor, ESMProteinTensor), (
+        f"Expected ESMProteinTensor but got error: {protein_tensor}"
+    )
     output = client.logits(
         protein_tensor,
         LogitsConfig(sequence=True, return_embeddings=True, return_hidden_states=True),
     )
-    assert isinstance(
-        output, LogitsOutput
-    ), f"LogitsOutput was expected but got error: {output}"
+    assert isinstance(output, LogitsOutput), (
+        f"LogitsOutput was expected but got error: {output}"
+    )
     assert output.logits is not None and output.logits.sequence is not None
     assert output.embeddings is not None
     assert output.hidden_states is not None
@@ -43,31 +45,40 @@ def main(client: ESMCInferenceClient | ESM3ForgeInferenceClient):
     )
 
     # request a specific hidden layer.
-    assert isinstance(
-        protein_tensor, ESMProteinTensor
-    ), f"Expected ESMProteinTensor but got error: {protein_tensor}"
+    assert isinstance(protein_tensor, ESMProteinTensor), (
+        f"Expected ESMProteinTensor but got error: {protein_tensor}"
+    )
     output = client.logits(
         protein_tensor, LogitsConfig(return_hidden_states=True, ith_hidden_layer=1)
     )
-    assert isinstance(
-        output, LogitsOutput
-    ), f"LogitsOutput was expected but got error: {output}"
+    assert isinstance(output, LogitsOutput), (
+        f"LogitsOutput was expected but got error: {output}"
+    )
     assert output.hidden_states is not None
     print(f"Client returned hidden states with shape {output.hidden_states.shape}")
 
 
-def raw_forward(model: ESMC):
+def raw_forward(model: EsmcForMaskedLM):
     protein = ESMProtein(sequence="AAAAA")
     assert protein.sequence is not None
     sequences = [protein.sequence, protein.sequence]
     # ================================================================
     # Example usage: directly use the model
     # ================================================================
-    input_ids = model._tokenize(sequences)
-    output = model(input_ids)
+    # EsmcModel / EsmcForMaskedLM are the canonical raw ESMC models. They expose
+    # a Hugging Face style ``forward`` (not the SDK ``encode``/``logits``
+    # inference API - use ``esmc_client()`` for that). Tokenize with the ESMC
+    # tokenizer and pass ``input_ids`` directly.
+    tokenizer = EsmcTokenizer()
+    encoded = tokenizer(sequences, return_tensors="pt", padding=True)
+    output = model(
+        input_ids=encoded["input_ids"],
+        attention_mask=encoded["attention_mask"],
+        output_hidden_states=True,
+    )
     logits, embeddings, hiddens = (
-        output.sequence_logits,
-        output.embeddings,
+        output.logits,
+        output.last_hidden_state,
         output.hidden_states,
     )
     print(
@@ -132,11 +143,12 @@ if __name__ == "__main__":
         print("ESM_API_KEY found. Trying to use model from Forge/Biohub Platform...")
         main(esmc_client(model="esmc-300m-2024-12"))
     else:
-        print("No ESM_API_KEY found. Trying to load model locally...")
+        print("No ESM_API_KEY found. Trying to load the model locally...")
         print(
-            "To try this script with a Forge/Biohub Platform API, please run ESM_API_KEY=your_api_key python esm3.py"
+            "To use the SDK inference API (encode/logits), run "
+            "ESM_API_KEY=your_api_key python esmc.py"
         )
-        main(ESMC.from_pretrained("esm3_sm_open_v1"))
-        model = ESMC.from_pretrained("esmc_300m")
-        main(model)
+        # The local raw model uses the Hugging Face style forward API rather
+        # than the SDK inference client.
+        model = EsmcForMaskedLM.from_pretrained("biohub/ESMC-300M")
         raw_forward(model)

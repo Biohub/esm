@@ -12,8 +12,15 @@ from Bio import SeqIO
 from scipy.spatial.distance import cdist
 
 from esm.utils.misc import slice_any_object
-from esm.utils.msa.filter_sequences import greedy_select_indices, hhfilter
-from esm.utils.parsing import FastaEntry, read_sequences, write_sequences
+from esm.utils.msa.filter_sequences import (
+    greedy_select_indices,
+    hhfilter,
+)
+from esm.utils.parsing import (
+    FastaEntry,
+    read_sequences,
+    write_sequences,
+)
 from esm.utils.sequential_dataclass import SequentialDataclass
 from esm.utils.system import PathOrBuffer
 
@@ -111,9 +118,9 @@ class MSA(SequentialDataclass):
             header = f"{record.id} {record.description}"
             seq = str(record.seq)
             if entries:
-                assert (
-                    len(seq) == len(entries[0].sequence)
-                ), f"Sequence length mismatch. Expected: {len(entries[0].sequence)}, Received: {len(seq)}"
+                assert len(seq) == len(entries[0].sequence), (
+                    f"Sequence length mismatch. Expected: {len(entries[0].sequence)}, Received: {len(seq)}"
+                )
             entries.append(FastaEntry(header, seq))
         msa = cls(entries)
         if remove_insertions:
@@ -442,9 +449,7 @@ class MSA(SequentialDataclass):
         if join_token == "":
             per_msa = [msa._aligned_deletions() for msa in msas]
             if all(d is not None for d in per_msa):
-                deletions = np.concatenate(
-                    per_msa, axis=1
-                )  # ty: ignore[no-matching-overload]
+                deletions = np.concatenate(per_msa, axis=1)  # ty: ignore[no-matching-overload]
         return cls(entries, deletions=deletions)
 
 
@@ -457,9 +462,9 @@ class FastMSA(SequentialDataclass):
 
     def __post_init__(self):
         if self.headers is not None:
-            assert (
-                len(self.headers) == self.depth
-            ), "Number of headers must match depth."
+            assert len(self.headers) == self.depth, (
+                "Number of headers must match depth."
+            )
 
     @classmethod
     def from_bytes(cls, data: bytes) -> FastMSA:

@@ -24,9 +24,18 @@ from biotite.structure.io.pdbx import (
 )
 
 from esm.utils import residue_constants
-from esm.utils.structure.metrics import compute_lddt, compute_rmsd
-from esm.utils.structure.mmcif_parsing import PLDDT_B_FACTOR_SCALE, round_mmcif_columns
-from esm.utils.structure.protein_complex import ProteinComplex, ProteinComplexMetadata
+from esm.utils.structure.metrics import (
+    compute_lddt,
+    compute_rmsd,
+)
+from esm.utils.structure.mmcif_parsing import (
+    PLDDT_B_FACTOR_SCALE,
+    round_mmcif_columns,
+)
+from esm.utils.structure.protein_complex import (
+    ProteinComplex,
+    ProteinComplexMetadata,
+)
 
 
 @dataclass
@@ -110,23 +119,23 @@ class MolecularComplex:
         """Validate array dimensions."""
         n_tokens = len(self.sequence)
         n_atoms = len(self.atom_positions)
-        assert (
-            self.token_to_atoms.shape[0] == n_tokens
-        ), f"token_to_atoms shape {self.token_to_atoms.shape} != {n_tokens} tokens"
-        assert (
-            self.chain_id.shape[0] == n_tokens
-        ), f"chain_id shape {self.chain_id.shape} != {n_tokens} tokens"
-        assert (
-            self.plddt.shape[0] == n_tokens
-        ), f"plddt shape {self.plddt.shape} != {n_tokens} tokens"
+        assert self.token_to_atoms.shape[0] == n_tokens, (
+            f"token_to_atoms shape {self.token_to_atoms.shape} != {n_tokens} tokens"
+        )
+        assert self.chain_id.shape[0] == n_tokens, (
+            f"chain_id shape {self.chain_id.shape} != {n_tokens} tokens"
+        )
+        assert self.plddt.shape[0] == n_tokens, (
+            f"plddt shape {self.plddt.shape} != {n_tokens} tokens"
+        )
         if self.atom_names is not None:
-            assert (
-                self.atom_names.shape[0] == n_atoms
-            ), f"atom_names shape {self.atom_names.shape} != {n_atoms} atoms"
+            assert self.atom_names.shape[0] == n_atoms, (
+                f"atom_names shape {self.atom_names.shape} != {n_atoms} atoms"
+            )
         if self.atom_hetero is not None:
-            assert (
-                self.atom_hetero.shape[0] == n_atoms
-            ), f"atom_hetero shape {self.atom_hetero.shape} != {n_atoms} atoms"
+            assert self.atom_hetero.shape[0] == n_atoms, (
+                f"atom_hetero shape {self.atom_hetero.shape} != {n_atoms} atoms"
+            )
 
     def __len__(self) -> int:
         """Return number of tokens."""

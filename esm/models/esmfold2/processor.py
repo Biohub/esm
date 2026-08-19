@@ -7,15 +7,22 @@ import numpy as np
 import torch
 
 from esm.models.esmfold2.conformers import load_ccd
-from esm.models.esmfold2.output import build_molecular_complex_from_features
-from esm.models.esmfold2.prepare_input import ChainInfo, prepare_esmfold2_input
+from esm.models.esmfold2.output import (
+    build_molecular_complex_from_features,
+)
+from esm.models.esmfold2.prepare_input import (
+    ChainInfo,
+    prepare_esmfold2_input,
+)
 from esm.models.esmfold2.types import (
     MSA,
     Modification,
     ProteinInput,
     StructurePredictionInput,
 )
-from esm.utils.structure.molecular_complex import MolecularComplexResult
+from esm.utils.structure.molecular_complex import (
+    MolecularComplexResult,
+)
 
 
 @contextmanager

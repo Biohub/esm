@@ -13,7 +13,10 @@ from attr import dataclass
 from esm.layers.regression_head import RegressionHead
 from esm.layers.transformer_stack import TransformerStack
 from esm.models.function_decoder import FunctionTokenDecoder
-from esm.models.vqvae import StructureTokenDecoder, StructureTokenEncoder
+from esm.models.vqvae import (
+    StructureTokenDecoder,
+    StructureTokenEncoder,
+)
 from esm.sdk.api import (
     ESM3InferenceClient,
     ESMProtein,
@@ -29,7 +32,10 @@ from esm.sdk.api import (
 from esm.tokenization import TokenizerCollectionProtocol
 from esm.utils import encoding
 from esm.utils.constants import esm3 as C
-from esm.utils.constants.models import ESM3_OPEN_SMALL, normalize_model_name
+from esm.utils.constants.models import (
+    ESM3_OPEN_SMALL,
+    normalize_model_name,
+)
 from esm.utils.decoding import decode_protein_tensor
 from esm.utils.generation import (
     _batch_forward,
@@ -44,7 +50,9 @@ from esm.utils.sampling import (
     get_default_sampling_config,
     validate_sampling_config,
 )
-from esm.utils.structure.affine3d import build_affine3d_from_coordinates
+from esm.utils.structure.affine3d import (
+    build_affine3d_from_coordinates,
+)
 
 
 @dataclass
@@ -398,9 +406,9 @@ class ESM3(nn.Module, ESM3InferenceClient):
     def batch_generate(
         self, inputs: list[ProteinType], configs: list[GenerationConfig]
     ) -> list[ProteinType]:
-        assert len(inputs) == len(
-            configs
-        ), "Must have the same number of prompts and configs."
+        assert len(inputs) == len(configs), (
+            "Must have the same number of prompts and configs."
+        )
 
         if inputs == []:
             # Nothing to do.

@@ -5,7 +5,10 @@ import torch
 import torch.nn.functional as F
 from torch import nn
 
-from esm.layers.rotary import RotaryEmbedding, TritonRotaryEmbedding
+from esm.layers.rotary import (
+    RotaryEmbedding,
+    TritonRotaryEmbedding,
+)
 
 try:
     from flash_attn import flash_attn_varlen_qkvpacked_func

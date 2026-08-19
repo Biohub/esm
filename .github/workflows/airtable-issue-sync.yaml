@@ -1,0 +1,33 @@
+name: Sync issues to Airtable
+
+on:
+  issues:
+    types: [opened, edited, reopened, closed, labeled, unlabeled]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: airtable-sync-${{ github.event.issue.number }}
+  cancel-in-progress: false
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Sync issue to Airtable
+        run: python .github/scripts/airtable_issue_sync.py
+        env:
+          AIRTABLE_TOKEN: ${{ secrets.AIRTABLE_TOKEN }}
+          # "All Feedback Post Launch". Pinned here rather than in a repository
+          # variable so the destination is reviewable with the code that writes
+          # to it; neither id grants access on its own.
+          AIRTABLE_BASE: app9zoO6eKABI4dog
+          AIRTABLE_TABLE: tbllUJRwhQg35gzbT

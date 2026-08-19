@@ -2,7 +2,6 @@ import random
 
 import torch
 import torch.nn.functional as F
-
 from esm.pretrained import (
     ESM3_function_decoder_v0,
     ESM3_sm_open_v0,
@@ -13,7 +12,9 @@ from esm.tokenization import get_esm3_model_tokenizers
 from esm.tokenization.function_tokenizer import (
     InterProQuantizedTokenizer as EsmFunctionTokenizer,
 )
-from esm.tokenization.sequence_tokenizer import EsmSequenceTokenizer
+from esm.tokenization.sequence_tokenizer import (
+    EsmSequenceTokenizer,
+)
 from esm.utils.structure.protein_chain import ProteinChain
 from esm.utils.types import FunctionAnnotation
 

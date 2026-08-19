@@ -30,8 +30,28 @@ import numpy as np
 import torch
 import torch.nn.functional as F
 import torch.optim as optim
+from esm.models.esmfold2 import (
+    ELEMENT_NUMBER_TO_SYMBOL,
+    ProteinInput,
+    StructurePredictionInput,
+    load_ccd,
+    prepare_esmfold2_input,
+)
+from esm.models.esmfold2.constants import (
+    MOL_TYPE_NONPOLYMER,
+    PROTEIN_1TO3,
+    PROTEIN_3TO1,
+    RES_TYPE_TO_CCD,
+)
+from esm.utils.structure.mmcif_parsing import (
+    PLDDT_B_FACTOR_SCALE,
+)
+from esm.utils.structure.protein_chain import ProteinChain
+from esm.utils.structure.protein_complex import ProteinComplex
 from transformers.models.esmc.modeling_esmc import ESMCForMaskedLM
-from transformers.models.esmc.tokenization_esmc import ESMCTokenizer
+from transformers.models.esmc.tokenization_esmc import (
+    ESMCTokenizer,
+)
 from transformers.models.esmfold2.modeling_esmfold2_common import (
     BACKEND_CUEQ,
     BACKEND_FUSED,
@@ -48,23 +68,6 @@ from transformers.models.esmfold2.modeling_esmfold2_experimental import (
 from transformers.models.esmfold2.modeling_esmfold2_experimental import (
     MSAEncoder as ESMFold2MSAEncoder,
 )
-
-from esm.models.esmfold2 import (
-    ELEMENT_NUMBER_TO_SYMBOL,
-    ProteinInput,
-    StructurePredictionInput,
-    load_ccd,
-    prepare_esmfold2_input,
-)
-from esm.models.esmfold2.constants import (
-    MOL_TYPE_NONPOLYMER,
-    PROTEIN_1TO3,
-    PROTEIN_3TO1,
-    RES_TYPE_TO_CCD,
-)
-from esm.utils.structure.mmcif_parsing import PLDDT_B_FACTOR_SCALE
-from esm.utils.structure.protein_chain import ProteinChain
-from esm.utils.structure.protein_complex import ProteinComplex
 
 os.environ["HF_XET_HIGH_PERFORMANCE"] = "1"
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s: %(message)s")
@@ -471,12 +474,12 @@ def compute_structure_losses(
     total = total + LOSS_WEIGHTS["glob"] * losses["glob_loss"]
     if target_hotspot_ids is not None:
         target_length = distogram_logits.shape[1] - binder_length
-        assert (
-            target_sequence is not None
-        ), "target_sequence is required when target_hotspot_ids is provided."
-        assert (
-            "|" not in target_sequence
-        ), "Epitope loss only supports one target chain."
+        assert target_sequence is not None, (
+            "target_sequence is required when target_hotspot_ids is provided."
+        )
+        assert "|" not in target_sequence, (
+            "Epitope loss only supports one target chain."
+        )
         assert len(target_sequence) == target_length, (
             f"Target sequence length {len(target_sequence)} does not match distogram "
             f"target length {target_length}."
@@ -1013,9 +1016,9 @@ def design_binder(
             )
         binder_prompt_factor = BINDER_PROMPT_FACTORIES[binder_name]
         if is_antibody is not None:
-            assert (
-                binder_prompt_factor.is_antibody == is_antibody
-            ), "Conflict in is_antibody settings."
+            assert binder_prompt_factor.is_antibody == is_antibody, (
+                "Conflict in is_antibody settings."
+            )
         is_antibody = binder_prompt_factor.is_antibody
         binder_sequence = binder_prompt_factor.sample(seed=seed)
     elif binder_sequence is None:

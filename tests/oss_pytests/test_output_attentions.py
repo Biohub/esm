@@ -2,7 +2,9 @@ import torch
 
 from esm.models.esm3 import ESM3, ESMOutput
 from esm.models.esmc import ESMC, ESMCOutput
-from esm.tokenization.sequence_tokenizer import EsmSequenceTokenizer
+from esm.tokenization.sequence_tokenizer import (
+    EsmSequenceTokenizer,
+)
 from esm.utils.constants import esm3 as C
 
 B, L = 2, 10

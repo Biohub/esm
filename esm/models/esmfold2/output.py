@@ -4,7 +4,10 @@ from typing import Any
 import numpy as np
 import torch
 
-from esm.models.esmfold2.constants import ELEMENT_NUMBER_TO_SYMBOL, MOL_TYPE_NONPOLYMER
+from esm.models.esmfold2.constants import (
+    ELEMENT_NUMBER_TO_SYMBOL,
+    MOL_TYPE_NONPOLYMER,
+)
 from esm.utils.structure.molecular_complex import (
     MolecularComplex,
     MolecularComplexMetadata,

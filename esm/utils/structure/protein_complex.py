@@ -32,7 +32,10 @@ from esm.utils.misc import slice_python_object_as_numpy
 from esm.utils.structure.affine3d import Affine3D
 from esm.utils.structure.aligner import Aligner
 from esm.utils.structure.atom_indexer import AtomIndexer
-from esm.utils.structure.metrics import compute_gdt_ts, compute_lddt_ca
+from esm.utils.structure.metrics import (
+    compute_gdt_ts,
+    compute_lddt_ca,
+)
 from esm.utils.structure.mmcif_parsing import (
     MmcifWrapper,
     NoProteinError,
@@ -694,9 +697,9 @@ class ProteinComplex:
 
     def _sanity_check_complexes_are_comparable(self, other: ProteinComplex):
         assert len(self) == len(other), "Protein complexes must have the same length"
-        assert len(list(self.chain_iter())) == len(
-            list(other.chain_iter())
-        ), "Protein complexes must have the same number of chains"
+        assert len(list(self.chain_iter())) == len(list(other.chain_iter())), (
+            "Protein complexes must have the same number of chains"
+        )
 
     def rmsd(
         self,
@@ -936,9 +939,7 @@ class ProteinComplex:
 
         result = DockQResult(
             total_dockq=result["value"],  # ty:ignore[invalid-argument-type]
-            native_interfaces=result[
-                "native interfaces"
-            ],  # ty:ignore[invalid-argument-type]
+            native_interfaces=result["native interfaces"],  # ty:ignore[invalid-argument-type]
             chain_mapping=result["mapping"],  # ty:ignore[invalid-argument-type]
             interfaces={
                 (i["Model chains"][0], i["Model chains"][1]): parse_dict(i)

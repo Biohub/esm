@@ -5,9 +5,18 @@ import attr
 import torch
 import torch.nn.functional as F
 
-from esm.sdk.api import ESMProteinTensor, SamplingConfig, SamplingTrackConfig
-from esm.tokenization import TokenizerCollectionProtocol, get_invalid_tokenizer_ids
-from esm.tokenization.function_tokenizer import InterProQuantizedTokenizer
+from esm.sdk.api import (
+    ESMProteinTensor,
+    SamplingConfig,
+    SamplingTrackConfig,
+)
+from esm.tokenization import (
+    TokenizerCollectionProtocol,
+    get_invalid_tokenizer_ids,
+)
+from esm.tokenization.function_tokenizer import (
+    InterProQuantizedTokenizer,
+)
 from esm.utils.constants.esm3 import (
     MAX_RESIDUE_ANNOTATIONS,
     SASA_DISCRETIZATION_BOUNDARIES,
@@ -98,9 +107,9 @@ class _BatchedESMProteinTensor(ESMProteinTensor):
             s = getattr(self, f.name)
             v = getattr(slice, f.name)
 
-            assert v is None or (
-                v is not None and s is not None
-            ), f"Trying to set a slice on None tensor ({f.name})."
+            assert v is None or (v is not None and s is not None), (
+                f"Trying to set a slice on None tensor ({f.name})."
+            )
 
             if v is not None:
                 s[i, ...] = v

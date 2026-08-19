@@ -1,6 +1,6 @@
 [project]
 name = "esm"
-version = "3.3.0"
+version = "4.0.0"
 description = "EvolutionaryScale open model repository"
 readme = "README.md"
 requires-python = ">=3.12,<3.13"
@@ -21,7 +21,7 @@ classifiers = [
 ]
 
 dependencies = [
-  "torch>=2.2.0",
+  "torch>=2.11.0,<2.12.0",
   "transformers @ git+https://github.com/Biohub/transformers.git@main",
   "ipython",
   "einops",
@@ -41,6 +41,11 @@ dependencies = [
   "py3dmol",
   "pydssp",
   "boto3",
+  # Both are imported directly by esm.models.hub, esm.models.esmc and
+  # esm.models.esmfold2; they resolved only because transformers happens to pull
+  # them in.
+  "huggingface_hub",
+  "safetensors",
   "pygtrie",
   "dna_features_viewer",
   "accelerate",
@@ -48,6 +53,15 @@ dependencies = [
   # renamed the RMSD keys (iRMSD/LRMSD) and dropped the DockQ_F1 output, which
   # protein_complex.py recomputes from F1.
   "dockq @ git+https://github.com/nrontsis/DockQ.git@ba4df5adaad7c77fd60851d0b7b05f2b77061ba2",
+  "cuequivariance-torch>=0.8.1; sys_platform == 'linux' and platform_machine == 'x86_64'",
+  "cuequivariance-ops-torch-cu13>=0.8.1; sys_platform == 'linux' and platform_machine == 'x86_64'",
+]
+
+[project.optional-dependencies]
+accel = [
+  "flash-attn==2.7.4.post1; sys_platform == 'linux' and platform_machine == 'x86_64'",
+  "transformer-engine[pytorch]==2.15.0; sys_platform == 'linux' and platform_machine == 'x86_64'",
+  "nvidia-cublas>=13.6; sys_platform == 'linux' and platform_machine == 'x86_64'",
 ]
 # Pytest
 [tool.pytest.ini_options]
@@ -55,8 +69,15 @@ addopts = """
   --cov=esm
 	--cov-report term-missing:skip-covered
 	-n auto
+	-m 'not gpu and not nightly and not manual'
 	--ignore=tests/oss_pytests/test_oss_client.py
 """
+markers = [
+  "gpu: requires a CUDA device",
+  "nightly: minutes-long, often multi-GPU; run outside CI",
+  "manual: run by hand, never by CI",
+  "merge_only: needs a real published checkpoint (network or staged weights)",
+]
 
 [tool.setuptools]
 package-dir = {"" = "."}
@@ -67,7 +88,7 @@ where = ["."]
 include = ["esm*"]
 
 [tool.setuptools.package-data]
-esm = ["data/*"]
+esm = ["data/*", "tests/reference/*.pkl.gz"]
 
 [tool.pixi.workspace]
 channels = ["conda-forge"]
@@ -102,9 +123,21 @@ ty = "==0.0.49"
 lint-all = "pre-commit run --all-files --show-diff-on-failure"
 cov-test = "pytest -v --junitxml=pytest.xml --cov=esm"
 
+[tool.pixi.feature.fused]
+platforms = ["linux-64"]
+
+[tool.pixi.feature.fused.pypi-dependencies]
+flash_attn = { url = "https://github.com/evolutionaryscale/wheels/releases/download/py312-pt211-cu13-sm80-90/flash_attn-2.7.4.post1-cp312-cp312-linux_x86_64.whl" }
+cuequivariance-torch = ">=0.8.1"
+cuequivariance-ops-torch-cu13 = ">=0.8.1"
+
+[tool.pixi.feature.fused.activation.env]
+LD_PRELOAD = "$CONDA_PREFIX/lib/libstdc++.so.6${LD_PRELOAD:+:$LD_PRELOAD}"
+
 [tool.pixi.environments]
 default = {features = [], solve-group = "default"}
 dev = {features = ["dev"], solve-group = "default"}
+gpu = {features = ["dev", "fused"], solve-group = "default"}
 
 [tool.ruff]
 extend-include = ["*.ipynb"]

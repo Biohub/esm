@@ -10,7 +10,9 @@ import numpy as np
 import pytest
 
 from esm.utils import residue_constants
-from esm.utils.structure.molecular_complex import MolecularComplex
+from esm.utils.structure.molecular_complex import (
+    MolecularComplex,
+)
 
 # Minimal CIF with protein (chain A) + ligand (chain B in label_asym_id, chain A in auth_asym_id)
 # This is the standard PDB convention that was previously broken.
@@ -226,9 +228,9 @@ def test_from_mmcif_no_token_on_wrong_chain(cif_fixture: str):
 
     # Non-protein tokens should not be on any protein chain
     overlap = protein_chains & non_protein_chains
-    assert (
-        overlap == set()
-    ), f"Non-protein tokens share chain(s) {overlap} with protein tokens"
+    assert overlap == set(), (
+        f"Non-protein tokens share chain(s) {overlap} with protein tokens"
+    )
 
 
 def _make_four_chain_protein_complex():
@@ -239,7 +241,9 @@ def _make_four_chain_protein_complex():
     with 3 breaks, residues after chain A would be shifted by 1, 2, or 3.
     """
     from esm.utils.structure.protein_chain import ProteinChain
-    from esm.utils.structure.protein_complex import ProteinComplex
+    from esm.utils.structure.protein_complex import (
+        ProteinComplex,
+    )
 
     rng = np.random.default_rng(42)
 
@@ -320,9 +324,9 @@ def test_protein_complex_roundtrip_preserves_atom37_mask():
     mc2 = MolecularComplex.from_blob(blob)
     pc2 = mc2.to_protein_complex()
 
-    assert (
-        pc2.sequence == pc.sequence
-    ), f"Sequence changed: {pc.sequence!r} -> {pc2.sequence!r}"
+    assert pc2.sequence == pc.sequence, (
+        f"Sequence changed: {pc.sequence!r} -> {pc2.sequence!r}"
+    )
 
     # Check per-chain, per-residue atom mask AND coordinate preservation
     for chain_orig, chain_rt in zip(pc.chain_iter(), pc2.chain_iter()):
