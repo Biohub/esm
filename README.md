@@ -299,6 +299,35 @@ with open("result.cif", "w") as f:
 
 For tutorials on how to use ESMFold2, see our [tutorials](https://github.com/Biohub/esm/tree/main/cookbook/tutorials).
 
+## Batch Inference
+For jobs that require processing multiple inputs, the Batch Executor provides a streamlined way to execute them concurrently and efficiently while respecting rate limits and adapting to request latency. The following example provides an example of using the batch_executor context manager when embedding sequences.
+
+```py
+from esm.sdk.forge import ESMCForgeInferenceClient
+from esm.sdk.api import ESMProtein, LogitsConfig, LogitsOutput, ESMProteinError
+from esm.sdk import batch_executor
+
+def  embed_sequence(client: ESMCForgeInferenceClient, sequence: str) -> LogitsOutput:
+  protein = ESMProtein(sequence=sequence)
+  protein_tensor = client.encode(protein)
+  if  isinstance(protein_tensor, ESMProteinError):
+    raise protein_tensor
+
+  output = client.logits(protein_tensor, LogitsConfig(sequence=True, return_embeddings=True))
+  return output
+
+sequences = ["A", "AA", "AAA"]
+client = ESMCForgeInferenceClient(model="esmc-6b-2024-12", url="https://biohub.ai", token="<your API token>")
+
+# Usage Example:
+# To execute a batch job, wrap your function inside the batch executor context manager.
+# Syntax:
+# with batch_executor() as executor:
+# outputs = executor.execute_batch(user_func=<your_function>, **kwargs)
+
+with batch_executor() as executor:
+  outputs = executor.execute_batch(user_func=embed_sequence, client=client, sequence=sequences)
+```
 
 ## Frontier Safety
 <a name="frontier-safety"></a>
