@@ -12,15 +12,8 @@ from Bio import SeqIO
 from scipy.spatial.distance import cdist
 
 from esm.utils.misc import slice_any_object
-from esm.utils.msa.filter_sequences import (
-    greedy_select_indices,
-    hhfilter,
-)
-from esm.utils.parsing import (
-    FastaEntry,
-    read_sequences,
-    write_sequences,
-)
+from esm.utils.msa.filter_sequences import greedy_select_indices, hhfilter
+from esm.utils.parsing import FastaEntry, read_sequences, write_sequences
 from esm.utils.sequential_dataclass import SequentialDataclass
 from esm.utils.system import PathOrBuffer
 

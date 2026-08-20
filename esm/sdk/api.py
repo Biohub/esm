@@ -3,28 +3,19 @@ from __future__ import annotations
 import warnings
 from abc import ABC
 from copy import deepcopy
-from typing import List, Literal, Sequence
+from typing import Sequence
 
 import attr
-import pandas as pd
 import torch
 from attr import asdict, define
 
 import esm.utils.constants.api as C
-from esm.tokenization import (
-    TokenizerCollectionProtocol,
-    get_esm3_model_tokenizers,
-)
+from esm.tokenization import TokenizerCollectionProtocol, get_esm3_model_tokenizers
 from esm.utils import encoding
 from esm.utils.constants.models import ESM3_OPEN_SMALL
-from esm.utils.misc import (
-    get_chainbreak_boundaries_from_sequence,
-)
+from esm.utils.misc import get_chainbreak_boundaries_from_sequence
 from esm.utils.structure.protein_chain import ProteinChain
-from esm.utils.structure.protein_complex import (
-    SINGLE_LETTER_CHAIN_IDS,
-    ProteinComplex,
-)
+from esm.utils.structure.protein_complex import SINGLE_LETTER_CHAIN_IDS, ProteinComplex
 from esm.utils.types import FunctionAnnotation, PathOrBuffer
 
 
@@ -430,8 +421,6 @@ class FoldingConfig:
     msa_max_depth: int | None = 1024
     msa_column_mask_rate: float = 0.1
     include_embeddings: bool = False
-
-
 
 
 ## Low Level Endpoint Types

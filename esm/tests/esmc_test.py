@@ -31,14 +31,8 @@ from esm.models.esmc import (
     EsmcTokenizer,
 )
 from esm.models.esmc import model as model_module
-from esm.models.esmc.checkpoint_layout import (
-    native_to_published,
-    published_to_native,
-)
-from esm.models.esmc.kernels import (
-    FLASH_ATTN_INSTALLED,
-    TE_INSTALLED,
-)
+from esm.models.esmc.checkpoint_layout import native_to_published, published_to_native
+from esm.models.esmc.kernels import FLASH_ATTN_INSTALLED, TE_INSTALLED
 from esm.models.esmc.layers import (
     EsmcFlashMultiHeadAttention,
     EsmcLayerNormLinear,
@@ -1227,9 +1221,7 @@ def test_fp8_backbone(esmc_300m_dir):
     if torch.cuda.get_device_capability()[0] < 9:
         pytest.skip("fp8 needs compute capability >= 9.0 (Hopper)")  # ty:ignore[too-many-positional-arguments]
 
-    from esm.models.esmfold2.model import (
-        _convert_te_modules_to_fp8_inplace,
-    )
+    from esm.models.esmfold2.model import _convert_te_modules_to_fp8_inplace
 
     model = EsmcModel.from_pretrained(
         esmc_300m_dir, device="cuda", dtype=torch.bfloat16

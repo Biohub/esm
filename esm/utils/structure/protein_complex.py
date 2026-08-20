@@ -32,10 +32,7 @@ from esm.utils.misc import slice_python_object_as_numpy
 from esm.utils.structure.affine3d import Affine3D
 from esm.utils.structure.aligner import Aligner
 from esm.utils.structure.atom_indexer import AtomIndexer
-from esm.utils.structure.metrics import (
-    compute_gdt_ts,
-    compute_lddt_ca,
-)
+from esm.utils.structure.metrics import compute_gdt_ts, compute_lddt_ca
 from esm.utils.structure.mmcif_parsing import (
     MmcifWrapper,
     NoProteinError,

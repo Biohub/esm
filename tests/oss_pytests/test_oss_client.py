@@ -2,6 +2,7 @@ import os
 
 import pytest
 import torch
+
 from esm.sdk import client  # pyright: ignore
 from esm.sdk.api import (  # pyright: ignore
     ESMProtein,

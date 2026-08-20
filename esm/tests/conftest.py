@@ -329,10 +329,7 @@ def protein_complex_input(chains):
     Chain ids are positional and always distinct; entity identity is derived from
     the sequence by the featurizer, not from the id.
     """
-    from esm.models.esmfold2.types import (
-        ProteinInput,
-        StructurePredictionInput,
-    )
+    from esm.models.esmfold2.types import ProteinInput, StructurePredictionInput
 
     return StructurePredictionInput(
         sequences=[
@@ -357,9 +354,7 @@ def _synthetic_lm_states(model, features, seed: int) -> torch.Tensor:
 
 def esmfold2_inputs(model, seq: str = "MQIFVKTLTGKT", seed: int = 0):
     """Protein features plus synthetic LM states, so no PLM backbone is needed."""
-    from esm.models.esmfold2.protein_utils import (
-        prepare_protein_features,
-    )
+    from esm.models.esmfold2.protein_utils import prepare_protein_features
 
     features = prepare_protein_features(seq)
     return features, _synthetic_lm_states(model, features, seed)
@@ -371,9 +366,7 @@ def esmfold2_complex_features(model, chains, seed: int = 0):
     Goes through the full featurizer rather than ``prepare_protein_features``,
     because chain identity tensors only exist on that path.
     """
-    from esm.models.esmfold2.prepare_input import (
-        prepare_esmfold2_input,
-    )
+    from esm.models.esmfold2.prepare_input import prepare_esmfold2_input
 
     raw, chain_infos = prepare_esmfold2_input(protein_complex_input(chains))
     # prepare_esmfold2_input returns unbatched tensors; only

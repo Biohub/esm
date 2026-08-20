@@ -13,7 +13,7 @@ from __future__ import annotations
 import random
 from contextlib import contextmanager
 from functools import partial
-from typing import cast
+from typing import Any, cast
 
 import numpy as np
 import torch
@@ -28,10 +28,10 @@ try:
 
     FLASH_ATTN_AVAILABLE = True
 except ImportError:
-    flash_attn_func = None  # ty:ignore[invalid-assignment]
-    flash_attn_varlen_func = None  # ty:ignore[invalid-assignment]
-    index_first_axis = None  # ty:ignore[invalid-assignment]
-    pad_input = None  # ty:ignore[invalid-assignment]
+    flash_attn_func: Any = None
+    flash_attn_varlen_func: Any = None
+    index_first_axis: Any = None
+    pad_input: Any = None
     FLASH_ATTN_AVAILABLE = False
 
 try:
@@ -42,8 +42,8 @@ try:
 
     CUE_AVAILABLE = True
 except ImportError:
-    _cue_attn_pair_bias = None  # ty:ignore[invalid-assignment]
-    _cue_tri_mul = None  # ty:ignore[invalid-assignment]
+    _cue_attn_pair_bias: Any = None
+    _cue_tri_mul: Any = None
     CUE_AVAILABLE = False
 
 # Vendored inference-only Triton kernels.
@@ -56,22 +56,18 @@ try:
     from esm.models.esmfold2.kernels import (
         FusedDropoutResidual as _FusedDropoutResidual,
     )
-    from esm.models.esmfold2.kernels import (
-        FusedLNLinearSwiGLU as _FusedLNLinearSwiGLU,
-    )
-    from esm.models.esmfold2.kernels import (
-        fused_pair_bias as _fused_pair_bias,
-    )
+    from esm.models.esmfold2.kernels import FusedLNLinearSwiGLU as _FusedLNLinearSwiGLU
+    from esm.models.esmfold2.kernels import fused_pair_bias as _fused_pair_bias
     from esm.models.esmfold2.kernels import (
         triangle_multiplicative_update_with_residual as _fused_trimul_with_residual,
     )
 
     TRITON_KERNELS_AVAILABLE = True
 except (ImportError, RuntimeError):
-    _fused_pair_bias = None
-    _fused_trimul_with_residual = None
-    _FusedLNLinearSwiGLU = None  # ty:ignore[invalid-assignment]
-    _FusedDropoutResidual = None  # ty:ignore[invalid-assignment]
+    _fused_pair_bias: Any = None
+    _fused_trimul_with_residual: Any = None
+    _FusedLNLinearSwiGLU: Any = None
+    _FusedDropoutResidual: Any = None
     TRITON_KERNELS_AVAILABLE = False
 
 from esm.models.esmfold2.config import EsmFold2Config
@@ -1147,7 +1143,7 @@ class AttentionPairBias(nn.Module):
                 num_heads=self.num_heads,
                 pair_norm_w=pair_norm_w,
                 pair_norm_b=pair_norm_b,
-            )  # (B, H, Q, K)  # ty:ignore[call-non-callable]
+            )  # (B, H, Q, K)
             q_bhqd = q.transpose(1, 2)
             k_bhqd = k.transpose(1, 2)
             v_bhqd = v.transpose(1, 2)
@@ -2645,7 +2641,7 @@ class PairUpdateBlock(nn.Module):
             g_out_weight=_to_fused_kernel_dtype(engine.proj_gate.weight),
             mask=pair_attention_mask,
             eps=_EPS,
-        )  # ty:ignore[call-non-callable]
+        )
 
     def forward(
         self, pair: Tensor, pair_attention_mask: Tensor | None = None

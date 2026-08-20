@@ -1,18 +1,13 @@
 import os
 import warnings
 
-from esm.sdk.api import (
-    ESM3InferenceClient,
-    ESMCInferenceClient,
-)
+from esm.sdk.api import ESM3InferenceClient, ESMCInferenceClient
 from esm.sdk.forge import (
     ESM3ForgeInferenceClient,
     ESMCForgeInferenceClient,
     SequenceStructureForgeInferenceClient,
 )
-from esm.utils.forge_context_manager import (
-    ForgeParallelExecutor,
-)
+from esm.utils.forge_context_manager import ForgeParallelExecutor
 
 # Note: please do not import ESM3SageMakerClient here since that requires AWS SDK.
 

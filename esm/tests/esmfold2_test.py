@@ -28,13 +28,8 @@ from esm.models.esmfold2 import (
 # flash-attn imports on CPU boxes but needs a CUDA runtime, so the reference
 # path is selected explicitly for the CPU tests below.
 from esm.models.esmfold2 import layers as _layers
-from esm.models.esmfold2.config import (
-    _LEGACY_PATHS,
-    _prune_empty,
-)
-from esm.models.esmfold2.protein_utils import (
-    prepare_protein_features,
-)
+from esm.models.esmfold2.config import _LEGACY_PATHS, _prune_empty
+from esm.models.esmfold2.protein_utils import prepare_protein_features
 from esm.models.hub import CONFIG_NAME
 from esm.tests.conftest import (
     ATOM_ALIGNED_SEQUENCE,
@@ -995,9 +990,7 @@ def test_bundled_backbone_is_built_and_loaded_in_one_pass(
     """
     from safetensors.torch import save_file
 
-    from esm.models.esmc.checkpoint_layout import (
-        native_to_published,
-    )
+    from esm.models.esmc.checkpoint_layout import native_to_published
     from esm.models.esmc.model import EsmcModel
 
     unbundled = EsmFold2Model(tiny_esmfold2_config)
@@ -1045,9 +1038,7 @@ def test_bundled_backbone_is_frozen_and_cast(
     """The bundled path must land on the same dtype/grad state as ``load_esmc``."""
     from safetensors.torch import save_file
 
-    from esm.models.esmc.checkpoint_layout import (
-        native_to_published,
-    )
+    from esm.models.esmc.checkpoint_layout import native_to_published
 
     bundled_config = EsmFold2Config(
         **{
@@ -1101,9 +1092,7 @@ def test_eval_forward_is_deterministic(tiny_esmfold2):
 
 def test_output_to_pdb_is_well_formed(tiny_esmfold2):
     """Guards the ProteinChain rendering path that replaced openfold's to_pdb."""
-    from esm.models.esmfold2.protein_utils import (
-        OUTPUT_TO_PDB_FEATURE_KEYS,
-    )
+    from esm.models.esmfold2.protein_utils import OUTPUT_TO_PDB_FEATURE_KEYS
 
     out, features = _forward(tiny_esmfold2)
     for key in OUTPUT_TO_PDB_FEATURE_KEYS:
@@ -1199,10 +1188,7 @@ def test_kernel_backends_agree(kernel_esmfold2_config, backend):
     compared two runs of one configuration and measured CUDA's own
     nondeterminism rather than any kernel.
     """
-    from esm.models.esmfold2.layers import (
-        CUE_AVAILABLE,
-        TRITON_KERNELS_AVAILABLE,
-    )
+    from esm.models.esmfold2.layers import CUE_AVAILABLE, TRITON_KERNELS_AVAILABLE
 
     if backend == "fused" and not TRITON_KERNELS_AVAILABLE:
         pytest.skip("triton kernels unavailable")  # ty:ignore[too-many-positional-arguments]

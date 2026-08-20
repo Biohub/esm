@@ -7,10 +7,7 @@ from typing import Any, Callable, List
 from tqdm import tqdm
 
 from esm.sdk.api import ESMProteinError
-from esm.sdk.retry import (
-    retry_if_specific_error,
-    skip_retries_var,
-)
+from esm.sdk.retry import retry_if_specific_error, skip_retries_var
 
 TQDM_BAR_FORMAT = (
     "{desc:<12}{percentage:3.0f}%|{bar:24}| {n_fmt}/{total_fmt} "

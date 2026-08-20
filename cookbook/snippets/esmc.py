@@ -2,6 +2,7 @@ import math
 import os
 
 import torch
+
 from esm.models.esmc import EsmcForMaskedLM, EsmcTokenizer
 from esm.sdk import esmc_client, parallel_executor
 from esm.sdk.api import (
@@ -12,10 +13,7 @@ from esm.sdk.api import (
     LogitsConfig,
     LogitsOutput,
 )
-from esm.sdk.forge import (
-    ESM3ForgeInferenceClient,
-    ESMCForgeInferenceClient,
-)
+from esm.sdk.forge import ESM3ForgeInferenceClient, ESMCForgeInferenceClient
 from esm.tokenization import get_esmc_model_tokenizers
 
 

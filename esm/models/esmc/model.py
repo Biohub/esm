@@ -17,10 +17,7 @@ import torch.nn as nn
 from safetensors.torch import save_file
 from torch.nn import BCEWithLogitsLoss, CrossEntropyLoss, MSELoss
 
-from esm.models.esmc.checkpoint_layout import (
-    native_to_published,
-    published_to_native,
-)
+from esm.models.esmc.checkpoint_layout import native_to_published, published_to_native
 from esm.models.esmc.config import EsmcConfig
 from esm.models.esmc.kernels import (
     FLASH_ATTN_INSTALLED,
@@ -28,15 +25,9 @@ from esm.models.esmc.kernels import (
     pad_input,
     unpad_input,
 )
-from esm.models.esmc.layers import (
-    EsmcRotaryEmbedding,
-    EsmcTransformerStack,
-)
+from esm.models.esmc.layers import EsmcRotaryEmbedding, EsmcTransformerStack
 from esm.models.esmc.sae import EsmcSaeLayer
-from esm.models.hub import (
-    HubPreTrainedModel,
-    resolve_model_dir,
-)
+from esm.models.hub import HubPreTrainedModel, resolve_model_dir
 
 _SAFETENSORS_INDEX = "model.safetensors.index.json"
 _SAFETENSORS_SINGLE = "model.safetensors"

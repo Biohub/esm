@@ -13,13 +13,9 @@ from esm.sdk.api import (
     GenerationConfig,
 )
 from esm.utils.constants import models
-from esm.widgets.components.results_visualizer import (
-    create_results_visualizer,
-)
+from esm.widgets.components.results_visualizer import create_results_visualizer
 from esm.widgets.utils.printing import wrapped_print
-from esm.widgets.utils.serialization import (
-    create_download_results_button,
-)
+from esm.widgets.utils.serialization import create_download_results_button
 
 
 def create_esm3_generation_launcher(

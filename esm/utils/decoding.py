@@ -10,24 +10,12 @@ from esm.models.function_decoder import FunctionTokenDecoder
 from esm.models.vqvae import StructureTokenDecoder
 from esm.sdk.api import ESMProtein, ESMProteinTensor
 from esm.tokenization import TokenizerCollectionProtocol
-from esm.tokenization.function_tokenizer import (
-    InterProQuantizedTokenizer,
-)
-from esm.tokenization.residue_tokenizer import (
-    ResidueAnnotationsTokenizer,
-)
-from esm.tokenization.sasa_tokenizer import (
-    SASADiscretizingTokenizer,
-)
-from esm.tokenization.sequence_tokenizer import (
-    EsmSequenceTokenizer,
-)
-from esm.tokenization.ss_tokenizer import (
-    SecondaryStructureTokenizer,
-)
-from esm.tokenization.structure_tokenizer import (
-    StructureTokenizer,
-)
+from esm.tokenization.function_tokenizer import InterProQuantizedTokenizer
+from esm.tokenization.residue_tokenizer import ResidueAnnotationsTokenizer
+from esm.tokenization.sasa_tokenizer import SASADiscretizingTokenizer
+from esm.tokenization.sequence_tokenizer import EsmSequenceTokenizer
+from esm.tokenization.ss_tokenizer import SecondaryStructureTokenizer
+from esm.tokenization.structure_tokenizer import StructureTokenizer
 from esm.tokenization.tokenizer_base import EsmTokenizerBase
 from esm.utils.constants import api as api_constants
 from esm.utils.constants import esm3 as C

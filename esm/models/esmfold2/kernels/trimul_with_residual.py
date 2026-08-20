@@ -49,16 +49,12 @@ import torch
 import triton
 import triton.language as tl
 
-from esm.models.esmfold2.kernels.fused_dual_gemm import (
-    fused_gated_dual_gemm_split,
-)
+from esm.models.esmfold2.kernels.fused_dual_gemm import fused_gated_dual_gemm_split
 from esm.models.esmfold2.kernels.fused_ln_residual import (
     fused_ln_transpose,
     fused_ln_with_residual_link,
 )
-from esm.models.esmfold2.kernels.trimul_einsum_triton import (
-    trimul_batched_einsum,
-)
+from esm.models.esmfold2.kernels.trimul_einsum_triton import trimul_batched_einsum
 
 # Static config — runtime autotune cold-start is unshippable for inference.
 _AUTOTUNE_CONFIGS = [

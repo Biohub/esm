@@ -18,6 +18,7 @@ The kernels, in the order ESMC prefers them:
 """
 
 import logging
+from typing import Any
 
 import torch
 
@@ -28,7 +29,7 @@ try:
 
     TE_INSTALLED = True
 except ImportError:
-    te = None  # ty:ignore[invalid-assignment]
+    te: Any = None
     TE_INSTALLED = False
 
 try:
@@ -36,7 +37,7 @@ try:
 
     XFORMERS_INSTALLED = True
 except ImportError:
-    xops = None  # ty:ignore[invalid-assignment]
+    xops: Any = None
     XFORMERS_INSTALLED = False
 
 try:
@@ -45,9 +46,10 @@ try:
 
     FLASH_ATTN_INSTALLED = True
 except ImportError:
-    flash_attn_func = None  # ty:ignore[invalid-assignment]
-    flash_attn_varlen_qkvpacked_func = None  # ty:ignore[invalid-assignment]
-    pad_input = unpad_input = None  # ty:ignore[invalid-assignment]
+    flash_attn_func: Any = None
+    flash_attn_varlen_qkvpacked_func: Any = None
+    pad_input: Any = None
+    unpad_input: Any = None
     FLASH_ATTN_INSTALLED = False
 
 try:
@@ -55,7 +57,7 @@ try:
 
     FLASH_ATTN_ROTARY_INSTALLED = True
 except ImportError:
-    apply_triton_rotary = None  # ty:ignore[invalid-assignment]
+    apply_triton_rotary: Any = None
     FLASH_ATTN_ROTARY_INSTALLED = False
 
 

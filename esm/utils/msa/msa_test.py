@@ -4,9 +4,7 @@ import gzip
 
 import numpy as np
 
-from esm.models.esmfold2.paired_msa import (
-    msa_to_res_type_and_deletions,
-)
+from esm.models.esmfold2.paired_msa import msa_to_res_type_and_deletions
 from esm.utils.msa.msa import MSA, a3m_deletion_counts
 from esm.utils.parsing import FastaEntry
 

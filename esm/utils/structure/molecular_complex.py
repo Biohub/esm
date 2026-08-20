@@ -24,18 +24,9 @@ from biotite.structure.io.pdbx import (
 )
 
 from esm.utils import residue_constants
-from esm.utils.structure.metrics import (
-    compute_lddt,
-    compute_rmsd,
-)
-from esm.utils.structure.mmcif_parsing import (
-    PLDDT_B_FACTOR_SCALE,
-    round_mmcif_columns,
-)
-from esm.utils.structure.protein_complex import (
-    ProteinComplex,
-    ProteinComplexMetadata,
-)
+from esm.utils.structure.metrics import compute_lddt, compute_rmsd
+from esm.utils.structure.mmcif_parsing import PLDDT_B_FACTOR_SCALE, round_mmcif_columns
+from esm.utils.structure.protein_complex import ProteinComplex, ProteinComplexMetadata
 
 
 @dataclass

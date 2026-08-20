@@ -1,8 +1,6 @@
 from ipywidgets import widgets
 
-from esm.widgets.components.sasa_prompt_selector import (
-    create_sasa_prompt_selector,
-)
+from esm.widgets.components.sasa_prompt_selector import create_sasa_prompt_selector
 from esm.widgets.components.secondary_structure_prompt_selector import (
     create_secondary_structure_prompt_selector,
 )

@@ -5,18 +5,9 @@ import attr
 import torch
 import torch.nn.functional as F
 
-from esm.sdk.api import (
-    ESMProteinTensor,
-    SamplingConfig,
-    SamplingTrackConfig,
-)
-from esm.tokenization import (
-    TokenizerCollectionProtocol,
-    get_invalid_tokenizer_ids,
-)
-from esm.tokenization.function_tokenizer import (
-    InterProQuantizedTokenizer,
-)
+from esm.sdk.api import ESMProteinTensor, SamplingConfig, SamplingTrackConfig
+from esm.tokenization import TokenizerCollectionProtocol, get_invalid_tokenizer_ids
+from esm.tokenization.function_tokenizer import InterProQuantizedTokenizer
 from esm.utils.constants.esm3 import (
     MAX_RESIDUE_ANNOTATIONS,
     SASA_DISCRETIZATION_BOUNDARIES,

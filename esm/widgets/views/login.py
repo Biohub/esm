@@ -4,10 +4,7 @@ from textwrap import dedent
 
 from ipywidgets import widgets
 
-from esm.widgets.utils.clients import (
-    get_forge_client,
-    get_local_client,
-)
+from esm.widgets.utils.clients import get_forge_client, get_local_client
 from esm.widgets.utils.types import ClientInitContainer
 
 

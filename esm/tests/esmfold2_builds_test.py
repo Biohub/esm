@@ -54,17 +54,9 @@ import pytest
 import torch
 import torch._dynamo
 
-from esm.models.esmfold2 import (
-    EsmFold2Config,
-    EsmFold2ExperimentalModel,
-    EsmFold2Model,
-)
+from esm.models.esmfold2 import EsmFold2Config, EsmFold2ExperimentalModel, EsmFold2Model
 from esm.models.esmfold2 import layers as _layers
-from esm.tests.conftest import (
-    ESMFOLD2_LENGTHS,
-    ESMFOLD2_SEQUENCES,
-    esmfold2_inputs,
-)
+from esm.tests.conftest import ESMFOLD2_LENGTHS, ESMFOLD2_SEQUENCES, esmfold2_inputs
 
 #: Chunk sizes the matrix sweeps. ``None`` disables chunking entirely.
 CHUNK_SIZES = (None, 16, 32, 64, 128)

@@ -1,8 +1,6 @@
 import numpy as np
 
-from esm.utils.structure.protein_structure import (
-    index_by_atom_name,
-)
+from esm.utils.structure.protein_structure import index_by_atom_name
 
 
 class AtomIndexer:

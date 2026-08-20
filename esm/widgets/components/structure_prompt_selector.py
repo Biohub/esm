@@ -10,12 +10,8 @@ from matplotlib.patches import Rectangle
 
 from esm.utils.structure.protein_chain import ProteinChain
 from esm.widgets.utils import indexing
-from esm.widgets.utils.drawing.draw_protein_structure import (
-    draw_protein_structure,
-)
-from esm.widgets.utils.parsing import (
-    convert_range_string_to_list_of_ranges,
-)
+from esm.widgets.utils.drawing.draw_protein_structure import draw_protein_structure
+from esm.widgets.utils.parsing import convert_range_string_to_list_of_ranges
 from esm.widgets.utils.printing import wrapped_print
 from esm.widgets.utils.prompting import PromptManager
 

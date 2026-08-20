@@ -18,16 +18,12 @@ import torch.nn as nn
 
 from esm.models.esmc import EsmcModel
 from esm.models.esmfold2 import layers as _layers
-from esm.models.esmfold2.conformers import (
-    get_idealized_atom_pos,
-)
+from esm.models.esmfold2.conformers import get_idealized_atom_pos
 from esm.models.esmfold2.layers import (
     ResIdxAsymIdSymIdEntityIdEncoding,
     compute_lm_hidden_states,
 )
-from esm.models.esmfold2.prepare_input import (
-    prepare_esmfold2_input,
-)
+from esm.models.esmfold2.prepare_input import prepare_esmfold2_input
 from esm.models.esmfold2.processor import ESMFold2InputBuilder
 from esm.models.esmfold2.protein_utils import (
     OUTPUT_TO_PDB_FEATURE_KEYS,

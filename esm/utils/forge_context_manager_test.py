@@ -1,10 +1,7 @@
 import pytest
 
 from esm.sdk import batch_executor, parallel_executor
-from esm.utils.forge_context_manager import (
-    ForgeBatchExecutor,
-    ForgeParallelExecutor,
-)
+from esm.utils.forge_context_manager import ForgeBatchExecutor, ForgeParallelExecutor
 
 
 def _double(x: int) -> int:

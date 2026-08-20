@@ -25,10 +25,7 @@ from esm.utils.misc import slice_python_object_as_numpy
 from esm.utils.structure.affine3d import Affine3D
 from esm.utils.structure.aligner import Aligner
 from esm.utils.structure.atom_indexer import AtomIndexer
-from esm.utils.structure.metrics import (
-    compute_gdt_ts,
-    compute_lddt_ca,
-)
+from esm.utils.structure.metrics import compute_gdt_ts, compute_lddt_ca
 from esm.utils.structure.mmcif_parsing import (
     PLDDT_B_FACTOR_SCALE,
     MmcifWrapper,
@@ -39,9 +36,7 @@ from esm.utils.structure.normalize_coordinates import (
     apply_frame_to_coords,
     get_protein_normalization_frame,
 )
-from esm.utils.structure.protein_structure import (
-    index_by_atom_name,
-)
+from esm.utils.structure.protein_structure import index_by_atom_name
 from esm.utils.types import PathOrBuffer
 
 msgpack_numpy.patch()
@@ -470,7 +465,6 @@ class ProteinChain:
                 bytes = input
         return cls.from_state_dict(msgpack.loads(brotli.decompress(bytes)))
 
-
     def sasa(self, by_residue: bool = True):
         arr = self.atom_array_no_insertions
         sasa_per_atom = bs.sasa(arr)
@@ -776,7 +770,6 @@ class ProteinChain:
             **kwargs,
         )
         return float(gdt_ts) if gdt_ts.numel() == 1 else gdt_ts.numpy().flatten()
-
 
     @classmethod
     def chain_iterable_from_mmcif(

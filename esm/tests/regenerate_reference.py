@@ -27,13 +27,8 @@ from esm.tests.conftest import (
     SEQUENCES,
     staged_model_dir,
 )
-from esm.tests.esmc_test import (
-    PPL_MAX_POSITIONS,
-    pseudo_perplexity,
-)
-from esm.tests.esmc_test import (
-    REFERENCE_FILE as ESMC_REFERENCE_FILE,
-)
+from esm.tests.esmc_test import PPL_MAX_POSITIONS, pseudo_perplexity
+from esm.tests.esmc_test import REFERENCE_FILE as ESMC_REFERENCE_FILE
 from esm.tests.esmfold2_execution_test import (
     DISTANCE_DRIFT_TOLERANCE,
     FORWARD_SEED,
@@ -47,9 +42,7 @@ from esm.tests.esmfold2_execution_test import (
     execution_case,
     reference_config,
 )
-from esm.tests.esmfold2_execution_test import (
-    REFERENCE_FILE as ESMFOLD2_REFERENCE_FILE,
-)
+from esm.tests.esmfold2_execution_test import REFERENCE_FILE as ESMFOLD2_REFERENCE_FILE
 
 # One residue's logit row plus the argmax path moves on any real numerical
 # change, so there is no need to store the full logits tensor.

@@ -7,10 +7,7 @@ from esm.layers.structure_proj import Dim6RotStructureHead
 from esm.layers.transformer_stack import TransformerStack
 from esm.utils.constants import esm3 as C
 from esm.utils.misc import knn_graph
-from esm.utils.structure.affine3d import (
-    Affine3D,
-    build_affine3d_from_coordinates,
-)
+from esm.utils.structure.affine3d import Affine3D, build_affine3d_from_coordinates
 from esm.utils.structure.predicted_aligned_error import (
     compute_predicted_aligned_error,
     compute_tm,

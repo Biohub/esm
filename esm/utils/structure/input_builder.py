@@ -1,5 +1,5 @@
 from dataclasses import dataclass
-from typing import Any, Literal, Sequence, TypeAlias, Union
+from typing import Any, Sequence, TypeAlias, Union
 
 import numpy as np
 

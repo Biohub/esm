@@ -206,6 +206,20 @@ unused-type-ignore-comment = "ignore"
 # rather than disabling unresolved-import, so genuinely-broken first-party imports still
 # surface.
 replace-imports-with-any = [
+    "biotite.database",
+    "biotite.database.**",
+    "biotite.structure",
+    "biotite.structure.**",
+    "biotite.sequence.align",
+    "biotite.sequence.align.**",
+    "scipy.spatial",
+    "transformer_engine",
+    "transformer_engine.**",
+    "transformer_engine_torch",
+    "xformers",
+    "xformers.**",
+    "cuequivariance_torch",
+    "cuequivariance_torch.**",
     "flash_attn",
     "flash_attn.**",
     "zstd",

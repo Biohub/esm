@@ -6,9 +6,7 @@ from esm.sdk.api import (
     ESMProteinError,
     GenerationConfig,
 )
-from esm.widgets.components.results_visualizer import (
-    create_results_visualizer,
-)
+from esm.widgets.components.results_visualizer import create_results_visualizer
 from esm.widgets.utils.printing import wrapped_print
 from esm.widgets.utils.protein_import import ProteinImporter
 

@@ -8,17 +8,10 @@ from accelerate import init_empty_weights
 
 from esm.models.esm3 import ESM3
 from esm.models.esmc.compatibility import ESMC
-from esm.models.esmc.config import (
-    ESMC_6B_HF_REPO,
-    ESMC_300M_HF_REPO,
-    ESMC_600M_HF_REPO,
-)
+from esm.models.esmc.config import ESMC_6B_HF_REPO, ESMC_300M_HF_REPO, ESMC_600M_HF_REPO
 from esm.models.esmc.model import EsmcForMaskedLM
 from esm.models.function_decoder import FunctionTokenDecoder
-from esm.models.vqvae import (
-    StructureTokenDecoder,
-    StructureTokenEncoder,
-)
+from esm.models.vqvae import StructureTokenDecoder, StructureTokenEncoder
 from esm.tokenization import get_esm3_model_tokenizers
 from esm.utils.constants.esm3 import data_root
 from esm.utils.constants.models import (

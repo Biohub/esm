@@ -4,20 +4,12 @@ from ipywidgets import widgets
 
 from esm.sdk.api import ESM3InferenceClient, ESMProtein
 from esm.utils.constants import esm3 as C
-from esm.widgets.components.function_annotator import (
-    create_function_annotator,
-)
+from esm.widgets.components.function_annotator import create_function_annotator
 from esm.widgets.utils.prompting import PromptManagerCollection
 from esm.widgets.utils.protein_import import ProteinImporter
-from esm.widgets.views.esm3_generation_launcher import (
-    create_esm3_generation_launcher,
-)
-from esm.widgets.views.esm3_prompt_preview import (
-    create_esm3_prompt_preview,
-)
-from esm.widgets.views.esm3_prompt_selector import (
-    create_esm3_prompt_selector,
-)
+from esm.widgets.views.esm3_generation_launcher import create_esm3_generation_launcher
+from esm.widgets.views.esm3_prompt_preview import create_esm3_prompt_preview
+from esm.widgets.views.esm3_prompt_selector import create_esm3_prompt_selector
 
 
 def create_generation_ui(

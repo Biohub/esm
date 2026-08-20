@@ -8,11 +8,7 @@ import torch
 from esm.models.esmc import ESMC, ESMCOutput
 from esm.models.esmc.compatibility import _legacy_name_to_repo
 from esm.models.esmc.model import EsmcForMaskedLM
-from esm.utils.constants.models import (
-    ESMC_6B,
-    ESMC_300M,
-    ESMC_600M,
-)
+from esm.utils.constants.models import ESMC_6B, ESMC_300M, ESMC_600M
 
 D_MODEL, N_HEADS, N_LAYERS = 32, 4, 2
 SEQUENCES = ["AAAA", "MKV"]

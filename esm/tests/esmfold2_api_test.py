@@ -14,25 +14,15 @@ import pytest
 import torch
 
 from esm.models.esmfold2 import layers as _layers
-from esm.models.esmfold2.prepare_input import (
-    prepare_esmfold2_input,
-)
+from esm.models.esmfold2.prepare_input import prepare_esmfold2_input
 from esm.models.esmfold2.processor import ESMFold2InputBuilder
 from esm.models.esmfold2.protein_utils import (
     OUTPUT_TO_PDB_FEATURE_KEYS,
     prepare_protein_features,
 )
-from esm.models.esmfold2.types import (
-    ProteinInput,
-    StructurePredictionInput,
-)
-from esm.tests.conftest import (
-    ESMFOLD2_SEQUENCES,
-    esmfold2_inputs,
-)
-from esm.utils.structure.molecular_complex import (
-    MolecularComplexResult,
-)
+from esm.models.esmfold2.types import ProteinInput, StructurePredictionInput
+from esm.tests.conftest import ESMFOLD2_SEQUENCES, esmfold2_inputs
+from esm.utils.structure.molecular_complex import MolecularComplexResult
 
 TINY_SEQUENCE = ESMFOLD2_SEQUENCES["tiny"]
 
@@ -330,10 +320,7 @@ def tiny_experimental(tiny_esmfold2_config):
     """The experimental architecture at the same tiny widths."""
     from dataclasses import asdict
 
-    from esm.models.esmfold2 import (
-        EsmFold2Config,
-        EsmFold2ExperimentalModel,
-    )
+    from esm.models.esmfold2 import EsmFold2Config, EsmFold2ExperimentalModel
 
     fields = {
         key: asdict(value) if hasattr(value, "__dataclass_fields__") else value

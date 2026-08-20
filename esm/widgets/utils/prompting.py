@@ -9,9 +9,7 @@ from esm.sdk.api import ESMProtein, FunctionAnnotation
 from esm.utils import encoding
 from esm.widgets.utils import indexing
 from esm.widgets.utils.drawing.colors import rgba_tuple_to_hex
-from esm.widgets.utils.drawing.draw_category_array import (
-    draw_data_array,
-)
+from esm.widgets.utils.drawing.draw_category_array import draw_data_array
 from esm.widgets.utils.printing import wrapped_print
 
 

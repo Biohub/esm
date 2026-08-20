@@ -1,10 +1,7 @@
 from dataclasses import dataclass
 from typing import Protocol
 
-from esm.utils.constants.models import (
-    ESM3_OPEN_SMALL,
-    normalize_model_name,
-)
+from esm.utils.constants.models import ESM3_OPEN_SMALL, normalize_model_name
 
 from .function_tokenizer import InterProQuantizedTokenizer
 from .residue_tokenizer import ResidueAnnotationsTokenizer

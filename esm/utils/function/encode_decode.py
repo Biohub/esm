@@ -3,16 +3,9 @@ from typing import Sequence
 
 import torch
 
-from esm.models.function_decoder import (
-    FunctionTokenDecoder,
-    merge_annotations,
-)
-from esm.tokenization.function_tokenizer import (
-    InterProQuantizedTokenizer,
-)
-from esm.tokenization.residue_tokenizer import (
-    ResidueAnnotationsTokenizer,
-)
+from esm.models.function_decoder import FunctionTokenDecoder, merge_annotations
+from esm.tokenization.function_tokenizer import InterProQuantizedTokenizer
+from esm.tokenization.residue_tokenizer import ResidueAnnotationsTokenizer
 from esm.utils.constants import esm3 as C
 from esm.utils.types import FunctionAnnotation
 

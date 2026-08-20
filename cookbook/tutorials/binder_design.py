@@ -30,28 +30,8 @@ import numpy as np
 import torch
 import torch.nn.functional as F
 import torch.optim as optim
-from esm.models.esmfold2 import (
-    ELEMENT_NUMBER_TO_SYMBOL,
-    ProteinInput,
-    StructurePredictionInput,
-    load_ccd,
-    prepare_esmfold2_input,
-)
-from esm.models.esmfold2.constants import (
-    MOL_TYPE_NONPOLYMER,
-    PROTEIN_1TO3,
-    PROTEIN_3TO1,
-    RES_TYPE_TO_CCD,
-)
-from esm.utils.structure.mmcif_parsing import (
-    PLDDT_B_FACTOR_SCALE,
-)
-from esm.utils.structure.protein_chain import ProteinChain
-from esm.utils.structure.protein_complex import ProteinComplex
 from transformers.models.esmc.modeling_esmc import ESMCForMaskedLM
-from transformers.models.esmc.tokenization_esmc import (
-    ESMCTokenizer,
-)
+from transformers.models.esmc.tokenization_esmc import ESMCTokenizer
 from transformers.models.esmfold2.modeling_esmfold2_common import (
     BACKEND_CUEQ,
     BACKEND_FUSED,
@@ -68,6 +48,23 @@ from transformers.models.esmfold2.modeling_esmfold2_experimental import (
 from transformers.models.esmfold2.modeling_esmfold2_experimental import (
     MSAEncoder as ESMFold2MSAEncoder,
 )
+
+from esm.models.esmfold2 import (
+    ELEMENT_NUMBER_TO_SYMBOL,
+    ProteinInput,
+    StructurePredictionInput,
+    load_ccd,
+    prepare_esmfold2_input,
+)
+from esm.models.esmfold2.constants import (
+    MOL_TYPE_NONPOLYMER,
+    PROTEIN_1TO3,
+    PROTEIN_3TO1,
+    RES_TYPE_TO_CCD,
+)
+from esm.utils.structure.mmcif_parsing import PLDDT_B_FACTOR_SCALE
+from esm.utils.structure.protein_chain import ProteinChain
+from esm.utils.structure.protein_complex import ProteinComplex
 
 os.environ["HF_XET_HIGH_PERFORMANCE"] = "1"
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s: %(message)s")

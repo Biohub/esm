@@ -4,16 +4,9 @@ import ipywidgets as widgets
 import pydssp
 
 from esm.utils.structure.protein_chain import ProteinChain
-from esm.widgets.utils.drawing.colors import (
-    hex_to_rgba_tuple,
-    rgba_tuple_to_hex,
-)
-from esm.widgets.utils.drawing.draw_category_array import (
-    draw_data_array,
-)
-from esm.widgets.utils.parsing import (
-    convert_range_string_to_list_of_ranges,
-)
+from esm.widgets.utils.drawing.colors import hex_to_rgba_tuple, rgba_tuple_to_hex
+from esm.widgets.utils.drawing.draw_category_array import draw_data_array
+from esm.widgets.utils.parsing import convert_range_string_to_list_of_ranges
 from esm.widgets.utils.prompting import PromptManager
 
 

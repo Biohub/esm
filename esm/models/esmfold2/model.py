@@ -13,7 +13,7 @@ companion ``esm`` package.
 
 import math
 from contextlib import contextmanager
-from typing import cast
+from typing import Any, cast
 
 import torch
 import torch.nn as nn
@@ -26,15 +26,13 @@ try:
 
     TE_AVAILABLE = True
 except ImportError:
-    te = None  # ty:ignore[invalid-assignment]
-    DelayedScaling = None  # ty:ignore[invalid-assignment]
-    Format = None  # ty:ignore[invalid-assignment]
+    te: Any = None
+    DelayedScaling: Any = None
+    Format: Any = None
     TE_AVAILABLE = False
 
 from esm.models.esmc import EsmcModel
-from esm.models.esmc.checkpoint_layout import (
-    published_to_native_subtree,
-)
+from esm.models.esmc.checkpoint_layout import published_to_native_subtree
 from esm.models.esmfold2.config import EsmFold2Config
 from esm.models.esmfold2.layers import (
     CHAR_VOCAB_SIZE,
@@ -58,10 +56,7 @@ from esm.models.esmfold2.layers import (
     maybe_apply_msa_column_masking,
     maybe_subsample_msa,
 )
-from esm.models.hub import (
-    HubPreTrainedModel,
-    resolve_model_dir,
-)
+from esm.models.hub import HubPreTrainedModel, resolve_model_dir
 
 _EPS = 1e-6
 _NONPOLYMER_ID = 4
@@ -444,7 +439,7 @@ def _convert_te_modules_to_fp8_inplace(module: nn.Module) -> None:
                 replaced = True
             elif hasattr(te, "LayerNormMLP") and isinstance(child, te.LayerNormMLP):
                 state = {k: v.detach().clone() for k, v in child.state_dict().items()}
-                fc1_weight: Tensor = child.fc1_weight  # ty:ignore[invalid-assignment]
+                fc1_weight: Tensor = child.fc1_weight
                 hidden_size = int(fc1_weight.shape[1])
                 # fc1 packed as (2*ffn_hidden_size, hidden_size) for swiglu.
                 ffn_hidden_size = int(fc1_weight.shape[0]) // 2
@@ -686,9 +681,7 @@ class EsmFold2Model(HubPreTrainedModel):
         if config is None:
             config = EsmFold2Config.from_pretrained(local_dir)
             if cls is EsmFold2Model and config.type == "experimental":
-                from esm.models.esmfold2.experimental import (
-                    EsmFold2ExperimentalModel,
-                )
+                from esm.models.esmfold2.experimental import EsmFold2ExperimentalModel
 
                 return EsmFold2ExperimentalModel.from_pretrained(
                     local_dir,
@@ -1185,9 +1178,7 @@ class EsmFold2Model(HubPreTrainedModel):
 
     @staticmethod
     def output_to_pdb(output: dict) -> str:
-        from esm.models.esmfold2.protein_utils import (
-            output_to_pdb as _output_to_pdb,
-        )
+        from esm.models.esmfold2.protein_utils import output_to_pdb as _output_to_pdb
 
         return _output_to_pdb(output)
 

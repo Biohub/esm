@@ -36,11 +36,7 @@ from esm.sdk.api import (
     LogitsConfig,
     LogitsOutput,
 )
-from esm.utils.constants.models import (
-    ESMC_6B,
-    ESMC_300M,
-    ESMC_600M,
-)
+from esm.utils.constants.models import ESMC_6B, ESMC_300M, ESMC_600M
 from esm.utils.sampling import _BatchedESMProteinTensor
 
 _DEPRECATION_MESSAGE = (

@@ -12,9 +12,7 @@ from cloudpathlib import AnyPath
 
 from esm.layers.regression_head import RegressionHead
 from esm.layers.transformer_stack import TransformerStack
-from esm.tokenization.function_tokenizer import (
-    InterProQuantizedTokenizer,
-)
+from esm.tokenization.function_tokenizer import InterProQuantizedTokenizer
 from esm.utils.constants import esm3 as C
 from esm.utils.misc import merge_annotations, merge_ranges
 from esm.utils.types import FunctionAnnotation

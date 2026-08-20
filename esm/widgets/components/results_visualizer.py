@@ -7,15 +7,11 @@ import matplotlib.colors as mcolors
 import matplotlib.pyplot as plt
 
 from esm.sdk.api import ESMProtein
-from esm.widgets.utils.drawing.draw_category_array import (
-    draw_data_array,
-)
+from esm.widgets.utils.drawing.draw_category_array import draw_data_array
 from esm.widgets.utils.drawing.draw_function_annotations import (
     draw_function_annotations,
 )
-from esm.widgets.utils.drawing.draw_protein_structure import (
-    draw_protein_structure,
-)
+from esm.widgets.utils.drawing.draw_protein_structure import draw_protein_structure
 from esm.widgets.utils.serialization import (
     create_download_button_from_buffer,
     protein_to_pdb_buffer,

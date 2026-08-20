@@ -2,13 +2,8 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
-from esm.layers.attention import (
-    FlashMultiHeadAttention,
-    MultiHeadAttention,
-)
-from esm.layers.geom_attention import (
-    GeometricReasoningOriginalImpl,
-)
+from esm.layers.attention import FlashMultiHeadAttention, MultiHeadAttention
+from esm.layers.geom_attention import GeometricReasoningOriginalImpl
 from esm.utils.structure.affine3d import Affine3D
 
 
