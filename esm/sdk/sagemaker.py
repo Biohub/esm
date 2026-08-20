@@ -49,9 +49,9 @@ class SequenceStructureSageMakerClient(SequenceStructureForgeInferenceClient):
         data = json.loads(response["Body"].read().decode())
 
         # Response must match request.
-        assert (
-            data["endpoint"] == endpoint
-        ), f"Response endpoint is {data['endpoint']} but request is {endpoint}"
+        assert data["endpoint"] == endpoint, (
+            f"Response endpoint is {data['endpoint']} but request is {endpoint}"
+        )
 
         # Get the actual responses under the endpoint key.
         data = data[endpoint]

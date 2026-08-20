@@ -51,17 +51,17 @@ def fold(
     # Folding with esm3 client
     config = GenerationConfig(track="structure", num_steps=1, temperature=0)
     esm3_client_folded_protein = esm3_client.generate(protein, config)
-    assert isinstance(
-        esm3_client_folded_protein, ESMProtein
-    ), f"Using ESM3 client, ESMProtein was expected but got {esm3_client_folded_protein}"
+    assert isinstance(esm3_client_folded_protein, ESMProtein), (
+        f"Using ESM3 client, ESMProtein was expected but got {esm3_client_folded_protein}"
+    )
 
     # Folding with folding client
     sequence_structure_client_folded_protein = sequence_structure_client.fold(
         protein.sequence, potential_sequence_of_concern=False
     )
-    assert isinstance(
-        sequence_structure_client_folded_protein, ESMProtein
-    ), f"Using sequence_structure client, ESMProtein was expected but got {sequence_structure_client_folded_protein}"
+    assert isinstance(sequence_structure_client_folded_protein, ESMProtein), (
+        f"Using sequence_structure client, ESMProtein was expected but got {sequence_structure_client_folded_protein}"
+    )
     sequence_structure_client_folded_protein.to_pdb("folded_protein.pdb")
     print("Saving folded protein to folded_protein.pdb")
 
@@ -74,18 +74,18 @@ def inverse_fold(
     protein.sequence = None
     protein.sasa = None
     protein.function_annotations = None
-    assert (
-        protein.coordinates is not None
-    ), "Protein coordinates must be set to inverse fold"
+    assert protein.coordinates is not None, (
+        "Protein coordinates must be set to inverse fold"
+    )
 
     # Inverse Folding with esm3 client
     config = GenerationConfig("sequence", num_steps=1, temperature=0.1)
     esm3_client_inv_folded_protein = cast(
         ESMProtein, esm3_client.generate(protein, config)
     )
-    assert isinstance(
-        esm3_client_inv_folded_protein, ESMProtein
-    ), f"Using ESM3 client, ESMProtein was expected but got {esm3_client_inv_folded_protein}"
+    assert isinstance(esm3_client_inv_folded_protein, ESMProtein), (
+        f"Using ESM3 client, ESMProtein was expected but got {esm3_client_inv_folded_protein}"
+    )
 
     # Inverse Folding with inverse folding client
     sequence_structure_client_inv_folded_protein = (
@@ -95,9 +95,9 @@ def inverse_fold(
             potential_sequence_of_concern=False,
         )
     )
-    assert isinstance(
-        sequence_structure_client_inv_folded_protein, ESMProtein
-    ), f"Using sequence_structure client, ESMProtein was expected but got {sequence_structure_client_inv_folded_protein}"
+    assert isinstance(sequence_structure_client_inv_folded_protein, ESMProtein), (
+        f"Using sequence_structure client, ESMProtein was expected but got {sequence_structure_client_inv_folded_protein}"
+    )
     print(
         f"Inverse folded protein: {sequence_structure_client_inv_folded_protein.sequence}"
     )

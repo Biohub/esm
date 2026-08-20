@@ -17,17 +17,17 @@ def encode_function_annotations(
     residue_annotations_tokenizer: ResidueAnnotationsTokenizer,
     add_special_tokens: bool = True,
 ) -> tuple[torch.Tensor, torch.Tensor]:
-    assert isinstance(
-        residue_annotations_tokenizer, ResidueAnnotationsTokenizer
-    ), "residue_annotations_tokenizer must be of type ResidueAnnotationsTokenizer"
+    assert isinstance(residue_annotations_tokenizer, ResidueAnnotationsTokenizer), (
+        "residue_annotations_tokenizer must be of type ResidueAnnotationsTokenizer"
+    )
 
     # Split the user's annotations by type
     ft_annotations: list[FunctionAnnotation] = []
     ra_annotations: list[FunctionAnnotation] = []
     for fa in function_annotations:
-        assert (
-            1 <= fa.start <= fa.end <= len(sequence)
-        ), f"Invalid (start, end) in function annotation {fa}. Indices 1-indexed and [inclusive, inclusive]"
+        assert 1 <= fa.start <= fa.end <= len(sequence), (
+            f"Invalid (start, end) in function annotation {fa}. Indices 1-indexed and [inclusive, inclusive]"
+        )
 
         supported_label = False
 
@@ -106,9 +106,9 @@ def decode_function_tokens(
     Returns:
         Predicted function annotations merged from both predictions.
     """
-    assert (
-        function_token_ids.ndim == 2
-    ), "function_token_ids must be of shape (length, depth)"
+    assert function_token_ids.ndim == 2, (
+        "function_token_ids must be of shape (length, depth)"
+    )
 
     annotations: list[FunctionAnnotation] = []
 
@@ -149,9 +149,9 @@ def decode_residue_annotation_tokens(
     Returns:
         Predicted residue annotations.
     """
-    assert (
-        residue_annotations_token_ids.ndim == 2
-    ), "logits must be of shape (length, MAX_RESIDUE_ANNOTATIONS)"
+    assert residue_annotations_token_ids.ndim == 2, (
+        "logits must be of shape (length, MAX_RESIDUE_ANNOTATIONS)"
+    )
 
     annotations: list[FunctionAnnotation] = []
 

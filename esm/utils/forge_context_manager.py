@@ -43,7 +43,7 @@ class AIMDRateLimiter:
         return self.concurrency
 
 
-class ForgeBatchExecutor:
+class ForgeParallelExecutor:
     """Context manager for managing concurrent calls with rate limiting.
 
     Args:
@@ -154,3 +154,7 @@ class ForgeBatchExecutor:
                 )
 
         return results
+
+
+# Deprecated alias, removed at the next major version. See parallel_executor.
+ForgeBatchExecutor = ForgeParallelExecutor

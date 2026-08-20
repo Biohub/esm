@@ -98,9 +98,9 @@ class _BatchedESMProteinTensor(ESMProteinTensor):
             s = getattr(self, f.name)
             v = getattr(slice, f.name)
 
-            assert v is None or (
-                v is not None and s is not None
-            ), f"Trying to set a slice on None tensor ({f.name})."
+            assert v is None or (v is not None and s is not None), (
+                f"Trying to set a slice on None tensor ({f.name})."
+            )
 
             if v is not None:
                 s[i, ...] = v

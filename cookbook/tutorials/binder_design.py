@@ -471,12 +471,12 @@ def compute_structure_losses(
     total = total + LOSS_WEIGHTS["glob"] * losses["glob_loss"]
     if target_hotspot_ids is not None:
         target_length = distogram_logits.shape[1] - binder_length
-        assert (
-            target_sequence is not None
-        ), "target_sequence is required when target_hotspot_ids is provided."
-        assert (
-            "|" not in target_sequence
-        ), "Epitope loss only supports one target chain."
+        assert target_sequence is not None, (
+            "target_sequence is required when target_hotspot_ids is provided."
+        )
+        assert "|" not in target_sequence, (
+            "Epitope loss only supports one target chain."
+        )
         assert len(target_sequence) == target_length, (
             f"Target sequence length {len(target_sequence)} does not match distogram "
             f"target length {target_length}."
@@ -1013,9 +1013,9 @@ def design_binder(
             )
         binder_prompt_factor = BINDER_PROMPT_FACTORIES[binder_name]
         if is_antibody is not None:
-            assert (
-                binder_prompt_factor.is_antibody == is_antibody
-            ), "Conflict in is_antibody settings."
+            assert binder_prompt_factor.is_antibody == is_antibody, (
+                "Conflict in is_antibody settings."
+            )
         is_antibody = binder_prompt_factor.is_antibody
         binder_sequence = binder_prompt_factor.sample(seed=seed)
     elif binder_sequence is None:

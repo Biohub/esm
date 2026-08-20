@@ -484,9 +484,9 @@ def concat_objects(objs: Sequence[Any], separator: Any | None = None):
         case Concatable():
             return objs[0].__class__.concat(objs)
         case str():
-            assert isinstance(
-                separator, str
-            ), "Trying to join strings but separator is not a string"
+            assert isinstance(separator, str), (
+                "Trying to join strings but separator is not a string"
+            )
             return separator.join(objs)
         case list():
             if separator is not None:

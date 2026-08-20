@@ -167,9 +167,7 @@ class RotaryEmbedding(torch.nn.Module):
                 else:
                     inv_freq = self.inv_freq
             else:
-                t = torch.arange(
-                    seqlen, device=device, dtype=self.inv_freq.dtype
-                )  # ty:ignore[no-matching-overload]
+                t = torch.arange(seqlen, device=device, dtype=self.inv_freq.dtype)  # ty:ignore[no-matching-overload]
                 t /= self.scaling_factor
                 inv_freq = self.inv_freq
             # Don't do einsum, it converts fp32 to fp16 under AMP

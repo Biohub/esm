@@ -282,9 +282,9 @@ class InterProQuantizedTokenizer(EsmTokenizerBase):
         """Converts token into token_id set of length depth."""
         if re.match(r"<lsh:[\d+,]+>", token):
             lsh_ids = [int(lsh_id) for lsh_id in re.findall(r"\d+", token)]
-            assert (
-                len(lsh_ids) == self.depth
-            ), f"Expected token to have {self.depth} ids found {lsh_ids}"
+            assert len(lsh_ids) == self.depth, (
+                f"Expected token to have {self.depth} ids found {lsh_ids}"
+            )
             return [self._lsh_token_vocab_offset + lsh_id for lsh_id in lsh_ids]
         elif token == "<none>" or token in self.special_tokens:
             return [self.vocab_to_index[token]] * self.depth

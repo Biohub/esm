@@ -165,12 +165,12 @@ class ESMProtein(ProteinType):
     def to_protein_complex(
         self, copy_annotations_from_ground_truth: ProteinComplex | None = None
     ) -> ProteinComplex:
-        assert (
-            self.sequence is not None
-        ), "ESMProtein must have a sequence to convert to ProteinComplex"
-        assert (
-            self.coordinates is not None
-        ), "ESMProtein must have coordinates to convert to ProteinComplex"
+        assert self.sequence is not None, (
+            "ESMProtein must have a sequence to convert to ProteinComplex"
+        )
+        assert self.coordinates is not None, (
+            "ESMProtein must have coordinates to convert to ProteinComplex"
+        )
         coords = self.coordinates.to("cpu").numpy()
 
         chain_boundaries = get_chainbreak_boundaries_from_sequence(self.sequence)

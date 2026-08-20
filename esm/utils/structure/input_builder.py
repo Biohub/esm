@@ -80,6 +80,44 @@ class StructurePredictionInput:
     covalent_bonds: list[CovalentBond] | None = None
 
 
+def _entity_key(item: ProteinInput | RNAInput | DNAInput | LigandInput) -> tuple:
+    """Canonical identity of a chain's chemical entity, ignoring chain ids.
+
+    Chains collapse to one entity only if they are chemically identical, so
+    modifications are part of the key: a modified chain and its unmodified twin
+    are separate entities, and merging them would make them ``sym_id`` copies of
+    each other.
+
+    Entity identity is chemical, not per-instance. Two copies of one entity can
+    therefore still differ in token count -- a covalently bonded copy of a CCD
+    ligand drops its leaving atoms while a free copy keeps them -- so "same
+    entity" does not imply "same length".
+    """
+    if isinstance(item, LigandInput):
+        # ccd wins over smiles at tokenization, so a redundant smiles alongside a
+        # ccd must not split one entity into two.
+        if item.ccd:
+            return ("NONPOLYMER", None, tuple(item.ccd))
+        return ("NONPOLYMER", item.smiles, ())
+    if isinstance(item, ProteinInput):
+        entity_type = "PROTEIN"
+    elif isinstance(item, RNAInput):
+        entity_type = "RNA"
+    elif isinstance(item, DNAInput):
+        entity_type = "DNA"
+    else:  # pragma: no cover - the annotation excludes unsupported inputs
+        raise TypeError(f"Unsupported sequence input type: {type(item)}")
+    # `msa` is excluded on purpose: it is stored per chain name, so two copies of
+    # one entity may legitimately carry different MSAs.
+    return (
+        entity_type,
+        item.sequence,
+        frozenset(
+            (mod.position, mod.ccd, mod.smiles) for mod in item.modifications or []
+        ),
+    )
+
+
 def serialize_structure_prediction_input(all_atom_input: StructurePredictionInput):
     def create_chain_data(seq_input, chain_type: str) -> dict[str, Any]:
         chain_data: dict[str, Any] = {

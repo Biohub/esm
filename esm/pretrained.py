@@ -1,16 +1,18 @@
 import inspect
+import warnings
 from typing import Callable
 
 import torch
 import torch.nn as nn
 from accelerate import init_empty_weights
-from huggingface_hub import load_torch_model
 
 from esm.models.esm3 import ESM3
-from esm.models.esmc import ESMC
+from esm.models.esmc.compatibility import ESMC
+from esm.models.esmc.config import ESMC_6B_HF_REPO, ESMC_300M_HF_REPO, ESMC_600M_HF_REPO
+from esm.models.esmc.model import EsmcForMaskedLM
 from esm.models.function_decoder import FunctionTokenDecoder
 from esm.models.vqvae import StructureTokenDecoder, StructureTokenEncoder
-from esm.tokenization import get_esm3_model_tokenizers, get_esmc_model_tokenizers
+from esm.tokenization import get_esm3_model_tokenizers
 from esm.utils.constants.esm3 import data_root
 from esm.utils.constants.models import (
     ESM3_FUNCTION_DECODER_V0,
@@ -63,48 +65,6 @@ def ESM3_function_decoder_v0(device: torch.device | str = "cpu"):
     return model
 
 
-def ESMC_300M_202412(device: torch.device | str = "cpu", use_flash_attn: bool = True):
-    with init_empty_weights():
-        model = ESMC(
-            d_model=960,
-            n_heads=15,
-            n_layers=30,
-            tokenizer=get_esmc_model_tokenizers(),
-            use_flash_attn=use_flash_attn,
-        ).eval()
-    load_torch_model(model, data_root("esmc-300"))
-    model = model.to(device)
-    return model
-
-
-def ESMC_600M_202412(device: torch.device | str = "cpu", use_flash_attn: bool = True):
-    with init_empty_weights():
-        model = ESMC(
-            d_model=1152,
-            n_heads=18,
-            n_layers=36,
-            tokenizer=get_esmc_model_tokenizers(),
-            use_flash_attn=use_flash_attn,
-        ).eval()
-    load_torch_model(model, data_root("esmc-600"))
-    model = model.to(device)
-    return model
-
-
-def ESMC_6B_202412(device: torch.device | str = "cpu", use_flash_attn: bool = True):
-    with init_empty_weights():
-        model = ESMC(
-            d_model=2560,
-            n_heads=40,
-            n_layers=80,
-            tokenizer=get_esmc_model_tokenizers(),
-            use_flash_attn=use_flash_attn,
-        ).eval()
-    load_torch_model(model, data_root("esmc-6b"))
-    model = model.to(device)
-    return model
-
-
 def ESM3_sm_open_v0(device: torch.device | str = "cpu"):
     with init_empty_weights():
         model = ESM3(
@@ -125,13 +85,65 @@ def ESM3_sm_open_v0(device: torch.device | str = "cpu"):
     return model
 
 
+def _deprecated_esmc(
+    new_name: str, repo: str, device: torch.device | str, use_flash_attn: bool
+) -> ESMC:
+    """Load an ESMC checkpoint behind one of the retired date-stamped names."""
+    warnings.warn(
+        f"{new_name} is deprecated; load the model directly with "
+        f'EsmcForMaskedLM.from_pretrained("{repo}"). The weights now come from '
+        f"the HuggingFace Hub rather than a local data root, so the first call "
+        f"downloads them.",
+        DeprecationWarning,
+        stacklevel=3,
+    )
+    with warnings.catch_warnings():
+        # The wrapper warns on its own; one deprecation per call is enough.
+        warnings.simplefilter("ignore", DeprecationWarning)
+        # dtype=None keeps fp32 on every device: the date-stamped factories
+        # loaded raw fp32 weights, and only ESMC.from_pretrained cast to bf16.
+        return ESMC(
+            model=EsmcForMaskedLM.from_pretrained(
+                repo,
+                device=device,
+                dtype=None,
+                attn_implementation="flash_attention_2" if use_flash_attn else "sdpa",
+            )
+        ).eval()
+
+
+def ESMC_300M_202412(
+    device: torch.device | str = "cpu", use_flash_attn: bool = True
+) -> ESMC:
+    """Deprecated. Use ``EsmcForMaskedLM.from_pretrained(ESMC_300M_HF_REPO)``."""
+    return _deprecated_esmc(
+        "ESMC_300M_202412", ESMC_300M_HF_REPO, device, use_flash_attn
+    )
+
+
+def ESMC_600M_202412(
+    device: torch.device | str = "cpu", use_flash_attn: bool = True
+) -> ESMC:
+    """Deprecated. Use ``EsmcForMaskedLM.from_pretrained(ESMC_600M_HF_REPO)``."""
+    return _deprecated_esmc(
+        "ESMC_600M_202412", ESMC_600M_HF_REPO, device, use_flash_attn
+    )
+
+
+def ESMC_6B_202412(
+    device: torch.device | str = "cpu", use_flash_attn: bool = True
+) -> ESMC:
+    """Deprecated. Use ``EsmcForMaskedLM.from_pretrained(ESMC_6B_HF_REPO)``."""
+    return _deprecated_esmc("ESMC_6B_202412", ESMC_6B_HF_REPO, device, use_flash_attn)
+
+
 LOCAL_MODEL_REGISTRY: dict[str, ModelBuilder] = {
     ESM3_OPEN_SMALL: ESM3_sm_open_v0,
     ESM3_STRUCTURE_ENCODER_V0: ESM3_structure_encoder_v0,
     ESM3_STRUCTURE_DECODER_V0: ESM3_structure_decoder_v0,
     ESM3_FUNCTION_DECODER_V0: ESM3_function_decoder_v0,
-    ESMC_600M: ESMC_600M_202412,
     ESMC_300M: ESMC_300M_202412,
+    ESMC_600M: ESMC_600M_202412,
     ESMC_6B: ESMC_6B_202412,
 }
 

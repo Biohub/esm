@@ -11,7 +11,7 @@ from matplotlib.collections import LineCollection
 from matplotlib.colors import Normalize
 from tqdm import tqdm
 
-from esm.sdk import batch_executor
+from esm.sdk import parallel_executor
 from esm.sdk.api import (
     ESM3InferenceClient,
     ESMProtein,
@@ -167,8 +167,8 @@ class ESM3GuidedDecodingWithConstraints(ESM3GuidedDecoding):
                 )
                 return new_pt, reward, g_val, raw_vals
 
-            if self._use_batch_executor:
-                with batch_executor(show_progress=False) as ex:
+            if self._use_parallel_executor:
+                with parallel_executor(show_progress=False) as ex:
                     results = ex.execute_batch(
                         user_func=_propose_and_eval,
                         pt=[protein_tensor] * num_samples_per_step,

@@ -56,6 +56,7 @@ from esm.models.esmfold2.types import (
     RNAInput,
     StructurePredictionInput,
 )
+from esm.utils.structure.input_builder import _entity_key
 
 # =============================================================================
 # Lightweight data model
@@ -672,35 +673,20 @@ def tokenize_ligand_smiles(
 # =============================================================================
 
 
-def _get_sequence_key(item) -> str:
-    """Get a hashable key for entity deduplication."""
-    if isinstance(item, ProteinInput):
-        return f"PROTEIN:{item.sequence}"
-    elif isinstance(item, DNAInput):
-        return f"DNA:{item.sequence}"
-    elif isinstance(item, RNAInput):
-        return f"RNA:{item.sequence}"
-    elif isinstance(item, LigandInput):
-        if item.ccd:
-            return f"LIGAND_CCD:{','.join(item.ccd)}"
-        return f"LIGAND_SMILES:{item.smiles}"
-    raise ValueError(f"Unknown input type: {type(item)}")
-
-
 def build_chains_from_input(
     input: StructurePredictionInput, seed: int | None = None
 ) -> tuple[list[ChainInfo], list[TokenInfo], list[AtomInfo]]:
     """Build chains, tokens, and atoms from StructurePredictionInput.
 
-    Handles entity deduplication (identical sequences get same entity_id),
-    sym_id assignment, and delegates to type-specific tokenization functions.
+    Handles entity deduplication (chemically identical chains get the same
+    entity_id), sym_id assignment, and delegates to type-specific tokenization.
     """
     chains: list[ChainInfo] = []
     all_tokens: list[TokenInfo] = []
     all_atoms: list[AtomInfo] = []
 
     # Entity deduplication
-    sequence_to_entity: dict[str, int] = {}
+    sequence_to_entity: dict[tuple, int] = {}
     entity_sym_count: dict[int, int] = {}
     next_entity_id = 0
 
@@ -717,7 +703,7 @@ def build_chains_from_input(
 
     for item in input.sequences:
         # Entity deduplication
-        seq_key = _get_sequence_key(item)
+        seq_key = _entity_key(item)
         if seq_key in sequence_to_entity:
             entity_id = sequence_to_entity[seq_key]
         else:

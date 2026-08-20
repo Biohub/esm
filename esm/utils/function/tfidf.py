@@ -23,9 +23,9 @@ class TFIDFModel:
             self.idf_ = np.load(f)
 
         assert self.idf_.ndim == 1
-        assert (
-            len(self.idf_) == len(self.vocabulary)
-        ), f"IDF size must match vocabulary size, got {len(self.idf_)} and {len(self.vocabulary)}"
+        assert len(self.idf_) == len(self.vocabulary), (
+            f"IDF size must match vocabulary size, got {len(self.idf_)} and {len(self.vocabulary)}"
+        )
 
     @cached_property
     def vocab_to_index(self) -> dict[str, int]:

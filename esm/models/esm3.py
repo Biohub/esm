@@ -398,9 +398,9 @@ class ESM3(nn.Module, ESM3InferenceClient):
     def batch_generate(
         self, inputs: list[ProteinType], configs: list[GenerationConfig]
     ) -> list[ProteinType]:
-        assert len(inputs) == len(
-            configs
-        ), "Must have the same number of prompts and configs."
+        assert len(inputs) == len(configs), (
+            "Must have the same number of prompts and configs."
+        )
 
         if inputs == []:
             # Nothing to do.

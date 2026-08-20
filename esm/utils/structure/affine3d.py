@@ -13,14 +13,10 @@ from esm.utils.misc import fp32_autocast_context
 
 class Rotation(ABC):
     @classmethod
-    def identity(
-        cls, shape: tuple[int, ...], **tensor_kwargs
-    ) -> Self: ...  # ty:ignore[empty-body]
+    def identity(cls, shape: tuple[int, ...], **tensor_kwargs) -> Self: ...  # ty:ignore[empty-body]
 
     @classmethod
-    def random(
-        cls, shape: tuple[int, ...], **tensor_kwargs
-    ) -> Self: ...  # ty:ignore[empty-body]
+    def random(cls, shape: tuple[int, ...], **tensor_kwargs) -> Self: ...  # ty:ignore[empty-body]
 
     def __getitem__(self, idx: T.Any) -> Self: ...  # ty:ignore[empty-body]
 
@@ -39,9 +35,7 @@ class Rotation(ABC):
 
     def as_matrix(self) -> RotationMatrix: ...  # ty:ignore[empty-body]
 
-    def as_quat(
-        self, normalize: bool = False
-    ) -> RotationQuat: ...  # ty:ignore[empty-body]
+    def as_quat(self, normalize: bool = False) -> RotationQuat: ...  # ty:ignore[empty-body]
 
     def compose(self, other: Self) -> Self:  # ty:ignore[empty-body]
         # To be safe, we force users to explicitly convert between rotation types.
