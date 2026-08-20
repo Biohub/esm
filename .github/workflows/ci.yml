@@ -27,7 +27,7 @@ jobs:
     - name: Setup Environment
       uses: prefix-dev/setup-pixi@v0.9.0
       with:
-        pixi-version: v0.68.0
+        pixi-version: v0.70.2
         cache: false
         cache-write: ${{ github.event_name == 'push' && github.ref_name == 'main' }}
 
@@ -45,7 +45,7 @@ jobs:
     - name: Setup Environment
       uses: prefix-dev/setup-pixi@v0.9.0
       with:
-        pixi-version: v0.68.0
+        pixi-version: v0.70.2
         cache: false
         cache-write: ${{ github.event_name == 'push' && github.ref_name == 'main' }}
 

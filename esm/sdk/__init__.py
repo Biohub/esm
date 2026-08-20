@@ -1,4 +1,5 @@
 import os
+import warnings
 
 from esm.sdk.api import (
     ESM3InferenceClient,
@@ -9,7 +10,9 @@ from esm.sdk.forge import (
     ESMCForgeInferenceClient,
     SequenceStructureForgeInferenceClient,
 )
-from esm.utils.forge_context_manager import ForgeBatchExecutor
+from esm.utils.forge_context_manager import (
+    ForgeParallelExecutor,
+)
 
 # Note: please do not import ESM3SageMakerClient here since that requires AWS SDK.
 
@@ -73,14 +76,28 @@ def esmfold2_client(
     )
 
 
-def batch_executor(max_attempts: int = 10, show_progress: bool = True):
-    """
+def parallel_executor(
+    max_attempts: int = 10, show_progress: bool = True
+) -> ForgeParallelExecutor:
+    """Run many requests concurrently against the on-demand API.
     Args:
         max_attempts: Maximum number of attempts to make before giving up.
         show_progress: Whether to display a tqdm progress bar.
 
     Usage:
-        with batch_executor(show_progress=False) as executor:
+        with parallel_executor(show_progress=False) as executor:
             executor.execute_batch(fn, **kwargs)
     """
-    return ForgeBatchExecutor(max_attempts=max_attempts, show_progress=show_progress)
+    return ForgeParallelExecutor(max_attempts=max_attempts, show_progress=show_progress)
+
+
+def batch_executor(
+    max_attempts: int = 10, show_progress: bool = True
+) -> ForgeParallelExecutor:
+    """Deprecated alias for :func:`parallel_executor`."""
+    warnings.warn(
+        "batch_executor is deprecated; use parallel_executor instead.",
+        DeprecationWarning,
+        stacklevel=2,
+    )
+    return parallel_executor(max_attempts=max_attempts, show_progress=show_progress)

@@ -1,6 +1,6 @@
 import numpy as np
 import torch
-from esm.sdk import batch_executor
+from esm.sdk import parallel_executor
 from esm.sdk.api import (
     ESMProtein,
     ESMProteinError,
@@ -52,7 +52,7 @@ def get_sae_features(
     sequences: list[str],
     pool: bool = True,
 ) -> list[np.ndarray]:
-    with batch_executor() as executor:
+    with parallel_executor() as executor:
         results = executor.execute_batch(
             user_func=get_sae_features_single,
             client=client,

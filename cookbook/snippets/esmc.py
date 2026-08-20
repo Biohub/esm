@@ -3,7 +3,7 @@ import os
 
 import torch
 from esm.models.esmc import EsmcForMaskedLM, EsmcTokenizer
-from esm.sdk import batch_executor, esmc_client
+from esm.sdk import esmc_client, parallel_executor
 from esm.sdk.api import (
     ESMCInferenceClient,
     ESMProtein,
@@ -92,7 +92,7 @@ def compute_pseudoperplexity(
     """Compute L-pass pseudoperplexity for a protein sequence via Forge/Biohub Platform.
 
     Masks each position one at a time, retrieves logits from Forge/Biohub Platform, and returns
-    exp(-mean(log_prob_true_aa)).  Uses batch_executor for parallel requests.
+    exp(-mean(log_prob_true_aa)).  Uses parallel_executor for parallel requests.
 
     Example::
 
@@ -116,7 +116,7 @@ def compute_pseudoperplexity(
             raise output
         return output
 
-    with batch_executor() as executor:
+    with parallel_executor() as executor:
         logit_outputs = executor.execute_batch(
             _get_logits, client=forge_client, sequence=masked_sequences
         )

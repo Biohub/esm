@@ -92,10 +92,16 @@ esm = ["data/*", "tests/reference/*.pkl.gz"]
 
 [tool.pixi.workspace]
 channels = ["conda-forge"]
-platforms = ["linux-64", "osx-arm64"]
+platforms = ["linux-64"]
 
 # These are build dependencies, to ensure pip support, keep run-time deps above in `dependencies`
+[tool.pixi.activation.env]
+LD_PRELOAD = "$CONDA_PREFIX/lib/libstdc++.so.6${LD_PRELOAD:+:$LD_PRELOAD}"
+
 [tool.pixi.dependencies]
+setuptools = "<82"
+scipy = "*"
+pyyaml = "*"
 pkg-config = "*"
 cmake = "*"
 pip = "*"
@@ -130,9 +136,6 @@ platforms = ["linux-64"]
 flash_attn = { url = "https://github.com/evolutionaryscale/wheels/releases/download/py312-pt211-cu13-sm80-90/flash_attn-2.7.4.post1-cp312-cp312-linux_x86_64.whl" }
 cuequivariance-torch = ">=0.8.1"
 cuequivariance-ops-torch-cu13 = ">=0.8.1"
-
-[tool.pixi.feature.fused.activation.env]
-LD_PRELOAD = "$CONDA_PREFIX/lib/libstdc++.so.6${LD_PRELOAD:+:$LD_PRELOAD}"
 
 [tool.pixi.environments]
 default = {features = [], solve-group = "default"}

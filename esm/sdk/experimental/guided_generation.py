@@ -6,7 +6,7 @@ import torch
 from tqdm import tqdm
 
 from esm.models.esm3 import ESM3
-from esm.sdk import batch_executor
+from esm.sdk import parallel_executor
 from esm.sdk.api import (
     ESM3InferenceClient,
     ESMProtein,
@@ -38,10 +38,10 @@ class ESM3GuidedDecoding:
     ):
         if isinstance(client, ESM3):
             self.tokenizers = client.tokenizers
-            self._use_batch_executor = False
+            self._use_parallel_executor = False
         elif isinstance(client, ESM3ForgeInferenceClient):
             self.tokenizers = get_esm3_model_tokenizers()
-            self._use_batch_executor = True
+            self._use_parallel_executor = True
         else:
             raise ValueError(
                 f"client must be an instance of ESM3 or ESM3ForgeInferenceClient. Got {type(client)}"
@@ -103,11 +103,11 @@ class ESM3GuidedDecoding:
                 )
                 return new_pt, score_val
 
-            if self._use_batch_executor:
+            if self._use_parallel_executor:
                 # ----------------------------------------------
                 # Remote client: parallel sampling with executor
                 # ----------------------------------------------
-                with batch_executor(show_progress=False) as executor:
+                with parallel_executor(show_progress=False) as executor:
                     results = executor.execute_batch(
                         user_func=_sample_and_score,
                         pt=[protein_tensor] * num_samples_per_step,
