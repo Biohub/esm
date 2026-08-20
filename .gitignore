@@ -3,3 +3,11 @@ esm.egg-info
 .pixi
 *.egg-info
 *.pyc
+
+# pytest --cov artifacts
+.coverage
+.coverage.*
+coverage.xml
+htmlcov/
+pytest.xml
+.ruff_cache/
