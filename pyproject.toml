@@ -55,6 +55,7 @@ dependencies = [
   "dockq @ git+https://github.com/nrontsis/DockQ.git@ba4df5adaad7c77fd60851d0b7b05f2b77061ba2",
   "cuequivariance-torch>=0.8.1; sys_platform == 'linux' and platform_machine == 'x86_64'",
   "cuequivariance-ops-torch-cu13>=0.8.1; sys_platform == 'linux' and platform_machine == 'x86_64'",
+  "xformers>=0.0.35,<0.1.0; sys_platform == 'linux' and platform_machine == 'x86_64'",
 ]
 
 [project.optional-dependencies]
@@ -92,13 +93,17 @@ esm = ["data/*", "tests/reference/*.pkl.gz"]
 
 [tool.pixi.workspace]
 channels = ["conda-forge"]
-platforms = ["linux-64"]
+platforms = ["linux-64", "osx-arm64"]
 
 # These are build dependencies, to ensure pip support, keep run-time deps above in `dependencies`
-[tool.pixi.activation.env]
+[tool.pixi.target.linux-64.activation.env]
 LD_PRELOAD = "$CONDA_PREFIX/lib/libstdc++.so.6${LD_PRELOAD:+:$LD_PRELOAD}"
 
 [tool.pixi.dependencies]
+matplotlib-base = "*"
+filelock = "*"
+pandas = "*"
+colorama = "*"
 setuptools = "<82"
 scipy = "*"
 pyyaml = "*"
