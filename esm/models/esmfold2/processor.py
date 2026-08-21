@@ -1,4 +1,5 @@
 import random
+import warnings
 from contextlib import contextmanager, nullcontext
 from pathlib import Path
 from typing import Any
@@ -337,10 +338,11 @@ class ESMFold2InputBuilder:
         step_scale: float | None = None,
         max_inference_sigma: float | None = None,
         lm_mask_pct: float | None = None,
-        early_exit: bool = False,
         lm_dropout: float | None = 0.3,
+        early_exit: bool | None = None,
         msa_max_depth: int | None = 1024,
         msa_column_mask_rate: float = 0.1,
+        msa_subsample_at_inference: bool | None = None,
         complex_id: str = "pred",
     ) -> MolecularComplexResult | list[MolecularComplexResult]:
         """Fold a structure end-to-end: encode → model → decode.
@@ -355,7 +357,7 @@ class ESMFold2InputBuilder:
             Inference knobs forwarded to the model.
         seed : int, optional
             Seeds both input prep (SMILES conformer generation) and diffusion sampling.
-        noise_scale, step_scale, max_inference_sigma, early_exit
+        noise_scale, step_scale, max_inference_sigma
             Optional sampler overrides forwarded to the model when not None.
         lm_mask_pct : float, optional
             Fraction of sequence residues randomly masked before the PLM backbone.
@@ -366,12 +368,13 @@ class ESMFold2InputBuilder:
             value); ``0``/``None`` disables.
         msa_max_depth : int, optional
             Maximum number of MSA rows kept per loop (row subsampling
-            is drawn fresh per loop). When ``None``, MSA row subsampling is
-            disabled and the full MSA depth is used. Only affects inputs that
-            carry an MSA.
-        msa_column_mask_rate : float
+            is drawn fresh per loop). Defaults to ``config.msa_encoder.max_depth``
+            when ``None``. Only affects inputs that carry an MSA.
+        msa_column_mask_rate : float, optional
             Fraction of MSA columns masked once before the loop
-            (shared across loops). Only affects inputs that carry an MSA.
+            (shared across loops). Defaults to
+            ``config.msa_encoder.column_mask_rate`` when ``None``. Only affects
+            inputs that carry an MSA.
         complex_id : str
             Identifier assigned to the predicted MolecularComplex(es).
 
@@ -380,6 +383,14 @@ class ESMFold2InputBuilder:
         MolecularComplexResult or list[MolecularComplexResult]
             A single result when num_diffusion_samples == 1, otherwise a list.
         """
+        if early_exit is not None or msa_subsample_at_inference is not None:
+            warnings.warn(
+                "fold(): ignoring early_exit and msa_subsample_at_inference. "
+                "Use msa_max_depth instead; early_exit was never supported.",
+                DeprecationWarning,
+                stacklevel=2,
+            )
+
         features, chain_infos = self.prepare_input(
             input, seed=seed, device=model.device
         )
@@ -402,11 +413,8 @@ class ESMFold2InputBuilder:
                         num_loops=num_loops,
                         num_sampling_steps=num_sampling_steps,
                         num_diffusion_samples=num_diffusion_samples,
-                        early_exit=early_exit,
                         msa_max_depth=msa_max_depth,
                         msa_column_mask_rate=msa_column_mask_rate,
-                        # A null depth means "use the full MSA" => no subsampling.
-                        msa_subsample_at_inference=msa_max_depth is not None,
                         **sampler_kwargs,
                     )
 
