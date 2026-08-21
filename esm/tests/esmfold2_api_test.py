@@ -43,14 +43,6 @@ SAMPLER_OVERRIDE_STEPS = 4
 #: implementation it tests. Strict, so whoever drops those two arguments from the
 #: ``fold`` call gets a failure telling them to delete this marker, rather than a
 #: test that silently keeps passing.
-FOLD_IS_BROKEN = pytest.mark.xfail(
-    strict=True,
-    raises=TypeError,
-    reason=(
-        "fold() forwards early_exit and msa_subsample_at_inference, which "
-        "EsmFold2Model.forward no longer accepts (#13995)"
-    ),
-)
 
 
 @pytest.fixture(autouse=True)
@@ -138,7 +130,6 @@ def test_forward_accepts_the_featurizer_key_set(tiny_esmfold2, ccd_pickle):
     ],
     ids=["noise_scale", "step_scale", "max_inference_sigma"],
 )
-@FOLD_IS_BROKEN
 def test_fold_forwards_sampler_overrides_to_the_sampler(
     tiny_esmfold2, builder, override, expected
 ):
@@ -163,7 +154,6 @@ def test_fold_forwards_sampler_overrides_to_the_sampler(
     [{"noise_scale": 2.0}, {"step_scale": 2.5}, {"max_inference_sigma": 100.0}],
     ids=["noise_scale", "step_scale", "max_inference_sigma"],
 )
-@FOLD_IS_BROKEN
 def test_fold_sampler_overrides_change_the_structure(tiny_esmfold2, builder, override):
     """The overrides are not just delivered, they move the coordinates.
 
@@ -186,7 +176,6 @@ def test_fold_sampler_overrides_change_the_structure(tiny_esmfold2, builder, ove
     assert not torch.allclose(before, after, atol=1e-3)
 
 
-@FOLD_IS_BROKEN
 def test_fold_is_reproducible_under_a_seed(tiny_esmfold2, builder):
     """Two folds with the same seed agree bit-for-bit.
 
@@ -210,7 +199,6 @@ def test_fold_is_reproducible_under_a_seed(tiny_esmfold2, builder):
 
 
 @pytest.mark.parametrize("num_diffusion_samples", [1, 2])
-@FOLD_IS_BROKEN
 def test_fold_return_shape_follows_the_sample_count(
     tiny_esmfold2, builder, num_diffusion_samples
 ):
