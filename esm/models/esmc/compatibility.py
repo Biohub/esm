@@ -15,10 +15,10 @@ output, before the final LayerNorm - because the native model follows the
 """
 
 import warnings
-from dataclasses import dataclass
 
 import torch
 import torch.nn as nn
+from attr import dataclass
 from transformers import PreTrainedTokenizerFast
 
 from esm.models.esmc.config import (
@@ -27,9 +27,11 @@ from esm.models.esmc.config import (
     ESMC_600M_HF_REPO,
     EsmcConfig,
 )
+from esm.models.esmc.layers import EsmcTransformerStack
 from esm.models.esmc.model import EsmcForMaskedLM
 from esm.models.esmc.tokenizer import EsmcTokenizer
 from esm.sdk.api import (
+    ESMCInferenceClient,
     ESMProtein,
     ESMProteinTensor,
     ForwardTrackData,
@@ -46,6 +48,7 @@ _DEPRECATION_MESSAGE = (
 )
 
 
+# attrs, matching v3.2.3, and un-slotted so 3.x code can still set extra attributes.
 @dataclass
 class ESMCOutput:
     """Deprecated. Superseded by ``EsmcMaskedLMOutput``."""
@@ -103,12 +106,17 @@ def _legacy_name_to_repo(model_name: str) -> str:
     }.get(model_name, model_name)
 
 
-class ESMC(nn.Module):
+# cookbook/snippets/esmc.py types its entry point against ``ESMCInferenceClient``,
+# so 3.x code annotates against it. No abstract methods, so it is free at runtime.
+class ESMC(nn.Module, ESMCInferenceClient):
     """Deprecated wrapper around :class:`EsmcForMaskedLM`.
 
     Accepts the old constructor arguments, or wraps an already-built native
     model via ``model=``.
     """
+
+    # Narrows ``model: str`` on ESMCInferenceClient; without it ty reports 12 errors.
+    model: EsmcForMaskedLM
 
     def __init__(
         self,
@@ -162,6 +170,46 @@ class ESMC(nn.Module):
             attn_implementation="flash_attention_2" if use_flash_attn else "sdpa",
         )
         return cls(model=model)
+
+    def __setattr__(self, name: str, value) -> None:
+        # ``nn.Module.__setattr__`` puts Modules straight into ``self._modules``
+        # without consulting a property, so setters must be dispatched explicitly.
+        prop = getattr(type(self), name, None)
+        if isinstance(prop, property):
+            prop.__set__(self, value)
+            return
+        super().__setattr__(name, value)
+
+    # Properties, not re-registered submodules, so ``state_dict`` keys stay native.
+    @property
+    def embed(self) -> nn.Embedding:
+        return self.model.esmc.embed
+
+    @embed.setter
+    def embed(self, value: nn.Embedding) -> None:
+        self.model.esmc.embed = value
+
+    @property
+    def transformer(self) -> EsmcTransformerStack:
+        return self.model.esmc.transformer
+
+    @transformer.setter
+    def transformer(self, value: EsmcTransformerStack) -> None:
+        self.model.esmc.transformer = value
+
+    @property
+    def sequence_head(self) -> nn.Module:
+        return self.model.lm_head
+
+    @sequence_head.setter
+    def sequence_head(self, value: nn.Module) -> None:
+        # 3.x allowed any module; the native attribute is a concrete nn.Sequential.
+        self.model.lm_head = value  # ty: ignore[invalid-assignment]
+
+    @property
+    def _use_flash_attn(self) -> bool:
+        """Effective flag, read from the native model, not the constructor arg."""
+        return self.model.esmc._use_flash_attn
 
     @property
     def device(self) -> torch.device:

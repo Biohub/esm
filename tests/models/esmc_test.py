@@ -40,7 +40,7 @@ from esm.models.esmc.layers import (
     EsmcRotaryEmbedding,
 )
 from esm.models.hub import CONFIG_NAME, read_safetensors_dir
-from esm.tests.conftest import (
+from tests.conftest import (
     LENGTH_NAMES,
     MEDIUM_SEQUENCE,
     REFERENCE_DIR,
@@ -71,7 +71,7 @@ def reference_values() -> dict:
     # A missing file is a broken checkout, not a reason to skip.
     assert REFERENCE_FILE.exists(), (
         f"{REFERENCE_FILE} is missing. It is checked in; regenerate with "
-        f"`python -m esm.tests.regenerate_reference`."
+        f"`python -m tests.regenerate_reference`."
     )
     with gzip.open(REFERENCE_FILE, "rb") as f:
         return pickle.load(f)

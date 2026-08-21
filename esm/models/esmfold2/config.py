@@ -24,6 +24,7 @@ from pathlib import Path
 from typing import Any
 
 from esm.models.esmc.config import EsmcConfig
+from esm.models.esmfold2.hf_checkpoint import drop_undeclared
 
 CONFIG_NAME = "config.json"
 
@@ -129,6 +130,45 @@ def _prune_empty(tree: dict) -> None:
         _prune_empty(value)
         if not value:
             del tree[key]
+
+
+#: Sections whose ``enabled`` decides whether a module is built at all, rather
+#: than how wide it is. Each is optional here, so a checkpoint whose config.json
+#: omits the flag would otherwise build a model missing that module entirely.
+_MODULE_FLAG_SECTIONS = ("msa_encoder", "lm_encoder", "parcae")
+
+
+def default_module_flags(local_dir: str | os.PathLike) -> dict:
+    """Fill in the module flags a checkpoint's ``config.json`` leaves unstated.
+
+    A section named without ``enabled`` describes a module the checkpoint has
+    weights for -- upstream omits the flag because it always builds these -- so
+    the default is on, and the strict key accounting in ``_load_pretrained``
+    catches it if that reading is wrong. Warned rather than refused: a
+    ``config.json`` is not the caller's to fix, and :meth:`EsmFold2Config.
+    from_pretrained` takes an override either way.
+
+    Called from ``EsmFold2Model.from_pretrained`` rather than from the config
+    reader, because a config with no weights behind it cannot disagree with
+    anything -- a partial one is a perfectly good thing to build.
+    """
+    with open(Path(local_dir) / CONFIG_NAME) as f:
+        raw = json.load(f)
+    defaults = {}
+    for section in _MODULE_FLAG_SECTIONS:
+        values = raw.get(section)
+        if isinstance(values, dict) and "enabled" not in values:
+            warnings.warn(
+                f"config.json names a {section!r} section but does not set "
+                f"{section}.enabled; defaulting to enabled=True, since the "
+                "section is only written when the checkpoint carries that "
+                "module's weights. To override, build the config yourself: "
+                f"EsmFold2Config.from_pretrained(path, {section}=...) and pass "
+                "it as config=.",
+                stacklevel=3,
+            )
+            defaults[section] = {**values, "enabled": True}
+    return defaults
 
 
 def _resolve_legacy_keys(kwargs: dict) -> dict:
@@ -436,7 +476,7 @@ class EsmFold2Config:
             if isinstance(val, cls):
                 return val
             if isinstance(val, dict):
-                return cls(**val)
+                return cls(**drop_undeclared(cls, val))
             return cls()
 
         self.atom_encoder = _init_nested(
@@ -472,12 +512,26 @@ class EsmFold2Config:
             local_files_only=kwargs.pop("local_files_only", False),
             force_download=kwargs.pop("force_download", False),
         )
+        unknown = sorted(set(kwargs) - cls._consumed_keywords())
+        if unknown:
+            raise TypeError(
+                f"{cls.__name__}.from_pretrained() got unexpected keyword "
+                f"argument(s) {unknown}. Unlike a key in config.json, which we "
+                "ignore, a keyword we do not consume would change nothing and "
+                "look like it had."
+            )
         with open(Path(local_dir) / CONFIG_NAME) as f:
             raw = json.load(f)
         raw.pop("model_type", None)
         # Caller overrides win, matching PretrainedConfig.from_pretrained.
         raw.update(kwargs)
         return cls(**raw)
+
+    @classmethod
+    def _consumed_keywords(cls) -> frozenset[str]:
+        """The keywords this class turns into fields, read off a default instance
+        rather than a list, so it cannot fall behind ``__init__``."""
+        return frozenset(vars(cls()))
 
     def save_pretrained(self, save_directory: str | os.PathLike) -> None:
         directory = Path(save_directory)

@@ -40,7 +40,7 @@ on a claim about our workstations. Pinning the opposite outcome would just move
 the redness. Until compilation behaves the same on both, this equivalence is not
 a property a required gate can assert, so it runs on demand instead:
 
-    pytest -m nightly esm/tests/esmfold2_builds_test.py
+    pytest -m nightly tests/models/esmfold2_builds_test.py
 
 That keeps the assertion honest - compiled output must match eager - and keeps
 an Inductor crash a real failure wherever it happens, without making either
@@ -56,7 +56,7 @@ import torch._dynamo
 
 from esm.models.esmfold2 import EsmFold2Config, EsmFold2ExperimentalModel, EsmFold2Model
 from esm.models.esmfold2 import layers as _layers
-from esm.tests.conftest import ESMFOLD2_LENGTHS, ESMFOLD2_SEQUENCES, esmfold2_inputs
+from tests.conftest import ESMFOLD2_LENGTHS, ESMFOLD2_SEQUENCES, esmfold2_inputs
 
 #: Chunk sizes the matrix sweeps. ``None`` disables chunking entirely.
 CHUNK_SIZES = (None, 16, 32, 64, 128)

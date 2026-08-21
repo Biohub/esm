@@ -35,7 +35,7 @@ import torch
 
 from esm.models.esmfold2 import layers as _layers
 from esm.models.esmfold2.layers import DiffusionStructureHead
-from esm.tests.conftest import (
+from tests.conftest import (
     ESMFOLD2_COMPLEXES,
     ESMFOLD2_SEQUENCES,
     esmfold2_complex_features,

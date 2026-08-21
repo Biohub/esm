@@ -31,6 +31,9 @@ TINY_SEQUENCES = ["MQIFVKTLTGKT", "MKV"]
 ESMC_300M_REPO = "biohub/ESMC-300M"
 ESMFOLD2_REPO = "biohub/ESMFold2"
 ESMFOLD2_EXPERIMENTAL_REPO = "biohub/ESMFold2-Experimental"
+# The ESMFold2 weights in the upstream transformers layout. A staging repo:
+# biohub/ESMFold2 has not been republished through their converter yet.
+ESMFOLD2_HF_PORT_REPO = "Rocketknight1/ESMFold2-merged-temp"
 #: Subdirectory holding this model under ``$ESM_ESMC_WEIGHTS_ROOT``.
 ESMC_300M_STAGED_DIR = "ESMC-300M"
 
@@ -408,6 +411,12 @@ def esmfold2_dir() -> str:
 @pytest.fixture(scope="session")
 def esmfold2_experimental_dir() -> str:
     return _skip_if_unreachable(ESMFOLD2_EXPERIMENTAL_REPO)
+
+
+@pytest.fixture(scope="session")
+def hf_port_checkpoint_dir() -> str:
+    """A checkpoint in the upstream transformers layout."""
+    return _skip_if_unreachable(ESMFOLD2_HF_PORT_REPO)
 
 
 @pytest.fixture(scope="session")
