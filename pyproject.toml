@@ -1,6 +1,6 @@
 [project]
 name = "esm"
-version = "4.0.0"
+version = "3.4.0"
 description = "EvolutionaryScale open model repository"
 readme = "README.md"
 requires-python = ">=3.12,<3.13"
@@ -89,7 +89,7 @@ where = ["."]
 include = ["esm*"]
 
 [tool.setuptools.package-data]
-esm = ["data/*", "tests/reference/*.pkl.gz"]
+esm = ["data/*"]
 
 [tool.pixi.workspace]
 channels = ["conda-forge"]

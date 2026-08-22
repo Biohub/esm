@@ -21,8 +21,8 @@ from esm.models.esmfold2.protein_utils import (
     prepare_protein_features,
 )
 from esm.models.esmfold2.types import ProteinInput, StructurePredictionInput
-from esm.tests.conftest import ESMFOLD2_SEQUENCES, esmfold2_inputs
 from esm.utils.structure.molecular_complex import MolecularComplexResult
+from tests.conftest import ESMFOLD2_SEQUENCES, esmfold2_inputs
 
 TINY_SEQUENCE = ESMFOLD2_SEQUENCES["tiny"]
 

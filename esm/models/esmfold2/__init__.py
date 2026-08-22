@@ -6,6 +6,7 @@ from esm.models.esmfold2.config import (
 from esm.models.esmfold2.conformers import load_ccd
 from esm.models.esmfold2.constants import ELEMENT_NUMBER_TO_SYMBOL
 from esm.models.esmfold2.experimental import EsmFold2ExperimentalModel
+from esm.models.esmfold2.hf_adapter import EsmFold2HFAdapter
 from esm.models.esmfold2.model import EsmFold2Model
 from esm.models.esmfold2.prepare_input import ChainInfo, prepare_esmfold2_input
 from esm.models.esmfold2.processor import ESMFold2InputBuilder, clean_esmfold2_input
@@ -33,6 +34,7 @@ __all__ = [
     "CovalentBond",
     "EsmFold2Config",
     "EsmFold2ExperimentalModel",
+    "EsmFold2HFAdapter",
     "EsmFold2Model",
     "DistogramConditioning",
     "DNAInput",

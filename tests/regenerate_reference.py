@@ -2,8 +2,8 @@
 
 Run from the repo root when a deliberate numerical change lands::
 
-    python -m esm.tests.regenerate_reference
-    python -m esm.tests.regenerate_reference esmfold2
+    python -m tests.regenerate_reference
+    python -m tests.regenerate_reference esmfold2
 
 CPU + fp32, so the files reproduce anywhere; every other build configuration is
 checked against them rather than against a reference of its own. The writers
@@ -19,7 +19,7 @@ from pathlib import Path
 import torch
 
 from esm.models.esmc import EsmcForMaskedLM, EsmcTokenizer
-from esm.tests.conftest import (
+from tests.conftest import (
     ESMC_300M_REPO,
     ESMC_300M_STAGED_DIR,
     ESMFOLD2_SEQUENCES,
@@ -27,9 +27,9 @@ from esm.tests.conftest import (
     SEQUENCES,
     staged_model_dir,
 )
-from esm.tests.esmc_test import PPL_MAX_POSITIONS, pseudo_perplexity
-from esm.tests.esmc_test import REFERENCE_FILE as ESMC_REFERENCE_FILE
-from esm.tests.esmfold2_execution_test import (
+from tests.models.esmc_test import PPL_MAX_POSITIONS, pseudo_perplexity
+from tests.models.esmc_test import REFERENCE_FILE as ESMC_REFERENCE_FILE
+from tests.models.esmfold2_execution_test import (
     DISTANCE_DRIFT_TOLERANCE,
     FORWARD_SEED,
     MODEL_SEED,
@@ -42,7 +42,9 @@ from esm.tests.esmfold2_execution_test import (
     execution_case,
     reference_config,
 )
-from esm.tests.esmfold2_execution_test import REFERENCE_FILE as ESMFOLD2_REFERENCE_FILE
+from tests.models.esmfold2_execution_test import (
+    REFERENCE_FILE as ESMFOLD2_REFERENCE_FILE,
+)
 
 # One residue's logit row plus the argmax path moves on any real numerical
 # change, so there is no need to store the full logits tensor.

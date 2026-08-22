@@ -33,7 +33,8 @@ except ImportError:
 
 from esm.models.esmc import EsmcModel
 from esm.models.esmc.checkpoint_layout import published_to_native_subtree
-from esm.models.esmfold2.config import EsmFold2Config
+from esm.models.esmfold2.config import EsmFold2Config, default_module_flags
+from esm.models.esmfold2.hf_checkpoint import hf_state_dict_to_native, is_hf_layout
 from esm.models.esmfold2.layers import (
     CHAR_VOCAB_SIZE,
     MAX_ATOMIC_NUMBER,
@@ -529,16 +530,26 @@ class EsmFold2Model(HubPreTrainedModel):
 
     config_class = EsmFold2Config
     _keys_to_ignore_on_load_unexpected = [r"\._extra_state$"]
+    # Allocated by ``ConfidenceHead.__init__`` and read by nothing; the upstream
+    # port drops them on conversion, so its checkpoints do not carry them.
+    _keys_to_ignore_on_load_missing = [
+        r"^confidence_head\.(s_norm|s_inputs_to_single|s_input_to_s)\."
+    ]
 
     @classmethod
     def _normalize_checkpoint_layout(
         cls, raw: dict[str, torch.Tensor]
     ) -> dict[str, torch.Tensor]:
-        """Translate a bundled ESMC encoder out of the published tensor layout.
+        """Translate a checkpoint out of the layout it was published in.
 
-        Scoped to the ``esmc.`` subtree so the trunk's own keys can never be
-        caught by the encoder's key patterns.
+        Two of them: the upstream HuggingFace port renames most of the tree, and
+        a bundled ESMC encoder packs its projections differently. Which one is in
+        hand is read off the key names; ours passes straight through. The
+        nothing-dropped accounting in ``_load_pretrained`` runs after this, so a
+        remap that loses a tensor still fails the load.
         """
+        if is_hf_layout(raw):
+            return hf_state_dict_to_native(raw)
         return published_to_native_subtree(raw, "esmc.")
 
     def __init__(self, config: EsmFold2Config) -> None:
@@ -679,7 +690,9 @@ class EsmFold2Model(HubPreTrainedModel):
     ):
         local_dir = resolve_model_dir(pretrained_model_name_or_path, **kwargs)
         if config is None:
-            config = EsmFold2Config.from_pretrained(local_dir)
+            config = EsmFold2Config.from_pretrained(
+                local_dir, **default_module_flags(local_dir)
+            )
             if cls is EsmFold2Model and config.type == "experimental":
                 from esm.models.esmfold2.experimental import EsmFold2ExperimentalModel
 

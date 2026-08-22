@@ -31,7 +31,11 @@ from esm.models.esmfold2.protein_utils import (
     PROTEIN_RESIDUE_TO_RES_TYPE,
     prepare_protein_features,
 )
-from esm.tests.conftest import (
+from esm.utils.structure.molecular_complex import (
+    MolecularComplex,
+    MolecularComplexResult,
+)
+from tests.conftest import (
     ATOM_ALIGNED_SEQUENCE,
     CHAIN_A,
     CHAIN_B,
@@ -42,10 +46,6 @@ from esm.tests.conftest import (
     esmfold2_complex_features,
     protein_complex_input,
 )
-from esm.utils.structure.molecular_complex import (
-    MolecularComplex,
-    MolecularComplexResult,
-)
 
 # ``prepare_esmfold2_input`` warns once per chain that no MSA was supplied,
 # which is the intended single-sequence mode for every case in this file.
@@ -54,9 +54,9 @@ pytestmark = pytest.mark.filterwarnings("ignore:No MSA provided")
 
 @pytest.fixture(autouse=True)
 def _force_reference_attention(monkeypatch):
-    """flash-attn imports on a CPU box but needs a CUDA runtime to run."""
-    if not torch.cuda.is_available():
-        monkeypatch.setattr(_layers, "FLASH_ATTN_AVAILABLE", False)
+    """These tests pin the CPU reference path, so the kernel must not vary with
+    whether the host happens to have a GPU visible."""
+    monkeypatch.setattr(_layers, "FLASH_ATTN_AVAILABLE", False)
 
 
 def batched(features: dict[str, torch.Tensor]) -> dict[str, torch.Tensor]:
@@ -188,13 +188,7 @@ def test_fast_path_omits_only_the_structure_supervision_keys(ccd_pickle):
     assert len(fast) == 23
 
 
-@pytest.mark.xfail(
-    strict=True,
-    reason="prepare_protein_features hardcodes entity_id=1; the pipeline "
-    "numbers entities from 0. Harmless today because entity_id is only ever "
-    "compared to itself, but the docstring claims the values match.",
-)
-def test_fast_path_entity_id_matches_the_pipeline():
+def test_fast_path_entity_id_matches_the_pipeline(ccd_pickle):
     fast = prepare_protein_features(C1_SEQUENCES["tiny"])
     full = full_pipeline_features(C1_SEQUENCES["tiny"])
     assert torch.equal(fast["entity_id"], full["entity_id"])

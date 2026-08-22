@@ -19,7 +19,7 @@ from esm.models.esmfold2.constants import MSA_GAP_TOKEN_ID
 from esm.models.esmfold2.layers import NUM_RES_TYPES
 from esm.models.esmfold2.prepare_input import prepare_esmfold2_input
 from esm.models.esmfold2.types import MSA, ProteinInput, StructurePredictionInput
-from esm.tests.conftest import ESMFOLD2_SEQUENCES, esmfold2_inputs
+from tests.conftest import ESMFOLD2_SEQUENCES, esmfold2_inputs
 
 # A forward is O(L^2)
 # and the default schedule is 68 ODE steps.

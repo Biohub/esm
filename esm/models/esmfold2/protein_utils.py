@@ -440,7 +440,7 @@ def prepare_protein_features(sequence: str) -> dict[str, Tensor]:
     residue_index = torch.arange(L, dtype=torch.int64)
     asym_id = torch.zeros(L, dtype=torch.int64)
     sym_id = torch.zeros(L, dtype=torch.int64)
-    entity_id = torch.ones(L, dtype=torch.int64)
+    entity_id = torch.zeros(L, dtype=torch.int64)
     mol_type = torch.full((L,), MOL_TYPE_PROTEIN, dtype=torch.int64)
     res_type = torch.tensor(res_type_vals, dtype=torch.int64)
     input_ids = torch.tensor(input_id_vals, dtype=torch.int64)

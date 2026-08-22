@@ -49,8 +49,8 @@ from torch import Tensor
 
 from esm.models.esmfold2 import EsmFold2Config, EsmFold2Model
 from esm.models.esmfold2 import layers as _layers
-from esm.tests import conftest as _conftest
-from esm.tests.conftest import (
+from tests import conftest as _conftest
+from tests.conftest import (
     ESMFOLD2_LENGTH_NAMES,
     ESMFOLD2_SEQUENCES,
     REFERENCE_DIR,
@@ -95,7 +95,7 @@ def reference_values() -> dict:
     # A missing file is a broken checkout, not a reason to skip.
     assert REFERENCE_FILE.exists(), (
         f"{REFERENCE_FILE} is missing. It is checked in; regenerate with "
-        f"`python -m esm.tests.regenerate_reference esmfold2`."
+        f"`python -m tests.regenerate_reference esmfold2`."
     )
     with gzip.open(REFERENCE_FILE, "rb") as f:
         return pickle.load(f)

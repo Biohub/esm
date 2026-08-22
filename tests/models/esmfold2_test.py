@@ -31,7 +31,7 @@ from esm.models.esmfold2 import layers as _layers
 from esm.models.esmfold2.config import _LEGACY_PATHS, _prune_empty
 from esm.models.esmfold2.protein_utils import prepare_protein_features
 from esm.models.hub import CONFIG_NAME
-from esm.tests.conftest import (
+from tests.conftest import (
     ATOM_ALIGNED_SEQUENCE,
     ATOM_PADDED_SEQUENCE,
     ESMFOLD2_LENGTH_NAMES,

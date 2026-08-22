@@ -589,7 +589,7 @@ class SWA3DRoPEAttention(nn.Module):
         if q.dtype not in (torch.float16, torch.bfloat16):
             q, k, v = q.bfloat16(), k.bfloat16(), v.bfloat16()
 
-        if len(attention_params) > 2 and FLASH_ATTN_AVAILABLE:
+        if len(attention_params) > 2 and FLASH_ATTN_AVAILABLE and q.is_cuda:
             indices, cu_seqlens, max_seqlen = (
                 attention_params[2],
                 attention_params[3],
@@ -616,7 +616,7 @@ class SWA3DRoPEAttention(nn.Module):
                 window_size=(self.half_window, self.half_window),
             )
             out = pad_input(out_unpad, indices, B, N)
-        elif FLASH_ATTN_AVAILABLE:
+        elif FLASH_ATTN_AVAILABLE and q.is_cuda:
             out = flash_attn_func(
                 q,
                 k,
