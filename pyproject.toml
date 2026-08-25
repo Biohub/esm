@@ -3,7 +3,7 @@ name = "esm"
 version = "3.4.0"
 description = "EvolutionaryScale open model repository"
 readme = "README.md"
-requires-python = ">=3.12,<3.13"
+requires-python = ">=3.12"
 license = {file = "LICENSE.md"}
 
 authors = [
@@ -18,6 +18,8 @@ classifiers = [
   "Development Status :: 3 - Alpha",
   "Topic :: Scientific/Engineering :: Bio-Informatics",
   "Programming Language :: Python :: 3.12",
+  "Programming Language :: Python :: 3.13",
+  "Programming Language :: Python :: 3.14",
 ]
 
 dependencies = [
@@ -55,7 +57,7 @@ dependencies = [
   "dockq @ git+https://github.com/nrontsis/DockQ.git@ba4df5adaad7c77fd60851d0b7b05f2b77061ba2",
   "cuequivariance-torch>=0.8.1; sys_platform == 'linux' and platform_machine == 'x86_64'",
   "cuequivariance-ops-torch-cu13>=0.8.1; sys_platform == 'linux' and platform_machine == 'x86_64'",
-  "xformers>=0.0.35,<0.1.0; sys_platform == 'linux' and platform_machine == 'x86_64'",
+  "xformers @ https://download.pytorch.org/whl/cu130/xformers-0.0.35-py39-none-manylinux_2_28_x86_64.whl ; sys_platform == 'linux' and platform_machine == 'x86_64'",
 ]
 
 [project.optional-dependencies]
@@ -111,7 +113,17 @@ pkg-config = "*"
 cmake = "*"
 pip = "*"
 twine = "*"
+
+# Python is per-feature rather than a workspace dependency so one manifest can
+# solve every version CI exercises.
+[tool.pixi.feature.py312.dependencies]
 python = "3.12.*"
+
+[tool.pixi.feature.py313.dependencies]
+python = "3.13.*"
+
+[tool.pixi.feature.py314.dependencies]
+python = "3.14.*"
 
 [tool.pixi.pypi-dependencies]
 esm = { path = ".", editable = true }
@@ -142,10 +154,13 @@ flash_attn = { url = "https://github.com/evolutionaryscale/wheels/releases/downl
 cuequivariance-torch = ">=0.8.1"
 cuequivariance-ops-torch-cu13 = ">=0.8.1"
 
+# `gpu` stays on 3.12: the prebuilt flash_attn wheel in `fused` is cp312-only.
 [tool.pixi.environments]
-default = {features = [], solve-group = "default"}
-dev = {features = ["dev"], solve-group = "default"}
-gpu = {features = ["dev", "fused"], solve-group = "default"}
+default = {features = ["py312"], solve-group = "default"}
+dev = {features = ["dev", "py312"], solve-group = "default"}
+gpu = {features = ["dev", "fused", "py312"], solve-group = "default"}
+dev-py313 = {features = ["dev", "py313"], solve-group = "py313"}
+dev-py314 = {features = ["dev", "py314"], solve-group = "py314"}
 
 [tool.ruff]
 extend-include = ["*.ipynb"]

@@ -62,7 +62,7 @@ jobs:
         cd tests
         make build-oss-ci
         make start-docker-oss URL=${{ env.BIOHUB_URL }} DOCKER_TAG=${{ env.DOCKER_TAG }} ESM_API_KEY=${{ env.ESM_API_KEY }}
-      shell: pixi run bash -e {0}
+      shell: pixi run --environment dev bash -e {0}
 
     - name: cleanup docker containers if they're hanging
       if: ${{ always() }}
@@ -84,3 +84,28 @@ jobs:
       if: ${{ github.event_name == 'pull_request' }}
       run: |
         echo '${{ steps.coverageComment.outputs.coverageHtml }}' >> $GITHUB_STEP_SUMMARY
+
+  # `requires-python` no longer caps at 3.13, so the versions above it need
+  # exercising. Tests only: the Docker suite and the coverage comment stay on the
+  # 3.12 job, so they run once, against one environment and one set of secrets.
+  test-esm-python-versions:
+    runs-on: ubuntu-24.04
+
+    strategy:
+      fail-fast: false
+      matrix:
+        environment: [dev-py313, dev-py314]
+
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Setup Environment
+      uses: prefix-dev/setup-pixi@v0.9.0
+      with:
+        pixi-version: v0.70.2
+        environments: ${{ matrix.environment }}
+        cache: false
+
+    - name: Run tests
+      run: pixi run --environment ${{ matrix.environment }} cov-test

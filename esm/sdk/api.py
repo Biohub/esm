@@ -423,6 +423,22 @@ class FoldingConfig:
     include_embeddings: bool = False
 
 
+@define
+class FoldMaxAccuracyConfig:
+    """
+    include_pae (bool): (ESMFold2) Whether to include Predicted Aligned Error (PAE)
+        matrix in the response.
+    include_pair_chains_iptm (bool): (ESMFold2) Whether to include pair-chain IPTM
+        predictions in the response.
+    include_embeddings (bool): (ESMFold2) Whether to include sequence and pair
+        embeddings in the response.
+    """
+
+    include_pae: bool = False
+    include_pair_chains_iptm: bool = False
+    include_embeddings: bool = False
+
+
 ## Low Level Endpoint Types
 @define
 class SamplingTrackConfig:
