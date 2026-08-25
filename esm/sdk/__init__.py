@@ -7,6 +7,7 @@ from esm.sdk.forge import (
     ESMCForgeInferenceClient,
     SequenceStructureForgeInferenceClient,
 )
+from esm.sdk.forge import ForgeBatchClient as ForgeBatchClient
 from esm.utils.forge_context_manager import ForgeParallelExecutor
 
 # Note: please do not import ESM3SageMakerClient here since that requires AWS SDK.
