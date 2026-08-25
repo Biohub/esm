@@ -256,6 +256,48 @@ with open("1mht_pred.cif", "w") as f:
 
 > **AMD ROCm users:** use ROCm 6.4 with PyTorch 2.9 or newer.
 
+### Low-memory ESMFold2 inference
+
+ESMFold2 now releases its initial deterministic relative-position and
+token-bond pair encodings before the trunk. It recreates relative-position
+features for diffusion and retains them through the immediately following
+confidence calculation, while recreating token-bond features only for
+confidence. It also delays the returned distogram until after diffusion and
+confidence. These scheduling changes are always enabled and preserve tensor
+values and model math. Pair-feature recomputation uses the same BF16 CUDA
+autocast context as the original forward computation.
+
+Two additional memory-saving behaviors can be enabled together, either on
+`model.forward()` or through `ESMFold2InputBuilder.fold()`:
+
+```python
+result = ESMFold2InputBuilder().fold(
+    model,
+    spi,
+    low_memory_mode=True,
+)
+```
+
+`low_memory_mode=True` enables ESMC offload after LM feature extraction and
+confidence sample chunking with chunk size 1. Passing
+`offload_esmc_after_lm=False` explicitly disables offload even when the preset
+is enabled.
+
+- `offload_esmc_after_lm=True` moves the frozen ESMC backbone to CPU after its
+  hidden states have been projected into ESMFold2 pair features. A later call
+  restores it automatically. This saves resident GPU memory during the trunk,
+  diffusion, and confidence phases at the cost of CPU RAM and PCIe transfer
+  time between repeated calls.
+  FP8 ESMC backbones reject this option until CPU offload has been validated
+  for that precision mode.
+- `confidence_sample_chunk_size=1` evaluates confidence one diffusion sample at
+  a time instead of expanding the pair representation across every sample.
+  Larger values trade peak VRAM for throughput. The default `None` retains the
+  fully batched path. Chunking preserves output ordering and model math, though
+  changing a kernel's batch shape can introduce low-order floating-point
+  differences. Chunk outputs are written directly into their final
+  batch-major buffers, avoiding a second peak from concatenating all chunks.
+
 ### Running ESMFold2 Through the Biohub Platform
 
 Install the `esm` Python package
