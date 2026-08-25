@@ -61,10 +61,11 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
+# flash-attn ships sdist-only and its setup.py imports torch, so this extra needs
+# `pip install --no-build-isolation 'esm[accel]'` into an env that already has torch.
 accel = [
   "flash-attn==2.7.4.post1; sys_platform == 'linux' and platform_machine == 'x86_64'",
   "transformer-engine[pytorch]==2.15.0; sys_platform == 'linux' and platform_machine == 'x86_64'",
-  "nvidia-cublas>=13.6; sys_platform == 'linux' and platform_machine == 'x86_64'",
 ]
 # Pytest
 [tool.pytest.ini_options]

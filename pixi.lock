@@ -9683,7 +9683,6 @@ packages:
   - xformers @ https://download.pytorch.org/whl/cu130/xformers-0.0.35-py39-none-manylinux_2_28_x86_64.whl ; platform_machine == 'x86_64' and sys_platform == 'linux'
   - flash-attn==2.7.4.post1 ; platform_machine == 'x86_64' and sys_platform == 'linux' and extra == 'accel'
   - transformer-engine[pytorch]==2.15.0 ; platform_machine == 'x86_64' and sys_platform == 'linux' and extra == 'accel'
-  - nvidia-cublas>=13.6 ; platform_machine == 'x86_64' and sys_platform == 'linux' and extra == 'accel'
   requires_python: '>=3.12'
 - pypi: direct+https://download.pytorch.org/whl/cu130/xformers-0.0.35-py39-none-manylinux_2_28_x86_64.whl
   name: xformers
