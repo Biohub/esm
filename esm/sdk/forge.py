@@ -29,7 +29,11 @@ from esm.sdk.api import (
     SamplingConfig,
     SamplingTrackConfig,
 )
-from esm.sdk.base_forge_client import _BaseForgeInferenceClient
+from esm.sdk.base_forge_client import (
+    EndpointHandler,
+    _BaseForgeBatchClient,
+    _BaseForgeInferenceClient,
+)
 from esm.sdk.retry import retry_decorator
 from esm.sdk.validation import validate_fold_max_accuracy_input
 from esm.utils.constants.api import MIMETYPE_ES_PICKLE

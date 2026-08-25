@@ -201,13 +201,10 @@ class _BaseForgeBatchClient(_BaseForgeInferenceClient):
         self.transfer_timeout = transfer_timeout
 
     @retry_decorator
-    def submit(
-        self, endpoint: str, payload: list[dict[str, Any]], disable_cache: bool = False
-    ) -> str:
+    def submit(self, endpoint: str, payload: list[dict[str, Any]]) -> str:
         response_data = self._post(
             "batch/submit",
             {"endpoint": endpoint, "payload": payload},
-            disable_cache=disable_cache,
             timeout=self.transfer_timeout,
         )
         task_id = response_data.get("task_id")
@@ -218,13 +215,10 @@ class _BaseForgeBatchClient(_BaseForgeInferenceClient):
         return task_id
 
     @retry_decorator
-    async def async_submit(
-        self, endpoint: str, payload: list[dict[str, Any]], disable_cache: bool = False
-    ) -> str:
+    async def async_submit(self, endpoint: str, payload: list[dict[str, Any]]) -> str:
         response_data = await self._async_post(
             "batch/submit",
             {"endpoint": endpoint, "payload": payload},
-            disable_cache=disable_cache,
             timeout=self.transfer_timeout,
         )
         task_id = response_data.get("task_id")
@@ -389,18 +383,12 @@ class EndpointHandler(ABC, Generic[TResponse]):
         pass
 
     def run(
-        self,
-        timeout: int = 300,
-        disable_cache: bool = False,
-        cancel_on_timeout: bool = True,
-        **kwargs,
+        self, timeout: int = 300, cancel_on_timeout: bool = True, **kwargs
     ) -> TResponse | ESMProteinError:
         """
         Submit and execute a batch job, waiting for completion by polling the status of the job.
         Args:
             timeout: Maximum time to wait for job completion, in seconds.
-            disable_cache: If True, bypasses any cached results and forces
-            a fresh computation.
             cancel_on_timeout: If True, cancels the batch job if it times out or is interrupted.
             **kwargs: Arguments to pass to the batch job.
         Returns:
@@ -411,9 +399,7 @@ class EndpointHandler(ABC, Generic[TResponse]):
         keyboard_interrupted = False
         try:
             request = self._prepare_request(**kwargs)
-            task_id = self._batch_client.submit(
-                self.endpoint_name, request, disable_cache=disable_cache
-            )
+            task_id = self._batch_client.submit(self.endpoint_name, request)
             response = self._batch_client.wait_for_completion(
                 task_id, timeout, poll_interval=self.poll_interval
             )
@@ -438,20 +424,14 @@ class EndpointHandler(ABC, Generic[TResponse]):
                         self._batch_client.cancel(task_id)
 
     async def async_run(
-        self,
-        timeout: int = 300,
-        disable_cache: bool = False,
-        cancel_on_timeout: bool = True,
-        **kwargs,
+        self, timeout: int = 300, cancel_on_timeout: bool = True, **kwargs
     ) -> TResponse | ESMProteinError:
         task_id = None
         task_timed_out = False
         keyboard_interrupted = False
         try:
             request = self._prepare_request(**kwargs)
-            task_id = await self._batch_client.async_submit(
-                self.endpoint_name, request, disable_cache=disable_cache
-            )
+            task_id = await self._batch_client.async_submit(self.endpoint_name, request)
             response = await self._batch_client.async_wait_for_completion(
                 task_id, timeout, poll_interval=self.poll_interval
             )
