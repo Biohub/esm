@@ -736,9 +736,25 @@ class EsmFold2Model(HubPreTrainedModel):
         """Compile L²-heavy blocks. ``mode='fixed_seqlen'`` recompiles per L; ``'dynamic_seqlen'`` compiles once.
 
         Does NOT stack with our Triton kernels — call ``set_kernel_backend(None)``
-        before compiling.
+        before compiling. Raises if the fused backend is still selected.
         """
         import torch._dynamo
+
+        from esm.models.esmfold2.layers import BACKEND_FUSED
+
+        stacked = [
+            name
+            for name, module in self.named_modules()
+            if getattr(module, "_kernel_backend", None) == BACKEND_FUSED
+        ]
+        if stacked:
+            raise RuntimeError(
+                "torch.compile does not stack with the fused Triton kernels: "
+                f"{len(stacked)} module(s) still select the fused backend (e.g. "
+                f"{stacked[0]!r}). Inductor cannot trace them - it fails with "
+                "PendingUnbackedSymbolNotFound on some GPUs and silently diverges "
+                "on others. Call set_kernel_backend(None) before compiling."
+            )
 
         torch._dynamo.config.cache_size_limit = 512
         torch._dynamo.config.accumulated_cache_size_limit = 512

@@ -43,6 +43,22 @@ def a3m_deletion_counts(seq: str) -> np.ndarray:
     return np.diff(insertions_before[match_positions], prepend=0)
 
 
+def stack_a3m_deletion_counts(sequences: Sequence[str]) -> np.ndarray | None:
+    """Per-row :func:`a3m_deletion_counts`, stacked, or None for an empty alignment.
+
+    Raises on a ragged alignment, where the rows disagree on how many match columns
+    they describe.
+    """
+    rows = [a3m_deletion_counts(seq) for seq in sequences]
+    for row in rows[1:]:
+        if len(row) != len(rows[0]):
+            raise ValueError(
+                "A3M match-column count mismatch. "
+                f"Expected: {len(rows[0])}, Received: {len(row)}"
+            )
+    return np.stack(rows).astype(np.float32) if rows else None
+
+
 @dataclass(frozen=True)
 class MSA(SequentialDataclass):
     """Object-oriented interface to an MSA.
@@ -166,13 +182,16 @@ class MSA(SequentialDataclass):
         cls, sequences: list[str], remove_insertions: bool = False
     ) -> MSA:
         if remove_insertions:
-            entries = [
-                FastaEntry("", remove_insertions_from_sequence(seq))
-                for seq in sequences
-            ]
-        else:
-            entries = [FastaEntry("", seq) for seq in sequences]
-        return cls(entries)
+            # Carry the counts, as from_a3m does: stripping without them discards the
+            # deletion features the folding models consume.
+            return cls(
+                [
+                    FastaEntry("", remove_insertions_from_sequence(seq))
+                    for seq in sequences
+                ],
+                deletions=stack_a3m_deletion_counts(sequences),
+            )
+        return cls([FastaEntry("", seq) for seq in sequences])
 
     def state_dict(self, json_serializable: bool = False) -> dict[str, Any]:
         """Serialize for the Forge wire / storage (mirrors ``ProteinComplex``).

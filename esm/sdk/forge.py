@@ -7,6 +7,7 @@ import warnings
 from concurrent.futures import ThreadPoolExecutor
 from typing import Any, Sequence, TypeAlias, Union, cast
 
+import attr
 import torch
 
 from esm.sdk.api import (
@@ -16,6 +17,7 @@ from esm.sdk.api import (
     ESMProteinError,
     ESMProteinTensor,
     FoldingConfig,
+    FoldMaxAccuracyConfig,
     ForwardAndSampleOutput,
     ForwardTrackData,
     GenerationConfig,
@@ -27,12 +29,18 @@ from esm.sdk.api import (
     SamplingConfig,
     SamplingTrackConfig,
 )
-from esm.sdk.base_forge_client import _BaseForgeInferenceClient
+from esm.sdk.base_forge_client import (
+    EndpointHandler,
+    _BaseForgeBatchClient,
+    _BaseForgeInferenceClient,
+)
 from esm.sdk.retry import retry_decorator
+from esm.sdk.validation import validate_fold_max_accuracy_input
 from esm.utils.constants.api import MIMETYPE_ES_PICKLE
 from esm.utils.constants.models import (
     DEFAULT_ESMFOLD2_FAST_LM_MASK_PCT,
     ESMFOLD2,
+    ESMFOLD2_CUTOFF_2025,
     ESMFOLD2_FAST,
     ESMFOLD2_MAX_MSA_SEQS,
 )
@@ -137,6 +145,16 @@ class SequenceStructureForgeInferenceClient(_BaseForgeInferenceClient):
         target_structure: ProteinComplex | None,
         model_name: str | None,
     ):
+        if config.include_distogram:
+            raise ValueError(
+                "include_distogram is not supported for Forge/Biohub Platform right now"
+            )
+
+        if len(sequence) == 0:
+            raise ValueError(
+                "Input sequence length is 0. Please provide a valid input."
+            )
+
         request: dict[str, Any] = {"sequence": sequence}
 
         if msa is None:
@@ -359,6 +377,16 @@ class SequenceStructureForgeInferenceClient(_BaseForgeInferenceClient):
         config: FoldingConfig,
         model_name: str | None = None,
     ) -> dict[str, Any]:
+        if config.include_distogram:
+            raise ValueError(
+                "include_distogram is not supported for Forge/Biohub Platform right now"
+            )
+
+        if len(all_atom_input.sequences) == 0:
+            raise ValueError(
+                "Input sequence length is 0. Please provide a valid input."
+            )
+
         for seq in all_atom_input.sequences:
             if not isinstance(seq, ProteinInput) or seq.msa is None:
                 continue
@@ -1358,3 +1386,80 @@ class ESMCForgeInferenceClient(ESMCInferenceClient, _BaseForgeInferenceClient):
         raise NotImplementedError(
             f"Can not get underlying remote model {self.model} from a Forge/Biohub Platform client."
         )
+
+
+class FoldMaxAccuracyHandler(EndpointHandler[MolecularComplexResult]):
+    """Fold a molecular complex at the highest-accuracy settings."""
+
+    poll_interval = 10
+
+    def __init__(self, batch_client: _BaseForgeBatchClient):
+        super().__init__(batch_client)
+
+    @property
+    def endpoint_name(self) -> str:
+        return "fold_max_accuracy"
+
+    def _prepare_request(
+        self,
+        all_atom_input: StructurePredictionInput,
+        config: FoldMaxAccuracyConfig = FoldMaxAccuracyConfig(),
+    ) -> list[dict[str, Any]]:
+        validate_fold_max_accuracy_input(all_atom_input)
+        return [
+            {
+                "all_atom_input": serialize_structure_prediction_input(all_atom_input),
+                "model": ESMFOLD2_CUTOFF_2025,
+                **attr.asdict(config),
+            }
+        ]
+
+    def _process_response(self, response: dict, **kwargs) -> MolecularComplexResult:
+        s3_url = response["response"]
+        result = self._batch_client.get_result_from_s3(s3_url)
+        return SequenceStructureForgeInferenceClient._process_fold_all_atom_response(
+            result
+        )
+
+    async def _async_process_response(
+        self, response: dict, **kwargs
+    ) -> MolecularComplexResult:
+        s3_url = response["response"]
+        result = await self._batch_client.async_get_result_from_s3(s3_url)
+        return SequenceStructureForgeInferenceClient._process_fold_all_atom_response(
+            result
+        )
+
+
+class ForgeBatchClient:
+    def __init__(
+        self,
+        url: str = "https://biohub.ai",
+        token: str = "",
+        request_timeout: int | None = 15,
+        model: str | None = None,
+        poll_interval: int = 2,
+        min_retry_wait: int = 2,
+        max_retry_wait: int = 2,
+        max_retry_attempts: int = 5,
+        transfer_timeout: int | None = 60,
+    ):
+        self._batch_client = _BaseForgeBatchClient(
+            url=url,
+            token=token,
+            request_timeout=request_timeout,
+            min_retry_wait=min_retry_wait,
+            max_retry_wait=max_retry_wait,
+            max_retry_attempts=max_retry_attempts,
+            poll_interval=poll_interval,
+            transfer_timeout=transfer_timeout,
+        )
+        self.model = model
+
+        self._fold_max_accuracy: FoldMaxAccuracyHandler | None = None
+
+    @property
+    def fold_max_accuracy(self) -> FoldMaxAccuracyHandler:
+        if self._fold_max_accuracy is None:
+            self._fold_max_accuracy = FoldMaxAccuracyHandler(self._batch_client)
+        return self._fold_max_accuracy

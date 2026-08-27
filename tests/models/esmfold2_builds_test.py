@@ -18,9 +18,9 @@ Defects this file pins:
   checkpoint runs four triangle multiplications on whatever backend they were
   constructed with. ``set_chunk_size`` on the release model does reach them.
 - ``EsmFold2ExperimentalModel.set_chunk_size`` misses ``msa_encoder`` too.
-- ``apply_torch_compile``'s "does NOT stack with our Triton kernels" docstring is
-  a comment and nothing else: the method inspects nothing and warns nothing when
-  a fused build is compiled.
+- ``apply_torch_compile`` enforces its "does NOT stack with our Triton kernels"
+  docstring: it inspects ``_kernel_backend`` and refuses a fused build rather
+  than letting Inductor fail deep in the backend.
 
 Each is a strict ``xfail`` or an explicit expectation, so a fix flips the test
 rather than going unnoticed.
@@ -48,7 +48,6 @@ platform's behaviour everyone's expectation.
 """
 
 import contextlib
-import warnings
 
 import pytest
 import torch
@@ -594,6 +593,17 @@ def assert_close_to_reference(result, reference, tolerance: dict, label: str):
         assert delta < bound, f"{label}: {key} moved {delta:.3e} (bound {bound})"
 
 
+def skip_if_flash_missing(flash: bool):
+    """``flash_attention(True)`` forces the flag on, kernels or not.
+
+    Without flash-attn installed the module globals are ``None``, so forcing the
+    path calls ``index_first_axis(None)`` and dies with a ``TypeError`` before
+    reaching the ``flash_attn_func is not None`` assert further down.
+    """
+    if flash and _layers.flash_attn_func is None:
+        pytest.skip("flash-attn is not installed")  # ty:ignore[too-many-positional-arguments]
+
+
 def skip_if_backend_missing(backend):
     if backend == "fused" and not _layers.TRITON_KERNELS_AVAILABLE:
         pytest.skip("triton kernels unavailable")  # ty:ignore[too-many-positional-arguments]
@@ -653,6 +663,7 @@ def test_every_gpu_build_reaches_the_cpu_reference(
     is correct, so falling back to it is invisible in the numbers.
     """
     skip_if_backend_missing(backend)
+    skip_if_flash_missing(flash)
     try:
         model = build_model(kernel_esmfold2_config, device="cuda")
         model.set_kernel_backend(backend)
@@ -713,42 +724,27 @@ def test_torch_compile_matches_eager(kernel_esmfold2_config, mode):
     assert_close_to_reference(actual, expected, GPU_TOLERANCE, f"compile[{mode}]")
 
 
-@pytest.mark.nightly
-def test_torch_compile_does_not_stack_with_the_fused_backend(kernel_esmfold2_config):
-    """``apply_torch_compile``'s "does not stack with Triton" claim is unenforced.
+def test_torch_compile_refuses_to_stack_with_the_fused_backend(tiny_esmfold2_config):
+    """``apply_torch_compile`` enforces its "does not stack with Triton" claim.
 
-    "Does NOT stack with our Triton kernels - call ``set_kernel_backend(None)``
-    before compiling" is a comment and nothing else: the method inspects nothing,
-    raises nothing and warns nothing at call time. That is the assertion here,
-    and a future guard would have to change it.
+    That line was a comment and nothing else, so a fused build reached
+    ``torch.compile`` and then died deep in the backend - Inductor raises
+    ``PendingUnbackedSymbolNotFound`` tracing the vendored kernels on our L40 and
+    H100 boxes. The guard turns that into a refusal at call time, which needs no
+    GPU to check: it reads ``_kernel_backend`` and compiles nothing.
 
-    What the stacked forward then *does* is platform-dependent (see the module
-    docstring), so this only requires that it produces a usable result on
-    whichever platform reached it. The numeric question - does compiling change
-    the answer - is ``test_torch_compile_matches_eager``'s job, on the
-    unstacked build where a clean eager reference exists.
+    Marked neither ``gpu`` nor ``nightly`` on purpose. ``nightly`` would be
+    actively wrong - conftest's autouse ``disable_direct_gpu_usage_for_nightly``
+    patches ``torch.cuda.is_available`` to False for nightly tests, and the fused
+    kernels then fail at launch with Triton's "0 active drivers".
     """
-    skip_if_backend_missing("fused")
+    model = build_model(tiny_esmfold2_config)
+    model.set_kernel_backend("fused")
 
-    # The fused build itself has to work, or the rest of this proves nothing.
-    eager = build_model(kernel_esmfold2_config, device="cuda")
-    eager.set_kernel_backend("fused")
-    expected = run_forward(eager, ESMFOLD2_SEQUENCES[MATRIX_LENGTH], flash=False)
+    with pytest.raises(RuntimeError, match="does not stack with the fused"):
+        model.apply_torch_compile(mode="fixed_seqlen")
 
-    torch._dynamo.reset()
-    stacked = build_model(kernel_esmfold2_config, device="cuda")
-    stacked.set_kernel_backend("fused")
-    with warnings.catch_warnings(record=True) as caught:
-        warnings.simplefilter("always")
-        stacked.apply_torch_compile(mode="fixed_seqlen")
-    about_kernels = [
-        str(w.message)
-        for w in caught
-        if "kernel" in str(w.message).lower() or "fused" in str(w.message).lower()
-    ]
-    assert not about_kernels, about_kernels
-
-    actual = run_forward(stacked, ESMFOLD2_SEQUENCES[MATRIX_LENGTH], flash=False)
-    for key in GPU_TOLERANCE:
-        assert actual[key].shape == expected[key].shape
-        assert torch.isfinite(actual[key]).all(), f"{key} is not finite"
+    # Clearing the backend is what the message tells the caller to do, so it has
+    # to be enough to get past the guard.
+    model.set_kernel_backend(None)
+    model.apply_torch_compile(mode="fixed_seqlen")
