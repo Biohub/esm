@@ -69,7 +69,7 @@ dependencies = [
 #     'transformer_engine_torch @ https://github.com/evolutionaryscale/wheels/releases/download/py312-pt211-cu13-sm80-90/transformer_engine_torch-2.15.0-cp312-cp312-linux_x86_64.whl'
 #   pip install --force-reinstall --no-deps 'nvidia-cublas>=13.6'
 accel = [
-  "flash_attn @ https://github.com/evolutionaryscale/wheels/releases/download/py312-pt211-cu13-sm80-90/flash_attn-2.7.4.post1-cp312-cp312-linux_x86_64.whl ; sys_platform == 'linux' and platform_machine == 'x86_64' and python_version == '3.12'",
+  "flash_attn @ https://github.com/evolutionaryscale/wheels/releases/download/py312-pt211-cu13-sm80-90/flash_attn-2.7.4.post1-cp312-cp312-linux_x86_64.whl ; sys_platform == 'linux' and platform_machine == 'x86_64'",
 ]
 # Pytest
 [tool.pytest.ini_options]
