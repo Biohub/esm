@@ -8,7 +8,7 @@ SwiGLU feed-forward networks.
 
 import os
 import re
-from dataclasses import dataclass, replace
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Self
 
@@ -230,14 +230,12 @@ class EsmcPreTrainedModel(HubPreTrainedModel):
         token: str | None = None,
         local_files_only: bool = False,
         force_download: bool = False,
-        **config_overrides: object,
     ) -> Self:
         """Load an ESMC model from a local directory or the HuggingFace Hub.
 
         ``device`` defaults to CUDA when one is present, and selects the fused
         kernels as well as the placement: they are CUDA-only, so a model built
-        for the CPU must not use them. Additional keywords override downloaded
-        config fields; unknown fields raise ``TypeError``.
+        for the CPU must not use them.
         """
         local_dir = resolve_model_dir(
             pretrained_model_name_or_path,
@@ -248,8 +246,6 @@ class EsmcPreTrainedModel(HubPreTrainedModel):
             force_download=force_download,
         )
         config = cls.config_class.from_pretrained(local_dir)
-        if config_overrides:
-            config = replace(config, **config_overrides)
         if attn_implementation is not None:
             config.attn_implementation = attn_implementation
         if device is None:

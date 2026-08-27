@@ -24,7 +24,7 @@ classifiers = [
 
 dependencies = [
   "torch>=2.11.0,<2.12.0",
-  "transformers>=4.57.6,<5.0.0",
+  "transformers @ git+https://github.com/Biohub/transformers.git@main",
   "ipython",
   "einops",
   "biotite>=1.0.0",
@@ -51,8 +51,25 @@ dependencies = [
   "pygtrie",
   "dna_features_viewer",
   "accelerate",
+  # Fork adding numpy-2 support on top of upstream v2.1.2. That upstream release
+  # renamed the RMSD keys (iRMSD/LRMSD) and dropped the DockQ_F1 output, which
+  # protein_complex.py recomputes from F1.
+  "dockq @ git+https://github.com/nrontsis/DockQ.git@ba4df5adaad7c77fd60851d0b7b05f2b77061ba2",
   "cuequivariance-torch>=0.8.1; sys_platform == 'linux' and platform_machine == 'x86_64'",
   "cuequivariance-ops-torch-cu13>=0.8.1; sys_platform == 'linux' and platform_machine == 'x86_64'",
+  "xformers @ https://download.pytorch.org/whl/cu130/xformers-0.0.35-py39-none-manylinux_2_28_x86_64.whl ; sys_platform == 'linux' and platform_machine == 'x86_64'",
+]
+
+[project.optional-dependencies]
+# Our own build: PyPI's flash-attn is sdist-only and its setup.py imports torch.
+# transformer-engine is excluded: its core needs a cuBLAS symbol from 13.3, and
+# torch pins cuda-toolkit==13.0.2 which pins nvidia-cublas==13.1.0.3. Get it from
+# the pixi `fused` environment, or by hand:
+#   pip install 'transformer-engine[pytorch]==2.15.0' \
+#     'transformer_engine_torch @ https://github.com/evolutionaryscale/wheels/releases/download/py312-pt211-cu13-sm80-90/transformer_engine_torch-2.15.0-cp312-cp312-linux_x86_64.whl'
+#   pip install --force-reinstall --no-deps 'nvidia-cublas>=13.6'
+accel = [
+  "flash_attn @ https://github.com/evolutionaryscale/wheels/releases/download/py312-pt211-cu13-sm80-90/flash_attn-2.7.4.post1-cp312-cp312-linux_x86_64.whl ; sys_platform == 'linux' and platform_machine == 'x86_64'",
 ]
 # Pytest
 [tool.pytest.ini_options]
@@ -130,11 +147,6 @@ pytest-xdist = "*"
 seaborn = "*"
 ty = "==0.0.49"
 
-[tool.pixi.feature.dev.pypi-dependencies]
-# DockQ is optional at runtime. Keep the NumPy 2-compatible fork in the dev
-# environment for tests without publishing its direct URL in package metadata.
-dockq = { git = "https://github.com/nrontsis/DockQ.git", rev = "ba4df5adaad7c77fd60851d0b7b05f2b77061ba2" }
-
 [tool.pixi.feature.dev.tasks]
 lint-all = "pre-commit run --all-files --show-diff-on-failure"
 cov-test = "pytest -v --junitxml=pytest.xml --cov=esm"
@@ -144,7 +156,6 @@ platforms = ["linux-64"]
 
 [tool.pixi.feature.fused.pypi-dependencies]
 flash_attn = { url = "https://github.com/evolutionaryscale/wheels/releases/download/py312-pt211-cu13-sm80-90/flash_attn-2.7.4.post1-cp312-cp312-linux_x86_64.whl" }
-xformers = { url = "https://download.pytorch.org/whl/cu130/xformers-0.0.35-py39-none-manylinux_2_28_x86_64.whl" }
 cuequivariance-torch = ">=0.8.1"
 cuequivariance-ops-torch-cu13 = ">=0.8.1"
 

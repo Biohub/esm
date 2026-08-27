@@ -80,8 +80,8 @@ if not XFORMERS_INSTALLED and not FLASH_ATTN_INSTALLED:
         "reduction order in bf16 differs from a fused kernel by ~1 bf16 "
         "ULP per attention block; compounded across the 80-block stack "
         "this reaches ~O(100) max-diff on the unnormalized residual stream. "
-        "Install an xformers build matching your PyTorch and CUDA versions "
-        "for a fused attention kernel."
+        "Install xformers (preferred) with `pip install xformers` for a "
+        "fused attention kernel."
     )
 
 if torch.cuda.is_available() and not FLASH_ATTN_ROTARY_INSTALLED:
