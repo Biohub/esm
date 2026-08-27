@@ -707,14 +707,15 @@ def fold_and_get_distogram(
     )
 
     with seed_context(seed):
-        output = model(
-            **inputs,
-            num_diffusion_samples=1,
-            num_sampling_steps=num_sampling_steps,
-            num_loops=num_loops,
-            calculate_confidence=calculate_confidence,
-            seed=seed,
-        )
+        with torch.autocast(device_type="cuda", dtype=torch.bfloat16):
+            output = model(
+                **inputs,
+                num_diffusion_samples=1,
+                num_sampling_steps=num_sampling_steps,
+                num_loops=num_loops,
+                calculate_confidence=calculate_confidence,
+                seed=seed,
+            )
 
     result: dict = {
         "distogram_logits": output["distogram_logits"],
@@ -799,9 +800,9 @@ def build_complex(
     """Build ProteinComplex from model output."""
     plddt_per_atom = output.get("plddt_per_atom")
     if plddt_per_atom is not None:
-        plddt_per_atom = plddt_per_atom[0].cpu().numpy() * PLDDT_B_FACTOR_SCALE
+        plddt_per_atom = plddt_per_atom[0].float().cpu().numpy() * PLDDT_B_FACTOR_SCALE
     atom_arr = to_atom_array(
-        coords=output["sample_atom_coords"][0].cpu().numpy(),
+        coords=output["sample_atom_coords"][0].float().cpu().numpy(),
         atom_to_token=inputs["atom_to_token"][0].cpu().numpy(),
         res_type=inputs["res_type"][0].cpu().numpy(),
         residue_index=inputs["token_index"][0].cpu().numpy(),
@@ -1250,6 +1251,7 @@ def _load_hf_model(
     elif CUE_AVAILABLE:
         kernel_backend = BACKEND_CUEQ
     model.set_kernel_backend(kernel_backend)
+
     return model.to(device=device).eval().requires_grad_(False)
 
 
@@ -1259,13 +1261,11 @@ def _apply_torch_compile(model: torch.nn.Module) -> None:
     torch._dynamo.config.accumulated_cache_size_limit = 512
 
     compile_targets = (ESMFold2MSAEncoder, PairUpdateBlock)
-
-    def _maybe_compile_module(module: torch.nn.Module) -> None:
-        if not isinstance(module, compile_targets):
-            return
-        module.forward = torch.compile(module.forward)  # ty:ignore[invalid-assignment]
-
-    model.apply(_maybe_compile_module)
+    for name, module in model.named_modules():
+        if "confidence_head" in name:
+            continue
+        if isinstance(module, compile_targets):
+            module.forward = torch.compile(module.forward)  # ty:ignore[invalid-assignment]
 
 
 class ESMFold2Design:
