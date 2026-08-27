@@ -343,6 +343,9 @@ class ESMFold2InputBuilder:
         msa_max_depth: int | None = 1024,
         msa_column_mask_rate: float = 0.1,
         msa_subsample_at_inference: bool | None = None,
+        low_memory_mode: bool = False,
+        offload_esmc_after_lm: bool | None = None,
+        confidence_sample_chunk_size: int | None = None,
         complex_id: str = "pred",
     ) -> MolecularComplexResult | list[MolecularComplexResult]:
         """Fold a structure end-to-end: encode → model → decode.
@@ -375,6 +378,17 @@ class ESMFold2InputBuilder:
             (shared across loops). Defaults to
             ``config.msa_encoder.column_mask_rate`` when ``None``. Only affects
             inputs that carry an MSA.
+        low_memory_mode : bool, optional
+            Enable ESMC CPU offload and confidence sample chunking with chunk
+            size 1. ``False`` preserves the default fully batched behavior.
+        offload_esmc_after_lm : bool, optional
+            Move the ESMC backbone to CPU after LM feature extraction. It is
+            restored automatically if a subsequent fold needs it. ``None``
+            uses the ``low_memory_mode`` preset; an explicit boolean overrides
+            that preset.
+        confidence_sample_chunk_size : int, optional
+            Maximum diffusion samples evaluated together by the confidence
+            head. ``None`` preserves the current fully batched behavior.
         complex_id : str
             Identifier assigned to the predicted MolecularComplex(es).
 
@@ -415,6 +429,9 @@ class ESMFold2InputBuilder:
                         num_diffusion_samples=num_diffusion_samples,
                         msa_max_depth=msa_max_depth,
                         msa_column_mask_rate=msa_column_mask_rate,
+                        low_memory_mode=low_memory_mode,
+                        offload_esmc_after_lm=offload_esmc_after_lm,
+                        confidence_sample_chunk_size=confidence_sample_chunk_size,
                         **sampler_kwargs,
                     )
 

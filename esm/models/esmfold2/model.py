@@ -515,6 +515,13 @@ class EsmFold2Model(HubPreTrainedModel):
       default to ``config.structure_head``; the sigma cap truncates the schedule.
     * ``msa_max_depth`` / ``msa_column_mask_rate``: inference-time MSA diversity,
       defaulting to ``config.msa_encoder`` when ``None``.
+    * ``low_memory_mode``: enable ESMC offload and confidence sample chunking
+      with chunk size ``1``. The default ``False`` preserves current behavior.
+    * ``offload_esmc_after_lm``: move ESMC to CPU after LM feature extraction;
+      it is restored automatically before a later call needs it. ``None`` uses
+      the ``low_memory_mode`` preset, while an explicit boolean overrides it.
+    * ``confidence_sample_chunk_size``: evaluate confidence for at most this
+      many diffusion samples at once. ``1`` minimizes confidence-head VRAM.
 
     Unknown keywords raise ``TypeError``; only the inference-irrelevant keys the
     featurizer emits (``_IGNORED_FEATURE_KEYS``) are accepted and dropped.
@@ -817,6 +824,99 @@ class EsmFold2Model(HubPreTrainedModel):
                 lm_mask_pct=lm_mask_pct,
             )
 
+    def _move_esmc_to(self, device: torch.device) -> None:
+        """Move the frozen LM backbone without changing its dtype or mode."""
+        if self.esmc is None:
+            return
+        parameter = next(self.esmc.parameters(), None)
+        if parameter is not None and parameter.device == device:
+            return
+        self.esmc.to(device=device)
+
+    def _compute_pair_encodings(
+        self,
+        *,
+        residue_index: Tensor,
+        asym_id: Tensor,
+        sym_id: Tensor,
+        entity_id: Tensor,
+        token_index: Tensor,
+        token_bonds: Tensor | None = None,
+        relative_position_encoding: Tensor | None = None,
+        use_amp: bool,
+    ) -> tuple[Tensor, Tensor | None]:
+        """Create missing static pair features with the forward path's AMP semantics."""
+        with torch.amp.autocast("cuda", enabled=use_amp, dtype=torch.bfloat16):
+            if relative_position_encoding is None:
+                relative_position_encoding = self.rel_pos(
+                    residue_index=residue_index,
+                    asym_id=asym_id,
+                    sym_id=sym_id,
+                    entity_id=entity_id,
+                    token_index=token_index,
+                )
+            token_bonds_encoding = (
+                self.token_bonds(token_bonds.float())
+                if token_bonds is not None
+                else None
+            )
+        return relative_position_encoding, token_bonds_encoding
+
+    def _run_confidence_head(
+        self,
+        *,
+        sample_chunk_size: int | None,
+        num_diffusion_samples: int,
+        x_pred: Tensor,
+        **kwargs: Any,
+    ) -> dict[str, Tensor]:
+        """Run confidence in sample chunks and restore batch-major ordering."""
+        if sample_chunk_size is None or sample_chunk_size >= num_diffusion_samples:
+            return self.confidence_head(
+                x_pred=x_pred, num_diffusion_samples=num_diffusion_samples, **kwargs
+            )
+        if sample_chunk_size < 1:
+            raise ValueError("confidence_sample_chunk_size must be at least 1")
+        batch_size = kwargs["s_inputs"].shape[0]
+        if x_pred.ndim == 3:
+            x_pred = x_pred.reshape(
+                batch_size, num_diffusion_samples, *x_pred.shape[1:]
+            )
+        elif x_pred.ndim != 4:
+            raise ValueError(
+                "chunked confidence requires sample_atom_coords shaped either "
+                "[batch * samples, atoms, 3] or [batch, samples, atoms, 3]"
+            )
+
+        outputs: dict[str, Tensor] = {}
+        for start in range(0, num_diffusion_samples, sample_chunk_size):
+            stop = min(start + sample_chunk_size, num_diffusion_samples)
+            chunk_samples = stop - start
+            chunk_output = self.confidence_head(
+                x_pred=x_pred[:, start:stop],
+                num_diffusion_samples=chunk_samples,
+                **kwargs,
+            )
+            for name in chunk_output:
+                chunk_value = chunk_output[name].reshape(
+                    batch_size, chunk_samples, *chunk_output[name].shape[1:]
+                )
+                if name not in outputs:
+                    outputs[name] = torch.empty(
+                        batch_size,
+                        num_diffusion_samples,
+                        *chunk_output[name].shape[1:],
+                        dtype=chunk_output[name].dtype,
+                        device=chunk_output[name].device,
+                    )
+                outputs[name][:, start:stop].copy_(chunk_value)
+                del chunk_value
+            del chunk_output
+        return {
+            name: value.reshape(batch_size * num_diffusion_samples, *value.shape[2:])
+            for name, value in outputs.items()
+        }
+
     def _discretized_dynamics(self) -> tuple[Tensor, Tensor]:
         delta = F.softplus(self.parcae_log_delta)
         a = torch.exp(-delta * torch.exp(self.parcae_log_a))
@@ -963,6 +1063,9 @@ class EsmFold2Model(HubPreTrainedModel):
         max_inference_sigma: float | None = 256.0,
         disto_cond: Tensor | None = None,
         disto_cond_mask: Tensor | None = None,
+        low_memory_mode: bool = False,
+        offload_esmc_after_lm: bool | None = None,
+        confidence_sample_chunk_size: int | None = None,
         **unused_features: Tensor,
     ) -> dict[str, Tensor]:
         unexpected = sorted(set(unused_features) - _IGNORED_FEATURE_KEYS)
@@ -991,7 +1094,25 @@ class EsmFold2Model(HubPreTrainedModel):
             if num_diffusion_samples is not None
             else self.config.num_diffusion_samples
         )
+        if offload_esmc_after_lm is None:
+            offload_esmc_after_lm = low_memory_mode
+        if low_memory_mode:
+            if confidence_sample_chunk_size is None:
+                confidence_sample_chunk_size = 1
         total_steps = max(1, n_loops + 1)
+        if (
+            confidence_sample_chunk_size is not None
+            and confidence_sample_chunk_size < 1
+        ):
+            raise ValueError("confidence_sample_chunk_size must be at least 1")
+        if offload_esmc_after_lm and self._esmc_fp8:
+            raise ValueError(
+                "offload_esmc_after_lm=True is not supported while the ESMC "
+                "backbone uses FP8"
+            )
+
+        if lm_hidden_states is None and input_ids is not None and self.esmc is not None:
+            self._move_esmc_to(input_ids.device)
 
         if res_type.dim() == 2:
             res_type_oh = F.one_hot(res_type.long(), num_classes=NUM_RES_TYPES).float()
@@ -1049,15 +1170,20 @@ class EsmFold2Model(HubPreTrainedModel):
                 x_inputs
             ).unsqueeze(1)
 
-            relative_position_encoding = self.rel_pos(
-                residue_index=residue_index,
-                asym_id=asym_id,
-                sym_id=sym_id,
-                entity_id=entity_id,
-                token_index=token_index,
+            relative_position_encoding, token_bonds_encoding = (
+                self._compute_pair_encodings(
+                    residue_index=residue_index,
+                    asym_id=asym_id,
+                    sym_id=sym_id,
+                    entity_id=entity_id,
+                    token_index=token_index,
+                    token_bonds=token_bonds,
+                    use_amp=use_amp,
+                )
             )
-            token_bonds_encoding = self.token_bonds(token_bonds.float())
+            assert token_bonds_encoding is not None
             z_init = z_init + relative_position_encoding + token_bonds_encoding
+            del relative_position_encoding, token_bonds_encoding
 
             if (
                 lm_hidden_states is None
@@ -1080,6 +1206,8 @@ class EsmFold2Model(HubPreTrainedModel):
             if lm_hidden_states is not None:
                 lm_z = self.language_model(lm_hidden_states.detach())
             del lm_hidden_states
+            if offload_esmc_after_lm and self.esmc is not None:
+                self._move_esmc_to(torch.device("cpu"))
 
             pair_mask = tok_mask[:, :, None].float() * tok_mask[:, None, :].float()
 
@@ -1133,7 +1261,15 @@ class EsmFold2Model(HubPreTrainedModel):
             z = self.parcae_coda(z, pair_attention_mask=pair_mask)
 
             z = z.float()
-        distogram_logits = self.distogram_head(z + z.transpose(-2, -3))
+
+        relative_position_encoding, _ = self._compute_pair_encodings(
+            residue_index=residue_index,
+            asym_id=asym_id,
+            sym_id=sym_id,
+            entity_id=entity_id,
+            token_index=token_index,
+            use_amp=use_amp,
+        )
 
         structure_output = self.structure_head.sample(
             z_trunk=z,
@@ -1163,23 +1299,42 @@ class EsmFold2Model(HubPreTrainedModel):
 
         sample_coords = structure_output["sample_atom_coords"]
         assert sample_coords is not None
-        output: dict[str, Tensor] = {"distogram_logits": distogram_logits}
-        output["sample_atom_coords"] = sample_coords
 
-        confidence_output = self.confidence_head(
+        relative_position_encoding, token_bonds_encoding = self._compute_pair_encodings(
+            residue_index=residue_index,
+            asym_id=asym_id,
+            sym_id=sym_id,
+            entity_id=entity_id,
+            token_index=token_index,
+            token_bonds=token_bonds,
+            relative_position_encoding=relative_position_encoding,
+            use_amp=use_amp,
+        )
+        assert token_bonds_encoding is not None
+        confidence_output = self._run_confidence_head(
+            sample_chunk_size=confidence_sample_chunk_size,
+            num_diffusion_samples=n_samples,
+            x_pred=sample_coords.detach(),
             s_inputs=x_inputs.detach(),
             z=z.detach().float(),
-            x_pred=sample_coords.detach(),
             distogram_atom_idx=disto_idx,
             token_attention_mask=tok_mask,
             atom_to_token=atom_to_token,
             atom_attention_mask=atm_mask,
             asym_id=asym_id,
             mol_type=mol_type,
-            num_diffusion_samples=n_samples,
             relative_position_encoding=relative_position_encoding.detach(),
             token_bonds_encoding=token_bonds_encoding.detach(),
         )
+        del relative_position_encoding, token_bonds_encoding
+
+        # Materialize the returned distogram only after diffusion and confidence
+        # have released their larger temporary pair representations.
+        distogram_logits = self.distogram_head(z + z.transpose(-2, -3))
+        output: dict[str, Tensor] = {
+            "distogram_logits": distogram_logits,
+            "sample_atom_coords": sample_coords,
+        }
         output.update(confidence_output)
         output["atom_pad_mask"] = (
             atm_mask.unsqueeze(0) if atm_mask.dim() == 1 else atm_mask
