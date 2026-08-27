@@ -61,11 +61,15 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
-# flash-attn ships sdist-only and its setup.py imports torch, so this extra needs
-# `pip install --no-build-isolation 'esm[accel]'` into an env that already has torch.
+# Our own build: PyPI's flash-attn is sdist-only and its setup.py imports torch.
+# transformer-engine is excluded: its core needs a cuBLAS symbol from 13.3, and
+# torch pins cuda-toolkit==13.0.2 which pins nvidia-cublas==13.1.0.3. Get it from
+# the pixi `fused` environment, or by hand:
+#   pip install 'transformer-engine[pytorch]==2.15.0' \
+#     'transformer_engine_torch @ https://github.com/evolutionaryscale/wheels/releases/download/py312-pt211-cu13-sm80-90/transformer_engine_torch-2.15.0-cp312-cp312-linux_x86_64.whl'
+#   pip install --force-reinstall --no-deps 'nvidia-cublas>=13.6'
 accel = [
-  "flash-attn==2.7.4.post1; sys_platform == 'linux' and platform_machine == 'x86_64'",
-  "transformer-engine[pytorch]==2.15.0; sys_platform == 'linux' and platform_machine == 'x86_64'",
+  "flash_attn @ https://github.com/evolutionaryscale/wheels/releases/download/py312-pt211-cu13-sm80-90/flash_attn-2.7.4.post1-cp312-cp312-linux_x86_64.whl ; sys_platform == 'linux' and platform_machine == 'x86_64' and python_version == '3.12'",
 ]
 # Pytest
 [tool.pytest.ini_options]
