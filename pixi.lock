@@ -165,10 +165,8 @@ environments:
       - conda: https://conda.anaconda.org/conda-forge/noarch/wheel-0.48.0-pyhd8ed1ab_0.conda
       - conda: https://conda.anaconda.org/conda-forge/noarch/zipp-4.1.0-pyhcf101f3_0.conda
       - pypi: .
-      - pypi: direct+https://download.pytorch.org/whl/cu130/xformers-0.0.35-py39-none-manylinux_2_28_x86_64.whl
-      - pypi: git+https://github.com/Biohub/transformers.git?rev=main#ef32577f55da19a4989cd7b22e004dc43a4998cb
-      - pypi: git+https://github.com/nrontsis/DockQ.git?rev=ba4df5adaad7c77fd60851d0b7b05f2b77061ba2#ba4df5adaad7c77fd60851d0b7b05f2b77061ba2
       - pypi: https://files.pythonhosted.org/packages/00/78/9cbcc1c073b9d4918e925af1a059762265dc65004e020511b2a06fbfd020/pydssp-0.9.1-py3-none-any.whl
+      - pypi: https://files.pythonhosted.org/packages/03/b8/e484ef633af3887baeeb4b6ad12743363af7cce68ae51e938e00aaa0529d/transformers-4.57.6-py3-none-any.whl
       - pypi: https://files.pythonhosted.org/packages/04/4b/29cac41a4d98d144bf5f6d33995617b185d14b22401f75ca86f384e87ff1/h11-0.16.0-py3-none-any.whl
       - pypi: https://files.pythonhosted.org/packages/14/2f/967ba146e6d58cf6a652da73885f52fc68001525b4197effc174321d70b4/jmespath-1.1.0-py3-none-any.whl
       - pypi: https://files.pythonhosted.org/packages/17/66/1ef1960ffa751df4f6ed05a76ba677e331ce451902f319d14c3f8ae81215/rdkit-2026.3.5-cp312-cp312-manylinux_2_28_x86_64.whl
@@ -213,7 +211,6 @@ environments:
       - pypi: https://files.pythonhosted.org/packages/7e/85/a5bfaebfd305ac18b57b0854d74e37e586809061a91fda62f0bd50c8518e/narwhals-2.24.0-py3-none-any.whl
       - pypi: https://files.pythonhosted.org/packages/7e/f5/f66802a942d491edb555dd61e3a9961140fd64c90bce1eafd741609d334d/httpcore-1.0.9-py3-none-any.whl
       - pypi: https://files.pythonhosted.org/packages/80/cd/c607b6337ddcf55cc0249527819b727ef28481d7c56ace54cca69400c2b9/biotraj-1.2.2-cp312-cp312-manylinux_2_17_x86_64.manylinux2014_x86_64.whl
-      - pypi: https://files.pythonhosted.org/packages/81/b6/100d5811cb60bfc13626910cb48872b8ca53f1dcaf2127aac71185575a7f/parallelbar-2.5-py3-none-any.whl
       - pypi: https://files.pythonhosted.org/packages/8e/37/efad0257dc6e593a18957422533ff0f87ede7c9c6ea010a2177d738fb82f/pure_eval-0.2.3-py3-none-any.whl
       - pypi: https://files.pythonhosted.org/packages/8e/5a/7fd1b784a87e96e0078f49a0a13a98b4c5f644ba5597a4a3b70a2ba3e613/py3dmol-2.5.5-py2.py3-none-any.whl
       - pypi: https://files.pythonhosted.org/packages/94/46/19d3178e70f37fda251f3d9560f29654f09c6eedbe1c8b790adeee84da49/botocore-1.43.75-py3-none-any.whl
@@ -392,9 +389,8 @@ environments:
       - conda: https://conda.anaconda.org/conda-forge/osx-arm64/zlib-ng-2.3.3-h31dac16_1.conda
       - conda: https://conda.anaconda.org/conda-forge/osx-arm64/zstd-1.5.7-hf451053_7.conda
       - pypi: .
-      - pypi: git+https://github.com/Biohub/transformers.git?rev=main#ef32577f55da19a4989cd7b22e004dc43a4998cb
-      - pypi: git+https://github.com/nrontsis/DockQ.git?rev=ba4df5adaad7c77fd60851d0b7b05f2b77061ba2#ba4df5adaad7c77fd60851d0b7b05f2b77061ba2
       - pypi: https://files.pythonhosted.org/packages/00/78/9cbcc1c073b9d4918e925af1a059762265dc65004e020511b2a06fbfd020/pydssp-0.9.1-py3-none-any.whl
+      - pypi: https://files.pythonhosted.org/packages/03/b8/e484ef633af3887baeeb4b6ad12743363af7cce68ae51e938e00aaa0529d/transformers-4.57.6-py3-none-any.whl
       - pypi: https://files.pythonhosted.org/packages/04/4b/29cac41a4d98d144bf5f6d33995617b185d14b22401f75ca86f384e87ff1/h11-0.16.0-py3-none-any.whl
       - pypi: https://files.pythonhosted.org/packages/08/b8/2bc2590a34c733ea0570f366e6ad7d889d05c7825bd3ccab01f36ece71c6/zstd-1.5.7.2-cp312-cp312-macosx_11_0_arm64.whl
       - pypi: https://files.pythonhosted.org/packages/14/2f/967ba146e6d58cf6a652da73885f52fc68001525b4197effc174321d70b4/jmespath-1.1.0-py3-none-any.whl
@@ -419,7 +415,6 @@ environments:
       - pypi: https://files.pythonhosted.org/packages/7b/91/984aca2ec129e2757d1e4e3c81c3fcda9d0f85b74670a094cc443d9ee949/joblib-1.5.3-py3-none-any.whl
       - pypi: https://files.pythonhosted.org/packages/7e/f5/f66802a942d491edb555dd61e3a9961140fd64c90bce1eafd741609d334d/httpcore-1.0.9-py3-none-any.whl
       - pypi: https://files.pythonhosted.org/packages/80/c4/f5af4c1ca8c1eeb2e92ccca14ce8effdeec651d5ab6053c589b074eda6e1/psutil-7.2.2-cp36-abi3-macosx_11_0_arm64.whl
-      - pypi: https://files.pythonhosted.org/packages/81/b6/100d5811cb60bfc13626910cb48872b8ca53f1dcaf2127aac71185575a7f/parallelbar-2.5-py3-none-any.whl
       - pypi: https://files.pythonhosted.org/packages/83/b4/fbd2f53d06bd2c98d7f52da05a1d4cc838e4921ca6daa839a30d72d89256/biopython-1.88-cp312-cp312-macosx_11_0_arm64.whl
       - pypi: https://files.pythonhosted.org/packages/8c/03/bbc5e9d4aaa2f1c4a942bbeb0c6eff79e56ec370ad8670e029ae6d156489/rdkit-2026.3.5-cp312-cp312-macosx_11_0_arm64.whl
       - pypi: https://files.pythonhosted.org/packages/8e/37/efad0257dc6e593a18957422533ff0f87ede7c9c6ea010a2177d738fb82f/pure_eval-0.2.3-py3-none-any.whl
@@ -685,10 +680,9 @@ environments:
       - conda: https://conda.anaconda.org/conda-forge/noarch/wheel-0.48.0-pyhd8ed1ab_0.conda
       - conda: https://conda.anaconda.org/conda-forge/noarch/zipp-4.1.0-pyhcf101f3_0.conda
       - pypi: .
-      - pypi: direct+https://download.pytorch.org/whl/cu130/xformers-0.0.35-py39-none-manylinux_2_28_x86_64.whl
-      - pypi: git+https://github.com/Biohub/transformers.git?rev=main#ef32577f55da19a4989cd7b22e004dc43a4998cb
       - pypi: git+https://github.com/nrontsis/DockQ.git?rev=ba4df5adaad7c77fd60851d0b7b05f2b77061ba2#ba4df5adaad7c77fd60851d0b7b05f2b77061ba2
       - pypi: https://files.pythonhosted.org/packages/00/78/9cbcc1c073b9d4918e925af1a059762265dc65004e020511b2a06fbfd020/pydssp-0.9.1-py3-none-any.whl
+      - pypi: https://files.pythonhosted.org/packages/03/b8/e484ef633af3887baeeb4b6ad12743363af7cce68ae51e938e00aaa0529d/transformers-4.57.6-py3-none-any.whl
       - pypi: https://files.pythonhosted.org/packages/04/4b/29cac41a4d98d144bf5f6d33995617b185d14b22401f75ca86f384e87ff1/h11-0.16.0-py3-none-any.whl
       - pypi: https://files.pythonhosted.org/packages/14/2f/967ba146e6d58cf6a652da73885f52fc68001525b4197effc174321d70b4/jmespath-1.1.0-py3-none-any.whl
       - pypi: https://files.pythonhosted.org/packages/17/66/1ef1960ffa751df4f6ed05a76ba677e331ce451902f319d14c3f8ae81215/rdkit-2026.3.5-cp312-cp312-manylinux_2_28_x86_64.whl
@@ -939,9 +933,9 @@ environments:
       - conda: https://conda.anaconda.org/conda-forge/osx-arm64/zlib-ng-2.3.3-h31dac16_1.conda
       - conda: https://conda.anaconda.org/conda-forge/osx-arm64/zstd-1.5.7-hf451053_7.conda
       - pypi: .
-      - pypi: git+https://github.com/Biohub/transformers.git?rev=main#ef32577f55da19a4989cd7b22e004dc43a4998cb
       - pypi: git+https://github.com/nrontsis/DockQ.git?rev=ba4df5adaad7c77fd60851d0b7b05f2b77061ba2#ba4df5adaad7c77fd60851d0b7b05f2b77061ba2
       - pypi: https://files.pythonhosted.org/packages/00/78/9cbcc1c073b9d4918e925af1a059762265dc65004e020511b2a06fbfd020/pydssp-0.9.1-py3-none-any.whl
+      - pypi: https://files.pythonhosted.org/packages/03/b8/e484ef633af3887baeeb4b6ad12743363af7cce68ae51e938e00aaa0529d/transformers-4.57.6-py3-none-any.whl
       - pypi: https://files.pythonhosted.org/packages/04/4b/29cac41a4d98d144bf5f6d33995617b185d14b22401f75ca86f384e87ff1/h11-0.16.0-py3-none-any.whl
       - pypi: https://files.pythonhosted.org/packages/08/b8/2bc2590a34c733ea0570f366e6ad7d889d05c7825bd3ccab01f36ece71c6/zstd-1.5.7.2-cp312-cp312-macosx_11_0_arm64.whl
       - pypi: https://files.pythonhosted.org/packages/14/2f/967ba146e6d58cf6a652da73885f52fc68001525b4197effc174321d70b4/jmespath-1.1.0-py3-none-any.whl
@@ -1230,10 +1224,9 @@ environments:
       - conda: https://conda.anaconda.org/conda-forge/noarch/virtualenv-21.7.4-pyhcf101f3_0.conda
       - conda: https://conda.anaconda.org/conda-forge/noarch/zipp-4.1.0-pyhcf101f3_0.conda
       - pypi: .
-      - pypi: direct+https://download.pytorch.org/whl/cu130/xformers-0.0.35-py39-none-manylinux_2_28_x86_64.whl
-      - pypi: git+https://github.com/Biohub/transformers.git?rev=main#ef32577f55da19a4989cd7b22e004dc43a4998cb
       - pypi: git+https://github.com/nrontsis/DockQ.git?rev=ba4df5adaad7c77fd60851d0b7b05f2b77061ba2#ba4df5adaad7c77fd60851d0b7b05f2b77061ba2
       - pypi: https://files.pythonhosted.org/packages/00/78/9cbcc1c073b9d4918e925af1a059762265dc65004e020511b2a06fbfd020/pydssp-0.9.1-py3-none-any.whl
+      - pypi: https://files.pythonhosted.org/packages/03/b8/e484ef633af3887baeeb4b6ad12743363af7cce68ae51e938e00aaa0529d/transformers-4.57.6-py3-none-any.whl
       - pypi: https://files.pythonhosted.org/packages/04/4b/29cac41a4d98d144bf5f6d33995617b185d14b22401f75ca86f384e87ff1/h11-0.16.0-py3-none-any.whl
       - pypi: https://files.pythonhosted.org/packages/14/2f/967ba146e6d58cf6a652da73885f52fc68001525b4197effc174321d70b4/jmespath-1.1.0-py3-none-any.whl
       - pypi: https://files.pythonhosted.org/packages/1f/88/8dab5de10c638c083772a6be83a3d8106ced492f74a928c8693638e5bb50/scikit_learn-1.9.0-cp313-cp313-manylinux_2_27_x86_64.manylinux_2_28_x86_64.whl
@@ -1483,9 +1476,9 @@ environments:
       - conda: https://conda.anaconda.org/conda-forge/osx-arm64/zlib-ng-2.3.3-h31dac16_1.conda
       - conda: https://conda.anaconda.org/conda-forge/osx-arm64/zstd-1.5.7-hf451053_7.conda
       - pypi: .
-      - pypi: git+https://github.com/Biohub/transformers.git?rev=main#ef32577f55da19a4989cd7b22e004dc43a4998cb
       - pypi: git+https://github.com/nrontsis/DockQ.git?rev=ba4df5adaad7c77fd60851d0b7b05f2b77061ba2#ba4df5adaad7c77fd60851d0b7b05f2b77061ba2
       - pypi: https://files.pythonhosted.org/packages/00/78/9cbcc1c073b9d4918e925af1a059762265dc65004e020511b2a06fbfd020/pydssp-0.9.1-py3-none-any.whl
+      - pypi: https://files.pythonhosted.org/packages/03/b8/e484ef633af3887baeeb4b6ad12743363af7cce68ae51e938e00aaa0529d/transformers-4.57.6-py3-none-any.whl
       - pypi: https://files.pythonhosted.org/packages/04/4b/29cac41a4d98d144bf5f6d33995617b185d14b22401f75ca86f384e87ff1/h11-0.16.0-py3-none-any.whl
       - pypi: https://files.pythonhosted.org/packages/14/2f/967ba146e6d58cf6a652da73885f52fc68001525b4197effc174321d70b4/jmespath-1.1.0-py3-none-any.whl
       - pypi: https://files.pythonhosted.org/packages/22/a6/858897256d0deac81a172289110f31629fc4cee19b6f01283303e18c8db3/ptyprocess-0.7.0-py2.py3-none-any.whl
@@ -1775,10 +1768,9 @@ environments:
       - conda: https://conda.anaconda.org/conda-forge/noarch/virtualenv-21.7.4-pyhcf101f3_0.conda
       - conda: https://conda.anaconda.org/conda-forge/noarch/zipp-4.1.0-pyhcf101f3_0.conda
       - pypi: .
-      - pypi: direct+https://download.pytorch.org/whl/cu130/xformers-0.0.35-py39-none-manylinux_2_28_x86_64.whl
-      - pypi: git+https://github.com/Biohub/transformers.git?rev=main#ef32577f55da19a4989cd7b22e004dc43a4998cb
       - pypi: git+https://github.com/nrontsis/DockQ.git?rev=ba4df5adaad7c77fd60851d0b7b05f2b77061ba2#ba4df5adaad7c77fd60851d0b7b05f2b77061ba2
       - pypi: https://files.pythonhosted.org/packages/00/78/9cbcc1c073b9d4918e925af1a059762265dc65004e020511b2a06fbfd020/pydssp-0.9.1-py3-none-any.whl
+      - pypi: https://files.pythonhosted.org/packages/03/b8/e484ef633af3887baeeb4b6ad12743363af7cce68ae51e938e00aaa0529d/transformers-4.57.6-py3-none-any.whl
       - pypi: https://files.pythonhosted.org/packages/04/4b/29cac41a4d98d144bf5f6d33995617b185d14b22401f75ca86f384e87ff1/h11-0.16.0-py3-none-any.whl
       - pypi: https://files.pythonhosted.org/packages/07/21/2287edfd0d2569639eea706e25c39e63b46a384cf1712db8ea05768317b0/biotraj-1.2.2.tar.gz
       - pypi: https://files.pythonhosted.org/packages/14/2f/967ba146e6d58cf6a652da73885f52fc68001525b4197effc174321d70b4/jmespath-1.1.0-py3-none-any.whl
@@ -2029,9 +2021,9 @@ environments:
       - conda: https://conda.anaconda.org/conda-forge/osx-arm64/zlib-ng-2.3.3-h31dac16_1.conda
       - conda: https://conda.anaconda.org/conda-forge/osx-arm64/zstd-1.5.7-hf451053_7.conda
       - pypi: .
-      - pypi: git+https://github.com/Biohub/transformers.git?rev=main#ef32577f55da19a4989cd7b22e004dc43a4998cb
       - pypi: git+https://github.com/nrontsis/DockQ.git?rev=ba4df5adaad7c77fd60851d0b7b05f2b77061ba2#ba4df5adaad7c77fd60851d0b7b05f2b77061ba2
       - pypi: https://files.pythonhosted.org/packages/00/78/9cbcc1c073b9d4918e925af1a059762265dc65004e020511b2a06fbfd020/pydssp-0.9.1-py3-none-any.whl
+      - pypi: https://files.pythonhosted.org/packages/03/b8/e484ef633af3887baeeb4b6ad12743363af7cce68ae51e938e00aaa0529d/transformers-4.57.6-py3-none-any.whl
       - pypi: https://files.pythonhosted.org/packages/04/4b/29cac41a4d98d144bf5f6d33995617b185d14b22401f75ca86f384e87ff1/h11-0.16.0-py3-none-any.whl
       - pypi: https://files.pythonhosted.org/packages/07/21/2287edfd0d2569639eea706e25c39e63b46a384cf1712db8ea05768317b0/biotraj-1.2.2.tar.gz
       - pypi: https://files.pythonhosted.org/packages/0f/1f/654a3c6364ff0eeca92f140911507497bc8a9a450b3612fc42d889bdc338/rdkit-2026.3.5-cp314-cp314-macosx_11_0_arm64.whl
@@ -2324,9 +2316,9 @@ environments:
       - pypi: .
       - pypi: direct+https://download.pytorch.org/whl/cu130/xformers-0.0.35-py39-none-manylinux_2_28_x86_64.whl
       - pypi: direct+https://github.com/evolutionaryscale/wheels/releases/download/py312-pt211-cu13-sm80-90/flash_attn-2.7.4.post1-cp312-cp312-linux_x86_64.whl
-      - pypi: git+https://github.com/Biohub/transformers.git?rev=main#ef32577f55da19a4989cd7b22e004dc43a4998cb
       - pypi: git+https://github.com/nrontsis/DockQ.git?rev=ba4df5adaad7c77fd60851d0b7b05f2b77061ba2#ba4df5adaad7c77fd60851d0b7b05f2b77061ba2
       - pypi: https://files.pythonhosted.org/packages/00/78/9cbcc1c073b9d4918e925af1a059762265dc65004e020511b2a06fbfd020/pydssp-0.9.1-py3-none-any.whl
+      - pypi: https://files.pythonhosted.org/packages/03/b8/e484ef633af3887baeeb4b6ad12743363af7cce68ae51e938e00aaa0529d/transformers-4.57.6-py3-none-any.whl
       - pypi: https://files.pythonhosted.org/packages/04/4b/29cac41a4d98d144bf5f6d33995617b185d14b22401f75ca86f384e87ff1/h11-0.16.0-py3-none-any.whl
       - pypi: https://files.pythonhosted.org/packages/14/2f/967ba146e6d58cf6a652da73885f52fc68001525b4197effc174321d70b4/jmespath-1.1.0-py3-none-any.whl
       - pypi: https://files.pythonhosted.org/packages/17/66/1ef1960ffa751df4f6ed05a76ba677e331ce451902f319d14c3f8ae81215/rdkit-2026.3.5-cp312-cp312-manylinux_2_28_x86_64.whl
@@ -9653,7 +9645,7 @@ packages:
   name: esm
   requires_dist:
   - torch>=2.11.0,<2.12.0
-  - transformers @ git+https://github.com/Biohub/transformers.git@main
+  - transformers>=4.57.6,<5.0.0
   - ipython
   - einops
   - biotite>=1.0.0
@@ -9677,11 +9669,8 @@ packages:
   - pygtrie
   - dna-features-viewer
   - accelerate
-  - dockq @ git+https://github.com/nrontsis/DockQ.git@ba4df5adaad7c77fd60851d0b7b05f2b77061ba2
   - cuequivariance-torch>=0.8.1 ; platform_machine == 'x86_64' and sys_platform == 'linux'
   - cuequivariance-ops-torch-cu13>=0.8.1 ; platform_machine == 'x86_64' and sys_platform == 'linux'
-  - xformers @ https://download.pytorch.org/whl/cu130/xformers-0.0.35-py39-none-manylinux_2_28_x86_64.whl ; platform_machine == 'x86_64' and sys_platform == 'linux'
-  - flash-attn @ https://github.com/evolutionaryscale/wheels/releases/download/py312-pt211-cu13-sm80-90/flash_attn-2.7.4.post1-cp312-cp312-linux_x86_64.whl ; platform_machine == 'x86_64' and sys_platform == 'linux' and extra == 'accel'
   requires_python: '>=3.12'
 - pypi: direct+https://download.pytorch.org/whl/cu130/xformers-0.0.35-py39-none-manylinux_2_28_x86_64.whl
   name: xformers
@@ -9697,9 +9686,28 @@ packages:
   - torch
   - einops
   requires_python: '>=3.9'
-- pypi: git+https://github.com/Biohub/transformers.git?rev=main#ef32577f55da19a4989cd7b22e004dc43a4998cb
+- pypi: git+https://github.com/nrontsis/DockQ.git?rev=ba4df5adaad7c77fd60851d0b7b05f2b77061ba2#ba4df5adaad7c77fd60851d0b7b05f2b77061ba2
+  name: dockq
+  version: 2.1.3
+  requires_dist:
+  - numpy>=2.0
+  - biopython>=1.79
+  - networkx
+  - parallelbar
+  requires_python: '>=3.10'
+- pypi: https://files.pythonhosted.org/packages/00/78/9cbcc1c073b9d4918e925af1a059762265dc65004e020511b2a06fbfd020/pydssp-0.9.1-py3-none-any.whl
+  name: pydssp
+  version: 0.9.1
+  sha256: 74fb8129c07c1625bb687b80f7e94ae7ebf1277725258d7fc75fc1f3d12a67dc
+  requires_dist:
+  - numpy
+  - torch
+  - einops
+  - tqdm
+- pypi: https://files.pythonhosted.org/packages/03/b8/e484ef633af3887baeeb4b6ad12743363af7cce68ae51e938e00aaa0529d/transformers-4.57.6-py3-none-any.whl
   name: transformers
   version: 4.57.6
+  sha256: 4c9e9de11333ddfe5114bc872c9f370509198acf0b87a832a0ab9458e2bd0550
   requires_dist:
   - filelock
   - huggingface-hub>=0.34.0,<1.0
@@ -10159,24 +10167,6 @@ packages:
   - opentelemetry-exporter-otlp ; extra == 'open-telemetry'
   - opentelemetry-sdk ; extra == 'open-telemetry'
   requires_python: '>=3.9.0'
-- pypi: git+https://github.com/nrontsis/DockQ.git?rev=ba4df5adaad7c77fd60851d0b7b05f2b77061ba2#ba4df5adaad7c77fd60851d0b7b05f2b77061ba2
-  name: dockq
-  version: 2.1.3
-  requires_dist:
-  - numpy>=2.0
-  - biopython>=1.79
-  - networkx
-  - parallelbar
-  requires_python: '>=3.10'
-- pypi: https://files.pythonhosted.org/packages/00/78/9cbcc1c073b9d4918e925af1a059762265dc65004e020511b2a06fbfd020/pydssp-0.9.1-py3-none-any.whl
-  name: pydssp
-  version: 0.9.1
-  sha256: 74fb8129c07c1625bb687b80f7e94ae7ebf1277725258d7fc75fc1f3d12a67dc
-  requires_dist:
-  - numpy
-  - torch
-  - einops
-  - tqdm
 - pypi: https://files.pythonhosted.org/packages/04/4b/29cac41a4d98d144bf5f6d33995617b185d14b22401f75ca86f384e87ff1/h11-0.16.0-py3-none-any.whl
   name: h11
   version: 0.16.0

@@ -730,9 +730,18 @@ def test_a_fresh_classification_head_is_the_only_excused_gap(
     """
     EsmcForMaskedLM(tiny_esmc_config).save_pretrained(tmp_path)
 
-    model = EsmcForSequenceClassification.from_pretrained(tmp_path, device="cpu")
+    model = EsmcForSequenceClassification.from_pretrained(
+        tmp_path, device="cpu", num_labels=7
+    )
+    assert model.num_labels == 7
+    assert model.classifier.out_proj.out_features == 7
     assert not any(p.is_meta for p in model.classifier.parameters())
     assert all(torch.isfinite(p).all() for p in model.classifier.parameters())
+
+    with pytest.raises(TypeError, match="unknown_option"):
+        EsmcForSequenceClassification.from_pretrained(
+            tmp_path, device="cpu", unknown_option=True
+        )
 
     drop_keys(tmp_path, lambda k: k.endswith("embed_tokens.weight"))
     with pytest.raises(RuntimeError, match="missing keys"):
