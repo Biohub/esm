@@ -58,10 +58,10 @@ There are two primary ways of running the ESM models: through the [**Biohub Plat
 ### Running ESMC Through Hugging Face
 <a name="running-esmc-through-hugging-face"></a>
 
-First, install `esm` from GitHub (a PyPI release is coming soon):
+First, install `esm` from PyPI:
 
 ```
-pip install esm@git+https://github.com/Biohub/esm.git@main
+pip install esm
 ```
 
 Then use the following code to run ESMC using the Transformers library via Hugging Face:
@@ -104,7 +104,7 @@ Note that our API migrated from forge.evolutionaryscale.ai to [biohub.ai](https:
 To get started with ESM, install the python library using `pip`:
 
 ```
-pip install esm@git+https://github.com/Biohub/esm.git@main
+pip install esm
 ```
 
 Then import the necessary libraries and instantiate your desired model.
@@ -147,10 +147,10 @@ Codebase, model weights, and model variants for ESMC SAEs are available through 
 
 ### Running SAEs Through Hugging Face
 
-First, install `esm` from GitHub (a PyPI release is coming soon):
+First, install `esm` from PyPI:
 
 ```
-pip install esm@git+https://github.com/Biohub/esm.git@main
+pip install esm
 ```
 
 Then use the following code to set up an ESMC SAE using the Transformers library via Hugging Face:
@@ -198,10 +198,10 @@ Codebase, model weights, and model variants for ESMFold2 are available through [
 ### Running ESMFold2 Through Hugging Face
 <a name="running-esmfold2-through-hugging-face"></a>
 
-First, install `esm` from GitHub (a PyPI release is coming soon):
+First, install `esm` from PyPI:
 
 ```
-pip install esm@git+https://github.com/Biohub/esm.git@main
+pip install esm
 ```
 
 Then use the following code to run ESMFold2 locally using the Transformers library via Hugging Face:
@@ -261,7 +261,7 @@ with open("1mht_pred.cif", "w") as f:
 Install the `esm` Python package
 
 ```
-pip install esm@git+https://github.com/Biohub/esm.git@main
+pip install esm
 ```
 
 Import the necessary libraries.
