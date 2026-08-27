@@ -9681,7 +9681,7 @@ packages:
   - cuequivariance-torch>=0.8.1 ; platform_machine == 'x86_64' and sys_platform == 'linux'
   - cuequivariance-ops-torch-cu13>=0.8.1 ; platform_machine == 'x86_64' and sys_platform == 'linux'
   - xformers @ https://download.pytorch.org/whl/cu130/xformers-0.0.35-py39-none-manylinux_2_28_x86_64.whl ; platform_machine == 'x86_64' and sys_platform == 'linux'
-  - flash-attn @ https://github.com/evolutionaryscale/wheels/releases/download/py312-pt211-cu13-sm80-90/flash_attn-2.7.4.post1-cp312-cp312-linux_x86_64.whl ; python_full_version == '3.12.*' and platform_machine == 'x86_64' and sys_platform == 'linux' and extra == 'accel'
+  - flash-attn @ https://github.com/evolutionaryscale/wheels/releases/download/py312-pt211-cu13-sm80-90/flash_attn-2.7.4.post1-cp312-cp312-linux_x86_64.whl ; platform_machine == 'x86_64' and sys_platform == 'linux' and extra == 'accel'
   requires_python: '>=3.12'
 - pypi: direct+https://download.pytorch.org/whl/cu130/xformers-0.0.35-py39-none-manylinux_2_28_x86_64.whl
   name: xformers
