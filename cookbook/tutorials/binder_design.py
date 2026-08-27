@@ -30,25 +30,8 @@ import numpy as np
 import torch
 import torch.nn.functional as F
 import torch.optim as optim
-from transformers.models.esmc.modeling_esmc import ESMCForMaskedLM
-from transformers.models.esmc.tokenization_esmc import ESMCTokenizer
-from transformers.models.esmfold2.modeling_esmfold2_common import (
-    BACKEND_CUEQ,
-    BACKEND_FUSED,
-    CUE_AVAILABLE,
-    TRITON_KERNELS_AVAILABLE,
-    PairUpdateBlock,
-)
-from transformers.models.esmfold2.modeling_esmfold2_common import (
-    _seed_context as seed_context,
-)
-from transformers.models.esmfold2.modeling_esmfold2_experimental import (
-    ESMFold2ExperimentalModel,
-)
-from transformers.models.esmfold2.modeling_esmfold2_experimental import (
-    MSAEncoder as ESMFold2MSAEncoder,
-)
 
+from esm.models.esmc import EsmcForMaskedLM, EsmcTokenizer
 from esm.models.esmfold2 import (
     ELEMENT_NUMBER_TO_SYMBOL,
     ProteinInput,
@@ -62,6 +45,16 @@ from esm.models.esmfold2.constants import (
     PROTEIN_3TO1,
     RES_TYPE_TO_CCD,
 )
+from esm.models.esmfold2.experimental import EsmFold2ExperimentalModel
+from esm.models.esmfold2.experimental import MSAEncoder as EsmFold2MSAEncoder
+from esm.models.esmfold2.layers import (
+    BACKEND_CUEQ,
+    BACKEND_FUSED,
+    CUE_AVAILABLE,
+    TRITON_KERNELS_AVAILABLE,
+    PairUpdateBlock,
+)
+from esm.models.esmfold2.layers import _seed_context as seed_context
 from esm.utils.structure.mmcif_parsing import PLDDT_B_FACTOR_SCALE
 from esm.utils.structure.protein_chain import ProteinChain
 from esm.utils.structure.protein_complex import ProteinComplex
@@ -663,7 +656,7 @@ def prepare_esmfold2_tensors(
 
 
 def fold_and_get_distogram(
-    model: ESMFold2ExperimentalModel,
+    model: EsmFold2ExperimentalModel,
     target_seq: str,
     target_one_hot: torch.Tensor,
     design: torch.Tensor,
@@ -829,7 +822,7 @@ def _folding_trunk_to_lm_aa_vocab_matrix(device: torch.device) -> torch.Tensor:
     three_to_one_map = {v: k for k, v in PROTEIN_1TO3.items()}
     ft_aas = [three_to_one_map[tok_3letter] for tok_3letter in TOKENS[2:22]]
 
-    lm_vocab = sorted(ESMCTokenizer().vocab.items(), key=lambda x: x[1])
+    lm_vocab = sorted(EsmcTokenizer().vocab.items(), key=lambda x: x[1])
     lm_aas = [lm_vocab[i][0] for i in range(4, 24)]
 
     ft_to_lm_aa_matrix = torch.zeros(20, 20)
@@ -851,7 +844,7 @@ def _straight_through(discrete: torch.Tensor, continuous: torch.Tensor) -> torch
 
 
 def compute_esmc_pseudoperplexity_nll(
-    esmc_model: ESMCForMaskedLM,
+    esmc_model: EsmcForMaskedLM,
     binder_design: torch.Tensor,
     score_mask: torch.Tensor,
     batch_size: int = 4,
@@ -871,7 +864,7 @@ def compute_esmc_pseudoperplexity_nll(
         dtype=model_dtype,
         device=device,
     )
-    tokenizer = ESMCTokenizer()
+    tokenizer = EsmcTokenizer()
     input_ids[:, 0, tokenizer.cls_token_id] = 1  # pyright: ignore
     input_ids[:, -1, tokenizer.eos_token_id] = 1  # pyright: ignore
     input_ids[:, 1:-1, 4:24] = input_esm.to(model_dtype)
@@ -964,9 +957,9 @@ def normalized_gradient_tensor(
 
 
 def design_binder(
-    inversion_models: dict[str, ESMFold2ExperimentalModel],
-    hf_critic_models: dict[str, ESMFold2ExperimentalModel],
-    esmc_model: ESMCForMaskedLM,
+    inversion_models: dict[str, EsmFold2ExperimentalModel],
+    hf_critic_models: dict[str, EsmFold2ExperimentalModel],
+    esmc_model: EsmcForMaskedLM,
     scaling_critic_names: list[str] | None,
     target_name: str,
     target_sequence: str | None,
@@ -1153,7 +1146,7 @@ def design_binder(
 
     def score_critic(
         critic_name: str,
-        critic_model: ESMFold2ExperimentalModel,
+        critic_model: EsmFold2ExperimentalModel,
         batch_idx: int,
         is_scaling_critic: bool,
     ) -> None:
@@ -1235,7 +1228,7 @@ def _load_hf_model(
     """Loads ESMFold2 from huggingface. Will cache ESMC by checkpoint ID among
     all non-scaling checkpoints, to save on VRAM and load time."""
     repo_id = f"biohub/{critic_name}"
-    model = ESMFold2ExperimentalModel.from_pretrained(repo_id, load_esmc=not cache_esmc)
+    model = EsmFold2ExperimentalModel.from_pretrained(repo_id, load_esmc=not cache_esmc)
     if cache_esmc:
         esmc_id = model.config.esmc_id
         if esmc_id not in _ESMC_CACHE:
@@ -1258,7 +1251,7 @@ def _apply_torch_compile(model: torch.nn.Module) -> None:
     torch._dynamo.config.cache_size_limit = 512
     torch._dynamo.config.accumulated_cache_size_limit = 512
 
-    compile_targets = (ESMFold2MSAEncoder, PairUpdateBlock)
+    compile_targets = (EsmFold2MSAEncoder, PairUpdateBlock)
 
     def _maybe_compile_module(module: torch.nn.Module) -> None:
         if not isinstance(module, compile_targets):
@@ -1307,8 +1300,8 @@ class ESMFold2Design:
                 name, lm_dropout=0.25, cache_esmc=True, device="cuda"
             )
 
-        self.esmc_model = ESMCForMaskedLM.from_pretrained(
-            self.lm_name, torch_dtype=torch.float32
+        self.esmc_model = EsmcForMaskedLM.from_pretrained(
+            self.lm_name, dtype=torch.float32
         )
         if REUSE_ESMC:
             reusable_esmc_model = self.inversion_models["ESMFold2-Experimental-Fast"]
