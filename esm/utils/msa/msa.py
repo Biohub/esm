@@ -17,16 +17,25 @@ from esm.utils.parsing import FastaEntry, read_sequences, write_sequences
 from esm.utils.sequential_dataclass import SequentialDataclass
 from esm.utils.system import PathOrBuffer
 
-REMOVE_LOWERCASE_TRANSLATION = str.maketrans(dict.fromkeys(string.ascii_lowercase))
+REMOVE_A3M_INSERTION_TRANSLATION = str.maketrans(
+    dict.fromkeys(string.ascii_lowercase + ".")
+)
 
 
 def remove_insertions_from_sequence(seq: str) -> str:
-    return seq.translate(REMOVE_LOWERCASE_TRANSLATION)
+    return seq.translate(REMOVE_A3M_INSERTION_TRANSLATION)
 
 
 def is_a3m_insertion(ch: str) -> bool:
     """True for an a3m insertion character (a lowercase letter or ``.``)."""
     return ch == "." or ch.islower()
+
+
+def _as_index(indices: Sequence[int] | np.ndarray | slice) -> np.ndarray | slice:
+    """Indices numpy will accept, so an empty selection still indexes."""
+    if isinstance(indices, slice):
+        return indices
+    return np.asarray(indices, dtype=int)
 
 
 def a3m_deletion_counts(seq: str) -> np.ndarray:
@@ -246,7 +255,8 @@ class MSA(SequentialDataclass):
 
     @property
     def seqlen(self) -> int:
-        return len(self.entries[0].sequence)
+        # 0 for an empty alignment, matching `depth`
+        return len(self.entries[0].sequence) if self.entries else 0
 
     @cached_property
     def array(self) -> np.ndarray:
@@ -261,7 +271,11 @@ class MSA(SequentialDataclass):
 
         Misalignment means the sequences still carry insertions (length !=
         match-column count), so the stored deletions no longer describe them."""
-        if self.deletions is None or self.deletions.shape != (self.depth, self.seqlen):
+        if self.deletions is None:
+            return None
+        if self.depth == 0:
+            return self.deletions if self.deletions.shape[0] == 0 else None
+        if self.deletions.shape != (self.depth, self.seqlen):
             return None
         return self.deletions
 
@@ -269,15 +283,17 @@ class MSA(SequentialDataclass):
         """Column-subselect ``deletions`` to match a position subselect, or None
         when ``deletions`` is not column-aligned with the sequences (e.g. the
         sequences still carry insertions, so length != match-column count)."""
-        if self.deletions is None or self.deletions.shape[1] != self.seqlen:
+        if self.deletions is None:
             return None
-        return self.deletions[:, indices]
+        if self.depth > 0 and self.deletions.shape[1] != self.seqlen:
+            return None
+        return self.deletions[:, _as_index(indices)]
 
     def select_sequences(self, indices: Sequence[int] | np.ndarray) -> MSA:
         """Subselect rows of the MSA."""
         entries = [self.entries[idx] for idx in indices]
         deletions = (
-            None if self.deletions is None else self.deletions[np.asarray(indices)]
+            None if self.deletions is None else self.deletions[_as_index(indices)]
         )
         return dataclasses.replace(self, entries=entries, deletions=deletions)
 

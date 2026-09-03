@@ -1,3 +1,4 @@
+import math
 from functools import cached_property
 
 import torch
@@ -76,6 +77,12 @@ class SASADiscretizingTokenizer(EsmTokenizerBase):
             ids.append(self.vocab_to_index["<pad>"])  # BOS
         for value in values:
             if isinstance(value, (float, int)):
+                if math.isnan(value):
+                    # torch.bucketize would silently bin NaN into the top SASA range.
+                    raise ValueError(
+                        "Cannot tokenize NaN SASA value. Use None or "
+                        f"'{self.mask_token}' to mask a position."
+                    )
                 bucket = torch.bucketize(value, torch.tensor(self._boundaries))
                 token_id = len(self.special_tokens) + bucket
             elif isinstance(value, str):
@@ -88,13 +95,21 @@ class SASADiscretizingTokenizer(EsmTokenizerBase):
 
         return torch.tensor(ids, dtype=torch.int64)
 
-    def decode_float(self, encoded: torch.Tensor) -> list[float]:
-        """Decodes SASA token ids into float values."""
-        decoded = self.midpoints_tensor[encoded.cpu()]
-        nan_mask = torch.isnan(decoded)
-        np_arr = decoded.numpy()
-        np_arr[nan_mask.numpy()] = None
-        return np_arr.tolist()
+    def decode_float(self, encoded: torch.Tensor) -> list[float | str | None]:
+        """Decodes SASA token ids into range midpoints.
+
+        Special tokens have no midpoint: `<pad>` decodes to None and the others to
+        their vocab string, so that the result re-encodes to the tokens it came from.
+        """
+        decoded: list[float | str | None] = []
+        for token_id in encoded.cpu().tolist():
+            if token_id == self.mask_token_id:
+                decoded.append(None)
+            elif token_id < len(self.special_tokens):
+                decoded.append(self.vocab[token_id])
+            else:
+                decoded.append(self.midpoints_tensor[token_id].item())
+        return decoded
 
     def decode(self, encoded: torch.Tensor) -> str:
         """Decodes SASA token ids."""

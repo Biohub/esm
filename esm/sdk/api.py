@@ -28,7 +28,7 @@ class ESMProtein(ProteinType):
     # Tracks
     sequence: str | None = None
     secondary_structure: str | None = None
-    sasa: list[float | None] | None = None
+    sasa: list[float | str | None] | None = None
     function_annotations: list[FunctionAnnotation] | None = None
     coordinates: torch.Tensor | None = None
 

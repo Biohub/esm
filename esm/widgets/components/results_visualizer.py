@@ -194,7 +194,7 @@ def create_sasa_results_page(
             if item.sasa is None:
                 print("Solvent Accessible Surface Area (SASA) is not available.")
             else:
-                sasa = [s or 0 for s in item.sasa]
+                sasa = [s if isinstance(s, (int, float)) else 0 for s in item.sasa]
                 draw_data_array(output, data_array=sasa, cmap="Reds")
 
         if copy_to_prompt_callback:

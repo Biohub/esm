@@ -248,6 +248,10 @@ class EsmFold2AtomEncoderConfig:
 
     hidden_size: int = 128
     output_dim: int = 768
+    # Pre-halving token width; wins over ``output_dim`` when the checkpoint
+    # states it, which is how a config can serve this and the transformers port
+    # at once. Absent, ``output_dim`` reads exactly as before.
+    token_hidden_size: int | None = None
     num_hidden_layers: int = 3
     num_attention_heads: int = 4
     expansion_ratio: int = 2

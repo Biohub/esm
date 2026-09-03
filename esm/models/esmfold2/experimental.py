@@ -654,7 +654,9 @@ class EsmFold2ExperimentalModel(HubPreTrainedModel):
         """
         from esm.models.esmc import EsmcModel
 
-        self.esmc = EsmcModel.from_pretrained(esmc_model_path)
+        self.esmc = EsmcModel.from_pretrained(
+            esmc_model_path, device=self.device, dtype=torch.bfloat16
+        )
         self.finalize_esmc()
 
     def finalize_esmc(self) -> None:
@@ -890,6 +892,7 @@ class EsmFold2ExperimentalModel(HubPreTrainedModel):
         max_inference_sigma: float | None = 256.0,
         seed: int | None = None,
         provide_soft_sequence_to_msa_and_profile: bool = True,
+        include_embeddings: bool = False,
         **unused_features: Tensor,
     ) -> dict[str, Tensor]:
         """Full ESMFold2 inference pipeline.
@@ -1115,6 +1118,12 @@ class EsmFold2ExperimentalModel(HubPreTrainedModel):
             # 6. Distogram (inside the trunk autocast so z stays bf16)
             distogram_logits = self.distogram_head(z + z.transpose(-2, -3))
 
+        embeddings: dict[str, Tensor] = {}
+        if include_embeddings:
+            embeddings["output_embedding_pair_pooled"] = z.detach().mean(
+                dim=1, dtype=torch.float32
+            )
+
         # 7. Diffusion sampling (always no_grad; optional seed for parity)
         with torch.no_grad(), _seed_context(seed):
             structure_output = self.structure_head.sample(
@@ -1171,6 +1180,7 @@ class EsmFold2ExperimentalModel(HubPreTrainedModel):
             )
             output["residue_index"] = residue_index
             output["entity_id"] = entity_id
+            output.update(embeddings)
 
             return output
 

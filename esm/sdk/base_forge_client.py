@@ -1,6 +1,7 @@
 import asyncio
 import time
 from abc import ABC, abstractmethod
+from collections.abc import Iterator
 from contextlib import suppress
 from typing import Any, Generic, Literal, TypeVar, overload
 from urllib.parse import urljoin
@@ -10,6 +11,42 @@ import httpx
 from esm.sdk.api import ESMProteinError
 from esm.sdk.retry import retry_decorator
 from esm.utils.decoding import assemble_message
+
+POLL_BACKOFF_FACTOR = 2.0
+POLLS_PER_INTERVAL = 3
+DEFAULT_POLL_INTERVAL = 2
+
+
+def _check_polling(interval: int | None, ceiling: int | None) -> None:
+    """Reject a pair one caller supplied that cannot both be honored."""
+    if interval is not None and ceiling is not None and ceiling < interval:
+        raise ValueError(
+            f"poll_max_interval ({ceiling}) is below poll_interval ({interval}); the "
+            "backoff ceiling cannot be lower than the interval it grows from"
+        )
+
+
+def _resolve_polling(
+    intervals: tuple[int | None, ...], ceilings: tuple[int | None, ...]
+) -> tuple[int, int]:
+    """Settle the poll interval and its backoff ceiling, most specific preference first."""
+    interval = next((v for v in intervals if v is not None), DEFAULT_POLL_INTERVAL)
+    ceiling = next((v for v in ceilings if v is not None), interval)
+    return interval, max(interval, ceiling)
+
+
+def _poll_intervals(initial: float, maximum: float | None = None) -> Iterator[float]:
+    """Staircased exponential polling backoff.
+
+    Poll at `initial` for `POLLS_PER_INTERVAL` times, then multiply the interval by
+    `POLL_BACKOFF_FACTOR` and repeat, up to `maximum`.
+    """
+    ceiling = initial if maximum is None else maximum
+    interval = min(initial, ceiling)
+    while True:
+        for _ in range(POLLS_PER_INTERVAL):
+            yield interval
+        interval = min(interval * POLL_BACKOFF_FACTOR, ceiling)
 
 
 class _BaseForgeInferenceClient:
@@ -131,6 +168,13 @@ class _BaseForgeInferenceClient:
             return data
         except ESMProteinError as e:
             raise e
+        except (TypeError, ValueError) as e:
+            # Serializing the request or parsing the reply failed deterministically.
+            # 500 would be retried
+            raise ESMProteinError(
+                error_code=400,
+                error_msg=f"Failed to submit request to {endpoint}. Error: {str(e)}",
+            )
         except Exception as e:
             raise ESMProteinError(
                 error_code=500,
@@ -162,6 +206,13 @@ class _BaseForgeInferenceClient:
             return data
         except ESMProteinError as e:
             raise e
+        except (TypeError, ValueError) as e:
+            # Serializing the request or parsing the reply failed deterministically.
+            # 500 would be retried
+            raise ESMProteinError(
+                error_code=400,
+                error_msg=f"Failed to submit request to {endpoint}. Error: {str(e)}",
+            )
         except Exception as e:
             raise ESMProteinError(
                 error_code=500,
@@ -182,7 +233,8 @@ class _BaseForgeBatchClient(_BaseForgeInferenceClient):
         min_retry_wait: int = 1,
         max_retry_wait: int = 10,
         max_retry_attempts: int = 5,
-        poll_interval: int = 2,
+        poll_interval: int | None = None,
+        poll_max_interval: int | None = None,
         transfer_timeout: int | None = 60,
     ):
         super().__init__(
@@ -194,8 +246,9 @@ class _BaseForgeBatchClient(_BaseForgeInferenceClient):
             max_retry_wait=max_retry_wait,
             max_retry_attempts=max_retry_attempts,
         )
-        # How often to poll for status
+        _check_polling(poll_interval, poll_max_interval)
         self.poll_interval = poll_interval
+        self.poll_max_interval = poll_max_interval
         # Separate (longer) timeout for the payload-sized transfers (submit upload +
         # S3 result download)
         self.transfer_timeout = transfer_timeout
@@ -243,12 +296,22 @@ class _BaseForgeBatchClient(_BaseForgeInferenceClient):
         return await self._async_post("batch/status", {"task_id": task_id})
 
     def wait_for_completion(
-        self, task_id: str, timeout: int, poll_interval: int | None = None
+        self,
+        task_id: str,
+        timeout: int,
+        poll_interval: int | None = None,
+        poll_max_interval: int | None = None,
     ) -> dict:
-        start_time = time.time()
-        interval = poll_interval if poll_interval is not None else self.poll_interval
+        _check_polling(poll_interval, poll_max_interval)
+        deadline = time.monotonic() + timeout
+        intervals = _poll_intervals(
+            *_resolve_polling(
+                (poll_interval, self.poll_interval),
+                (poll_max_interval, self.poll_max_interval),
+            )
+        )
 
-        while time.time() - start_time < timeout:
+        while True:
             response = self.get_status(task_id)
             job_status = response.get("status")
             if job_status == "done":
@@ -262,7 +325,10 @@ class _BaseForgeBatchClient(_BaseForgeInferenceClient):
                     error_code=500,
                     error_msg=f"Job {task_id} failed with error: '{response.get('error')}'.",
                 )
-            time.sleep(interval)
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                break
+            time.sleep(min(next(intervals), remaining))
 
         raise ESMProteinError(
             error_code=500,
@@ -270,12 +336,22 @@ class _BaseForgeBatchClient(_BaseForgeInferenceClient):
         )
 
     async def async_wait_for_completion(
-        self, task_id: str, timeout: int, poll_interval: int | None = None
+        self,
+        task_id: str,
+        timeout: int,
+        poll_interval: int | None = None,
+        poll_max_interval: int | None = None,
     ) -> dict:
-        start_time = time.time()
-        interval = poll_interval if poll_interval is not None else self.poll_interval
+        _check_polling(poll_interval, poll_max_interval)
+        deadline = time.monotonic() + timeout
+        intervals = _poll_intervals(
+            *_resolve_polling(
+                (poll_interval, self.poll_interval),
+                (poll_max_interval, self.poll_max_interval),
+            )
+        )
 
-        while time.time() - start_time < timeout:
+        while True:
             response = await self.async_get_status(task_id)
             job_status = response.get("status")
             if job_status == "done":
@@ -289,7 +365,10 @@ class _BaseForgeBatchClient(_BaseForgeInferenceClient):
                     error_code=500,
                     error_msg=f"Job {task_id} failed with error: '{response.get('error')}'.",
                 )
-            await asyncio.sleep(interval)
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                break
+            await asyncio.sleep(min(next(intervals), remaining))
 
         raise ESMProteinError(
             error_code=500,
@@ -358,12 +437,27 @@ TResponse = TypeVar("TResponse")
 
 class EndpointHandler(ABC, Generic[TResponse]):
     poll_interval: int | None = None
+    poll_max_interval: int = 30
+    default_timeout: int = 30 * 60  # 30 minutes
 
     def __init__(self, batch_client: _BaseForgeBatchClient):
         self._batch_client = batch_client
         self.min_retry_wait = batch_client.min_retry_wait
         self.max_retry_wait = batch_client.max_retry_wait
         self.max_retry_attempts = batch_client.max_retry_attempts
+
+    def _resolved_polling(
+        self, poll_interval: int | None = None, poll_max_interval: int | None = None
+    ) -> tuple[int, int]:
+        _check_polling(poll_interval, poll_max_interval)
+        return _resolve_polling(
+            (poll_interval, self._batch_client.poll_interval, self.poll_interval),
+            (
+                poll_max_interval,
+                self._batch_client.poll_max_interval,
+                self.poll_max_interval,
+            ),
+        )
 
     @property
     @abstractmethod
@@ -383,25 +477,36 @@ class EndpointHandler(ABC, Generic[TResponse]):
         pass
 
     def run(
-        self, timeout: int = 300, cancel_on_timeout: bool = True, **kwargs
+        self,
+        timeout: int | None = None,
+        cancel_on_timeout: bool = True,
+        poll_interval: int | None = None,
+        poll_max_interval: int | None = None,
+        **kwargs,
     ) -> TResponse | ESMProteinError:
         """
         Submit and execute a batch job, waiting for completion by polling the status of the job.
         Args:
             timeout: Maximum time to wait for job completion, in seconds.
+            poll_interval: Seconds between status polls
+            poll_max_interval: Ceiling the backoff may grow `poll_interval` to.
             cancel_on_timeout: If True, cancels the batch job if it times out or is interrupted.
             **kwargs: Arguments to pass to the batch job.
         Returns:
             The response from the batch job or an ESMProteinError if the job fails.
         """
+        timeout = self.default_timeout if timeout is None else timeout
         task_id = None
         task_timed_out = False
         keyboard_interrupted = False
+        interval, max_interval = self._resolved_polling(
+            poll_interval, poll_max_interval
+        )
         try:
             request = self._prepare_request(**kwargs)
             task_id = self._batch_client.submit(self.endpoint_name, request)
             response = self._batch_client.wait_for_completion(
-                task_id, timeout, poll_interval=self.poll_interval
+                task_id, timeout, poll_interval=interval, poll_max_interval=max_interval
             )
             return self._process_response(response, **kwargs)
         except KeyboardInterrupt:
@@ -424,16 +529,25 @@ class EndpointHandler(ABC, Generic[TResponse]):
                         self._batch_client.cancel(task_id)
 
     async def async_run(
-        self, timeout: int = 300, cancel_on_timeout: bool = True, **kwargs
+        self,
+        timeout: int | None = None,
+        cancel_on_timeout: bool = True,
+        poll_interval: int | None = None,
+        poll_max_interval: int | None = None,
+        **kwargs,
     ) -> TResponse | ESMProteinError:
+        timeout = self.default_timeout if timeout is None else timeout
         task_id = None
         task_timed_out = False
         keyboard_interrupted = False
+        interval, max_interval = self._resolved_polling(
+            poll_interval, poll_max_interval
+        )
         try:
             request = self._prepare_request(**kwargs)
             task_id = await self._batch_client.async_submit(self.endpoint_name, request)
             response = await self._batch_client.async_wait_for_completion(
-                task_id, timeout, poll_interval=self.poll_interval
+                task_id, timeout, poll_interval=interval, poll_max_interval=max_interval
             )
             return await self._async_process_response(response, **kwargs)
         except KeyboardInterrupt:

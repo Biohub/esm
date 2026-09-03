@@ -31,6 +31,7 @@ F_TYPE = "Type of Request"
 F_DATE = "Submission Date"
 F_PRODUCT = "Tool or Product"
 F_SOURCE = "Issue Source"
+F_TITLE = "Issue Title"
 F_DESCRIPTION = "Issue Description"
 F_GITHUB_ID = "Github Username"
 F_ORIGINAL_Q = "Original Q Location"
@@ -342,7 +343,8 @@ def build_row(schema, existing, issue, repo_full_name, action):
     row.own(F_GITHUB_ID, login)
 
     row.fill(F_DATE, issue.get("created_at"))
-    row.fill(F_DESCRIPTION, truncate(f"{title}\n\n{body}", url))
+    row.fill(F_TITLE, title)
+    row.fill(F_DESCRIPTION, truncate(body, url))
     row.fill(F_DETAILS, details_block(issue, repo_full_name))
     row.fill(F_TYPE, request_types(issue))
     row.fill(F_PRODUCT, products(issue))

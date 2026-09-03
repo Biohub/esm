@@ -36,6 +36,7 @@ from esm.sdk.base_forge_client import (
 )
 from esm.sdk.retry import retry_decorator
 from esm.sdk.validation import validate_fold_max_accuracy_input
+from esm.utils.compression import compress_state_dict
 from esm.utils.constants.api import MIMETYPE_ES_PICKLE
 from esm.utils.constants.models import (
     DEFAULT_ESMFOLD2_FAST_LM_MASK_PCT,
@@ -168,14 +169,12 @@ class SequenceStructureForgeInferenceClient(_BaseForgeInferenceClient):
                     stacklevel=4,
                 )
             elif len(msa.sequences) > ESMFOLD2_MAX_MSA_SEQS:
-                warnings.warn(
+                raise ValueError(
                     f"MSA depth ({len(msa.sequences)}) exceeds the maximum of "
-                    f"{ESMFOLD2_MAX_MSA_SEQS}. The MSA will be truncated to "
-                    f"{ESMFOLD2_MAX_MSA_SEQS} sequences by the server.",
-                    UserWarning,
-                    stacklevel=4,
+                    f"{ESMFOLD2_MAX_MSA_SEQS}. Truncate the alignment using "
+                    "`select_sequences` before submitting."
                 )
-            request["msa"] = msa.state_dict(json_serializable=True)
+            request["msa"] = compress_state_dict(msa)
         else:
             error_msg = f"MSA must be None or MSA. Got {msa} instead."
             raise AttributeError(error_msg)
@@ -403,12 +402,10 @@ class SequenceStructureForgeInferenceClient(_BaseForgeInferenceClient):
                 and len(seq.msa.sequences) > ESMFOLD2_MAX_MSA_SEQS
             ):
                 chain_id = seq.id if seq.id is not None else "unknown"
-                warnings.warn(
+                raise ValueError(
                     f"MSA depth ({len(seq.msa.sequences)}) for chain '{chain_id}' "
-                    f"exceeds the maximum of {ESMFOLD2_MAX_MSA_SEQS}. The MSA will "
-                    f"be truncated to {ESMFOLD2_MAX_MSA_SEQS} sequences by the server.",
-                    UserWarning,
-                    stacklevel=4,
+                    f"exceeds the maximum of {ESMFOLD2_MAX_MSA_SEQS}. Truncate the "
+                    "alignment using `select_sequences` before submitting."
                 )
 
         request: dict[str, Any] = {
@@ -1392,6 +1389,8 @@ class FoldMaxAccuracyHandler(EndpointHandler[MolecularComplexResult]):
     """Fold a molecular complex at the highest-accuracy settings."""
 
     poll_interval = 10
+    poll_max_interval = 60
+    default_timeout = 2 * 60 * 60  # 2 hours
 
     def __init__(self, batch_client: _BaseForgeBatchClient):
         super().__init__(batch_client)
@@ -1438,7 +1437,8 @@ class ForgeBatchClient:
         token: str = "",
         request_timeout: int | None = 15,
         model: str | None = None,
-        poll_interval: int = 2,
+        poll_interval: int | None = None,
+        poll_max_interval: int | None = None,
         min_retry_wait: int = 2,
         max_retry_wait: int = 2,
         max_retry_attempts: int = 5,
@@ -1452,6 +1452,7 @@ class ForgeBatchClient:
             max_retry_wait=max_retry_wait,
             max_retry_attempts=max_retry_attempts,
             poll_interval=poll_interval,
+            poll_max_interval=poll_max_interval,
             transfer_timeout=transfer_timeout,
         )
         self.model = model

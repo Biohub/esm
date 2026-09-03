@@ -2,7 +2,7 @@
 # requires-python = "<=3.13"
 # dependencies = [
 #     "abnumber",
-#     "esm@git+https://github.com/Biohub/esm.git@main",
+#     "esm",
 #     "modal",
 # ]
 # ///
@@ -648,6 +648,9 @@ def prepare_esmfold2_tensors(
     del max_tokens, max_seqs, pad_to_max_seqs, use_vectorized_msa_assembly
     _ensure_ccd_loaded()
     features, _ = prepare_esmfold2_input(input, seed=seed)
+    # Distogram conditioning is unimplemented, so forward() rejects these.
+    features.pop("disto_cond", None)
+    features.pop("disto_cond_mask", None)
     if max_atoms is not None:
         for key, dim in _ATOM_FEATURE_DIMS.items():
             if key in features:
@@ -705,7 +708,6 @@ def fold_and_get_distogram(
             num_diffusion_samples=1,
             num_sampling_steps=num_sampling_steps,
             num_loops=num_loops,
-            calculate_confidence=calculate_confidence,
             seed=seed,
         )
 
@@ -1233,9 +1235,9 @@ def _load_hf_model(
         esmc_id = model.config.esmc_id
         if esmc_id not in _ESMC_CACHE:
             model.load_esmc(esmc_id)
-            assert model._esmc is not None
-            _ESMC_CACHE[esmc_id] = model._esmc
-        model._esmc = _ESMC_CACHE[esmc_id]
+            assert model.esmc is not None
+            _ESMC_CACHE[esmc_id] = model.esmc
+        model.esmc = _ESMC_CACHE[esmc_id]
     model.configure_lm_dropout(lm_dropout, force_lm_dropout_during_inference=True)
     kernel_backend = None
     if TRITON_KERNELS_AVAILABLE:
@@ -1309,10 +1311,10 @@ class ESMFold2Design:
                 f"Cannot reuse ESMC trunk from {reusable_esmc_model.config.esmc_id!r} "
                 f"with LM head from {self.lm_name!r}."
             )
-            assert reusable_esmc_model._esmc is not None
+            assert reusable_esmc_model.esmc is not None
             del self.esmc_model.esmc
             torch.cuda.empty_cache()
-            self.esmc_model.esmc = reusable_esmc_model._esmc
+            self.esmc_model.esmc = reusable_esmc_model.esmc
         self.esmc_model = self.esmc_model.cuda().eval().requires_grad_(False)
 
     def design(
@@ -1386,9 +1388,7 @@ def get_base_image():
                 "NVTE_FRAMEWORK": "pytorch",
             },
         )
-        .pip_install(
-            "abnumber", "esm@git+https://github.com/Biohub/esm.git@main", "modal"
-        )
+        .pip_install("abnumber", "esm", "modal")
         .env(
             {
                 "HF_HOME": "/models",

@@ -104,6 +104,19 @@ def test_slicing_carries_deletions(tmp_path):
     np.testing.assert_array_equal(by_slice, _EXPECTED_DELETIONS[:, 1:])
 
 
+def test_an_empty_selection_is_allowed_once_deletions_are_set(tmp_path):
+    msa = _a3m_msa(tmp_path)
+    assert msa.deletions is not None
+
+    empty = msa.select_sequences([])
+
+    assert empty.sequences == []
+    assert empty.depth == 0
+    # 0 rather than an IndexError off entries[0]; the column subselect below reads it.
+    assert empty.seqlen == 0
+    assert empty.select_positions([0, 1]).sequences == []
+
+
 def test_sliced_deletions_flow_through_featurization(tmp_path):
     """A per-chain column subselect (as chainbreak splitting does) keeps deletions,
     so featurizing the sliced MSA yields the sliced counts, not zeros."""

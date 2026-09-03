@@ -200,8 +200,9 @@ class HubPreTrainedModel(nn.Module):
             )
 
         model._materialize_uninitialized(device="cpu")
-        model.to(device)
+        del raw, adapted
         if dtype is not None:
             model.to(dtype)
+        model.to(device)
         model.eval()
         return model
