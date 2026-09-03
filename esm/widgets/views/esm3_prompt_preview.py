@@ -1,3 +1,5 @@
+from collections.abc import Sequence
+
 import torch
 from ipywidgets import widgets
 
@@ -21,7 +23,7 @@ def coordinates_to_text(coordinates: torch.Tensor | None) -> str:
     return "".join(coordinates_text)
 
 
-def sasa_to_text(sasa: list[int | float | None] | None) -> str:
+def sasa_to_text(sasa: Sequence[int | float | str | None] | None) -> str:
     if sasa is None:
         return ""
 
@@ -36,14 +38,17 @@ def sasa_to_text(sasa: list[int | float | None] | None) -> str:
     return ",".join(sasa_text)
 
 
-def text_to_sasa(sasa_text: str) -> list[int | float | None] | None:
+def text_to_sasa(sasa_text: str) -> list[int | float | str | None] | None:
     if not sasa_text:
         return None
 
-    sasa = []
+    sasa: list[int | float | str | None] = []
     for value in sasa_text.split(","):
         if value == MASK_STR_SHORT:
             sasa.append(None)
+        elif value.startswith("<"):
+            # A SASA vocab token such as "<motif>"; the tokenizer validates it.
+            sasa.append(value)
         else:
             sasa.append(float(value))
 

@@ -101,7 +101,7 @@ def decode_protein_tensor(
     return ESMProtein(
         sequence=sequence,
         secondary_structure=secondary_structure,
-        sasa=sasa,  # type: ignore
+        sasa=sasa,
         function_annotations=function_annotations if function_annotations else None,
         coordinates=coordinates,
         plddt=plddt,
@@ -175,12 +175,15 @@ def decode_secondary_structure(
     _bos_eos_warn("Secondary structure", secondary_structure_tokens, ss_tokenizer)
     secondary_structure_tokens = secondary_structure_tokens[1:-1]
     secondary_structure = ss_tokenizer.decode(secondary_structure_tokens)
+    secondary_structure = secondary_structure.replace(
+        ss_tokenizer.mask_token, C.MASK_STR_SHORT
+    )
     return secondary_structure
 
 
 def decode_sasa(
     sasa_tokens: torch.Tensor, sasa_tokenizer: SASADiscretizingTokenizer
-) -> list[float]:
+) -> list[float | str | None]:
     if sasa_tokens[0] != 0:
         raise ValueError("SASA does not start with 0 corresponding to BOS token")
     if sasa_tokens[-1] != 0:
@@ -194,11 +197,13 @@ def decode_sasa(
         torch.long,
     ]:
         # Decode if int
-        # handles turning NaN's into None's
+        # handles turning special tokens into None's / vocab strings
         sasa = sasa_tokenizer.decode_float(sasa_tokens)
     else:
         # If already float, just convert to list
-        sasa = cast(list[float], maybe_list(sasa_tokens, convert_nan_to_none=True))
+        sasa = cast(
+            list[float | str | None], maybe_list(sasa_tokens, convert_nan_to_none=True)
+        )
 
     return sasa
 

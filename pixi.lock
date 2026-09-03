@@ -9671,6 +9671,12 @@ packages:
   - accelerate
   - cuequivariance-torch>=0.8.1 ; platform_machine == 'x86_64' and sys_platform == 'linux'
   - cuequivariance-ops-torch-cu13>=0.8.1 ; platform_machine == 'x86_64' and sys_platform == 'linux'
+  - triton>=3,<4 ; extra == 'fused'
+  - transformer-engine[pytorch]>=2,<3 ; extra == 'fold-cp'
+  - cuequivariance-torch ; extra == 'cueq12'
+  - cuequivariance-ops-torch-cu12 ; extra == 'cueq12'
+  - cuequivariance-torch ; extra == 'cueq13'
+  - cuequivariance-ops-torch-cu13 ; extra == 'cueq13'
   requires_python: '>=3.12'
 - pypi: direct+https://download.pytorch.org/whl/cu130/xformers-0.0.35-py39-none-manylinux_2_28_x86_64.whl
   name: xformers

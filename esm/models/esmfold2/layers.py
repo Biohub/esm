@@ -1765,7 +1765,17 @@ class DiffusionStructureHead(nn.Module):
         xgt_c = x_gt - mu_gt
         H = torch.einsum("bni,bnj->bij", w * xgt_c, x_c)
         H32 = H.float()
-        U, _, Vh = torch.linalg.svd(H32, driver="gesvd" if H32.is_cuda else None)
+        try:
+            U, _, Vh = torch.linalg.svd(H32, driver="gesvd" if H32.is_cuda else None)
+        except RuntimeError:
+            # Near the OOM boundary cuSOLVER can fail to allocate its handle
+            # (cusolverDnCreate) even though this 3x3 SVD is trivial. Fall back to
+            # a CPU SVD of the tiny matrix — instant, and only reached when the GPU
+            # path would otherwise crash. driver=None (gesvd is cuSOLVER-only).
+            if not H32.is_cuda:
+                raise
+            Ucpu, _, Vhcpu = torch.linalg.svd(H32.cpu(), driver=None)
+            U, Vh = Ucpu.to(H32.device), Vhcpu.to(H32.device)
         det = torch.linalg.det(U @ Vh)
         ones = torch.ones_like(det)
         R = (U @ torch.diag_embed(torch.stack([ones, ones, det], dim=-1)) @ Vh).to(
@@ -1959,7 +1969,11 @@ class InputsEmbedder(nn.Module):
 
         self.atom_attention_encoder = EsmFold2AtomEncoder(
             d_atom=swa_cfg.hidden_size,
-            d_token=swa_cfg.output_dim,
+            d_token=(
+                swa_cfg.token_hidden_size
+                if swa_cfg.token_hidden_size is not None
+                else swa_cfg.output_dim
+            ),
             n_blocks=swa_cfg.num_hidden_layers,
             n_heads=swa_cfg.num_attention_heads,
             swa_window_size=config.sliding_window,

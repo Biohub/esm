@@ -244,6 +244,7 @@ class EsmFold2HFAdapter(torch.nn.Module):
         max_inference_sigma: float | None = 256.0,
         disto_cond: Tensor | None = None,
         disto_cond_mask: Tensor | None = None,
+        include_embeddings: bool = False,
         **unused_features: Tensor,
     ) -> dict[str, Tensor]:
         """Our end-to-end ``forward``, dispatched to their ``fold``.
@@ -263,6 +264,13 @@ class EsmFold2HFAdapter(torch.nn.Module):
             raise NotImplementedError(
                 "distogram conditioning is not implemented for ESMFold2; "
                 "fold without it."
+            )
+
+        if include_embeddings:
+            raise NotImplementedError(
+                "include_embeddings is not supported through the HF adapter: the "
+                "upstream fold() does not return the trunk pair state. Use "
+                "EsmFold2Model directly."
             )
 
         if lm_mask_pct:

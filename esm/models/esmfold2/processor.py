@@ -279,6 +279,8 @@ class ESMFold2InputBuilder:
         pair_chains_t = output.get("pair_chains_iptm")
         residue_index_t = output.get("residue_index")
         entity_id_t = output.get("entity_id")
+        emb_seq_t = output.get("output_embedding_sequence")
+        emb_pair_pooled_t = output.get("output_embedding_pair_pooled")
 
         results: list[MolecularComplexResult] = []
         for i in range(Bm):
@@ -318,6 +320,14 @@ class ESMFold2InputBuilder:
                         if entity_id_t is not None
                         else None
                     ),
+                    output_embedding_sequence=(
+                        emb_seq_t[0].detach().cpu() if emb_seq_t is not None else None
+                    ),
+                    output_embedding_pair_pooled=(
+                        emb_pair_pooled_t[0].detach().cpu()
+                        if emb_pair_pooled_t is not None
+                        else None
+                    ),
                 )
             )
 
@@ -343,6 +353,7 @@ class ESMFold2InputBuilder:
         msa_max_depth: int | None = 1024,
         msa_column_mask_rate: float = 0.1,
         msa_subsample_at_inference: bool | None = None,
+        include_embeddings: bool = False,
         complex_id: str = "pred",
     ) -> MolecularComplexResult | list[MolecularComplexResult]:
         """Fold a structure end-to-end: encode → model → decode.
@@ -375,6 +386,13 @@ class ESMFold2InputBuilder:
             (shared across loops). Defaults to
             ``config.msa_encoder.column_mask_rate`` when ``None``. Only affects
             inputs that carry an MSA.
+        include_embeddings : bool
+            Populate ``output_embedding_pair_pooled`` on each result: the trunk's
+            final pair state averaged over the first token axis, ``[L, d_pair]``
+            fp32 on CPU. This is the same tensor, computed the same way, that the
+            Forge ``FoldingConfig.include_embeddings`` flag returns.
+            ``output_embedding_sequence`` stays None, as it does over the API -
+            neither released architecture keeps a single trunk state.
         complex_id : str
             Identifier assigned to the predicted MolecularComplex(es).
 
@@ -415,6 +433,7 @@ class ESMFold2InputBuilder:
                         num_diffusion_samples=num_diffusion_samples,
                         msa_max_depth=msa_max_depth,
                         msa_column_mask_rate=msa_column_mask_rate,
+                        include_embeddings=include_embeddings,
                         **sampler_kwargs,
                     )
 

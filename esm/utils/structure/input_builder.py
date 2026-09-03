@@ -3,6 +3,7 @@ from typing import Any, Sequence, TypeAlias, Union
 
 import numpy as np
 
+from esm.utils.compression import compress_state_dict, decompress_state_dict
 from esm.utils.msa import MSA
 
 # fmt: off
@@ -136,7 +137,7 @@ def serialize_structure_prediction_input(all_atom_input: StructurePredictionInpu
         elif seq_input.msa is None:
             chain_data["msa"] = None
         elif isinstance(seq_input.msa, MSA):
-            chain_data["msa"] = seq_input.msa.state_dict(json_serializable=True)
+            chain_data["msa"] = compress_state_dict(seq_input.msa)
         else:
             error_msg = f"MSA must be None or MSA. Got {seq_input.msa} instead."
             raise AttributeError(error_msg)
@@ -215,7 +216,9 @@ def deserialize_structure_prediction_input(
             return None
         msa_blk = chain["msa"]
         if isinstance(msa_blk, str):
-            raise ValueError(f"Unexpected MSA string value: {msa_blk!r}")
+            # `serialize_structure_prediction_input` always compresses, so expanding
+            # here is what keeps this function its inverse.
+            return MSA.from_state_dict(decompress_state_dict(msa_blk))
         return MSA.from_sequences(msa_blk["sequences"])
 
     sequences: list[ProteinInput | RNAInput | DNAInput | LigandInput] = []

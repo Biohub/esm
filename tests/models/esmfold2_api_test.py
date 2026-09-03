@@ -362,3 +362,100 @@ def test_experimental_forward_rejects_an_unknown_keyword(tiny_experimental):
                 num_recyles=1,
                 **FAST_FOLD,
             )
+
+
+# ---------------------------------------------------------------------------
+# include_embeddings
+# ---------------------------------------------------------------------------
+
+
+def _pair_width(config) -> int:
+    return config.pairwise_hidden_size
+
+
+def test_fold_omits_embeddings_by_default(tiny_esmfold2, builder):
+    """The pair export is opt-in: it costs an L x L reduction and an L x D tensor."""
+    result = builder.fold(tiny_esmfold2, protein_input(), seed=0, **FAST_FOLD)
+
+    assert result.output_embedding_pair_pooled is None
+    assert result.output_embedding_sequence is None
+
+
+def test_fold_include_embeddings_returns_the_pooled_pair(
+    tiny_esmfold2, tiny_esmfold2_config, builder
+):
+    """Shape, dtype and device match what the SDK hands back from Forge."""
+    result = builder.fold(
+        tiny_esmfold2, protein_input(), seed=0, include_embeddings=True, **FAST_FOLD
+    )
+
+    pooled = result.output_embedding_pair_pooled
+    assert pooled is not None
+    assert pooled.shape == (len(TINY_SEQUENCE), _pair_width(tiny_esmfold2_config))
+    assert pooled.dtype == torch.float32
+    assert pooled.device.type == "cpu"
+    assert torch.isfinite(pooled).all()
+
+    assert result.output_embedding_sequence is None
+
+
+def test_pooled_pair_is_the_post_coda_pair_averaged_over_the_first_axis(tiny_esmfold2):
+    """Pin the reduction axis against the tensor it is supposed to summarise."""
+    captured: dict[str, torch.Tensor] = {}
+    handle = tiny_esmfold2.parcae_coda.register_forward_hook(
+        lambda module, args, out: captured.__setitem__("z", out.detach().float())
+    )
+    try:
+        features, lm_hidden_states = esmfold2_inputs(tiny_esmfold2, TINY_SEQUENCE)
+        with torch.no_grad():
+            output = tiny_esmfold2(
+                **features,
+                lm_hidden_states=lm_hidden_states,
+                include_embeddings=True,
+                **FAST_FOLD,
+            )
+    finally:
+        handle.remove()
+
+    z = captured["z"]
+    pooled = output["output_embedding_pair_pooled"]
+
+    assert torch.allclose(pooled, z.mean(dim=1), atol=1e-6)
+    assert not torch.allclose(pooled, z.mean(dim=2), atol=1e-4)
+
+
+def test_pooled_pair_is_shared_across_diffusion_samples(tiny_esmfold2, builder):
+    """The trunk runs once, so every sample carries the same embedding."""
+    results = builder.fold(
+        tiny_esmfold2,
+        protein_input(),
+        seed=0,
+        num_loops=1,
+        num_sampling_steps=2,
+        num_diffusion_samples=2,
+        include_embeddings=True,
+    )
+
+    assert isinstance(results, list) and len(results) == 2
+    first, second = (item.output_embedding_pair_pooled for item in results)
+    assert first is not None and second is not None
+    assert torch.equal(first, second)
+
+
+def test_experimental_forward_supports_include_embeddings(
+    tiny_experimental, tiny_esmfold2_config
+):
+    """``fold`` takes either architecture, so the flag cannot be release-only."""
+    features, lm_hidden_states = esmfold2_inputs(tiny_experimental, TINY_SEQUENCE)
+
+    with torch.no_grad():
+        output = tiny_experimental(
+            **features,
+            lm_hidden_states=lm_hidden_states,
+            include_embeddings=True,
+            **FAST_FOLD,
+        )
+
+    pooled = output["output_embedding_pair_pooled"]
+    assert pooled.shape == (1, len(TINY_SEQUENCE), _pair_width(tiny_esmfold2_config))
+    assert pooled.dtype == torch.float32
