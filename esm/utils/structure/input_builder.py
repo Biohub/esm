@@ -72,6 +72,10 @@ class PocketConditioning:
 
 @dataclass
 class CovalentBond:
+    """``res_idx`` and ``atom_idx`` are 0-based. Use care when working with PDB
+    files residue numbers that are 1-based.
+    """
+
     chain_id1: str
     res_idx1: int
     atom_idx1: int

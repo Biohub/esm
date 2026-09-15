@@ -71,13 +71,13 @@ addopts = """
   --cov=esm
 	--cov-report term-missing:skip-covered
 	-n auto
-	-m 'not gpu and not manual'
+	-m 'not gpu and not manual and not merge_only'
 	--ignore=tests/oss_pytests/test_oss_client.py
 """
 markers = [
-  "gpu: requires a CUDA device",
-  "manual: run by hand, never by CI",
-  "merge_only: needs a real published checkpoint (network or staged weights)",
+  "gpu: requires a CUDA device; run in the monorepo's gpu-ci",
+  "manual: too heavy for a hosted runner; run in the monorepo's research-ci",
+  "merge_only: needs a real published checkpoint; run in the monorepo's research-ci",
 ]
 
 [tool.setuptools]

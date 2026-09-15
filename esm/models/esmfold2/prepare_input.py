@@ -1029,19 +1029,48 @@ def compute_token_bonds(
                 t = tokens[atom.token_index]
                 chain_res_atoms[(t.asym_id, t.residue_index)].append(atom)
 
-        for cb in input.covalent_bonds:
-            c1 = chain_by_id.get(cb.chain_id1)
-            c2 = chain_by_id.get(cb.chain_id2)
-            if c1 is None or c2 is None:
-                continue
+        # Residue count per chain, only used to build the error messages below.
+        res_idx_by_asym: dict[int, set[int]] = defaultdict(set)
+        for t in tokens:
+            res_idx_by_asym[t.asym_id].add(t.residue_index)
 
-            atoms_1 = chain_res_atoms.get((c1.asym_id, cb.res_idx1), [])
-            atoms_2 = chain_res_atoms.get((c2.asym_id, cb.res_idx2), [])
+        def resolve_bond_atom(chain_id: str, res_idx: int, atom_idx: int) -> AtomInfo:
+            """Resolve one end of a covalent bond to its atom.
 
-            if cb.atom_idx1 < len(atoms_1) and cb.atom_idx2 < len(atoms_2):
-                add_bond(
-                    atoms_1[cb.atom_idx1].token_index, atoms_2[cb.atom_idx2].token_index
+            Raises
+            ------
+            ValueError
+                If the chain id, residue index or atom index does not exist.
+                Skipping instead would fold the ligand unbonded and return a
+                confident wrong structure. Messages match the hosted API's
+                ``validate_connections_input`` so both paths report the same thing.
+            """
+            chain = chain_by_id.get(chain_id)
+            if chain is None:
+                raise ValueError(
+                    f"Invalid covalent bond: chain_id '{chain_id}' does not exist. "
+                    f"Available chain IDs: {list(chain_by_id)}"
                 )
+            res_atoms = chain_res_atoms.get((chain.asym_id, res_idx), [])
+            if not res_atoms:
+                n_res = len(res_idx_by_asym[chain.asym_id])
+                raise ValueError(
+                    f"Invalid covalent bond: residue index {res_idx} does not exist in "
+                    f"chain '{chain_id}'. Chain '{chain_id}' has {n_res} residues "
+                    f"(indices 0-{n_res - 1})."
+                )
+            if not 0 <= atom_idx < len(res_atoms):
+                raise ValueError(
+                    f"Invalid covalent bond: atom index {atom_idx} does not exist in "
+                    f"residue {res_idx} of chain '{chain_id}'. This residue has "
+                    f"{len(res_atoms)} atoms (indices 0-{len(res_atoms) - 1})."
+                )
+            return res_atoms[atom_idx]
+
+        for cb in input.covalent_bonds:
+            atom_1 = resolve_bond_atom(cb.chain_id1, cb.res_idx1, cb.atom_idx1)
+            atom_2 = resolve_bond_atom(cb.chain_id2, cb.res_idx2, cb.atom_idx2)
+            add_bond(atom_1.token_index, atom_2.token_index)
 
     # Add peptide bonds at modified-residue boundaries: an atom-tokenized
     # residue's N atom connects to the prev residue's C atom (and same for

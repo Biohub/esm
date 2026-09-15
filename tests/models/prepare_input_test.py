@@ -9,6 +9,7 @@ from esm.models.esmfold2.prepare_input import (
     compute_token_bonds,
 )
 from esm.models.esmfold2.types import (
+    CovalentBond,
     LigandInput,
     Modification,
     ProteinInput,
@@ -103,3 +104,113 @@ def test_build_chains_numbers_copies_across_both_id_forms():
     assert [c.chain_id for c in chains] == ["A", "B", "C"]
     assert [c.entity_id for c in chains] == [0, 0, 0]
     assert [c.sym_id for c in chains] == [0, 1, 2]
+
+
+def _covalent_bond_input(bonds: list[CovalentBond] | None) -> StructurePredictionInput:
+    """Protein with a lysine at residue 3 plus an ethanol ligand.
+
+    LYS is the shortest residue that reproduces the semaglutide case: 9 heavy
+    atoms, NZ last at 0-based index 8.
+    """
+    return StructurePredictionInput(
+        sequences=[
+            ProteinInput(id="A", sequence="AAAKGG"),
+            LigandInput(id="B", smiles="CCO"),
+        ],
+        covalent_bonds=bonds,
+    )
+
+
+def test_valid_covalent_bond_is_added_to_token_bonds(ccd_pickle):
+    """A resolvable bond must reach the matrix, on the LYS NZ token pair."""
+    plain = _covalent_bond_input(None)
+    chains, tokens, atoms = build_chains_from_input(plain, seed=0)
+    baseline = compute_token_bonds(tokens, atoms, plain, chains)
+
+    # (A, res 3, atom 8) is LYS NZ; (B, res 0, atom 0) is the ligand's first atom.
+    bonded = _covalent_bond_input(
+        [
+            CovalentBond(
+                chain_id1="A",
+                res_idx1=3,
+                atom_idx1=8,
+                chain_id2="B",
+                res_idx2=0,
+                atom_idx2=0,
+            )
+        ]
+    )
+    chains, tokens, atoms = build_chains_from_input(bonded, seed=0)
+    token_bonds = compute_token_bonds(tokens, atoms, bonded, chains)
+
+    # The matrix is symmetric, so one bond is two nonzero entries.
+    assert int((token_bonds != 0).sum()) == int((baseline != 0).sum()) + 2
+
+    nz_token = tokens[3].token_index
+    ligand_token = tokens[6].token_index
+    assert atoms[tokens[3].atom_start + 8].name == "NZ"
+    assert token_bonds[nz_token, ligand_token, 0] != 0
+    assert token_bonds[ligand_token, nz_token, 0] != 0
+
+
+def test_covalent_bond_with_unknown_chain_id_raises(ccd_pickle):
+    """A chain id that does not exist must not be silently dropped."""
+    spi = _covalent_bond_input(
+        [
+            CovalentBond(
+                chain_id1="a",
+                res_idx1=3,
+                atom_idx1=8,
+                chain_id2="B",
+                res_idx2=0,
+                atom_idx2=0,
+            )
+        ]
+    )
+    chains, tokens, atoms = build_chains_from_input(spi, seed=0)
+    with pytest.raises(ValueError, match=r"chain_id 'a' does not exist"):
+        compute_token_bonds(tokens, atoms, spi, chains)
+
+
+def test_covalent_bond_with_out_of_range_residue_index_raises(ccd_pickle):
+    """A complex-wide residue index must not be silently dropped."""
+    spi = _covalent_bond_input(
+        [
+            CovalentBond(
+                chain_id1="A",
+                res_idx1=509,
+                atom_idx1=8,
+                chain_id2="B",
+                res_idx2=0,
+                atom_idx2=0,
+            )
+        ]
+    )
+    chains, tokens, atoms = build_chains_from_input(spi, seed=0)
+    with pytest.raises(
+        ValueError, match=r"residue index 509 does not exist in chain 'A'"
+    ):
+        compute_token_bonds(tokens, atoms, spi, chains)
+
+
+def test_covalent_bond_with_out_of_range_atom_index_raises(ccd_pickle):
+    """A 1-based atom index must not be silently dropped (LYS has 9 atoms, 0-8)."""
+    spi = _covalent_bond_input(
+        [
+            CovalentBond(
+                chain_id1="A",
+                res_idx1=3,
+                atom_idx1=9,
+                chain_id2="B",
+                res_idx2=0,
+                atom_idx2=0,
+            )
+        ]
+    )
+    chains, tokens, atoms = build_chains_from_input(spi, seed=0)
+    with pytest.raises(
+        ValueError,
+        match=r"atom index 9 does not exist in residue 3 of chain 'A'\. "
+        r"This residue has 9 atoms",
+    ):
+        compute_token_bonds(tokens, atoms, spi, chains)
