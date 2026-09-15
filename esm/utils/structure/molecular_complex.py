@@ -464,6 +464,18 @@ class MolecularComplex:
             # Input is mmCIF string content
             mmcif_file = pdbx.CIFFile.read(StringIO(inp))
 
+        complex_id = id or (
+            Path(inp).stem if os.path.exists(inp) else "complex_from_string"
+        )
+        return cls.from_cif_file(mmcif_file, id=complex_id)
+
+    @classmethod
+    def from_cif_file(
+        cls,
+        mmcif_file: pdbx.CIFFile | pdbx.BinaryCIFFile,
+        id: str = "complex_from_string",
+    ) -> "MolecularComplex":
+        """Read a parsed CIF file using the same semantics as :meth:`from_mmcif`."""
         # Get structure - handle missing model information gracefully
         try:
             structure = pdbx.get_structure(
@@ -540,137 +552,54 @@ class MolecularComplex:
         except Exception:
             pass
 
-        # Initialize arrays for flat atom representation
-        sequence_tokens = []
-        flat_positions = []
-        flat_elements = []
-        flat_names = []
-        flat_hetero = []
-        token_to_atoms = []
-        confidence_scores = []
-        chain_ids = []  # Track chain IDs for each token
-
-        atom_idx = 0
-
-        # Group atoms by chain and residue.
-        # Use label_asym_id (distinct per entity) when available, otherwise
-        # fall back to biotite's chain_id (auth_asym_id).
-        chain_residue_groups: dict[str, dict[tuple[int, str], dict]] = {}
-        for atom_i, atom in enumerate(structure):
-            chain_id = (
-                label_asym_ids[atom_i] if label_asym_ids is not None else atom.chain_id
+        chain_labels = (
+            label_asym_ids if label_asym_ids is not None else structure.chain_id
+        )
+        # Include water-only chains so numeric chain IDs remain unchanged.
+        _, chain_first, chain_numbers = np.unique(
+            chain_labels, return_index=True, return_inverse=True
+        )
+        chain_lookup = {i: chain_labels[first] for i, first in enumerate(chain_first)}
+        names = structure.res_name
+        residues = structure.res_id
+        # Stable sorting preserves atom order within each (chain, residue, name).
+        order = np.lexsort((names, residues, chain_numbers))
+        order = order[names[order] != "HOH"]
+        if len(order):
+            boundary = np.ones(len(order), dtype=bool)
+            boundary[1:] = (
+                (chain_numbers[order[1:]] != chain_numbers[order[:-1]])
+                | (residues[order[1:]] != residues[order[:-1]])
+                | (names[order[1:]] != names[order[:-1]])
             )
-            res_id = atom.res_id
-            res_name = atom.res_name
-
-            if chain_id not in chain_residue_groups:
-                chain_residue_groups[chain_id] = {}
-            # Key by (res_id, res_name) to distinguish residues that share
-            # the same res_id but have different res_name (e.g. a protein
-            # residue and a ligand that were on the same auth chain).
-            res_key = (res_id, res_name)
-            if res_key not in chain_residue_groups[chain_id]:
-                chain_residue_groups[chain_id][res_key] = {
-                    "atoms": [],
-                    "res_name": res_name,
-                    "is_hetero": atom.hetero,
-                }
-            chain_residue_groups[chain_id][res_key]["atoms"].append(atom)
-
-        # Create a mapping from chain_id to numeric indices
-        chain_id_to_numeric = {
-            chain_id: idx
-            for idx, chain_id in enumerate(sorted(chain_residue_groups.keys()))
-        }
-
-        # Process each chain and residue
-        for chain_id in sorted(chain_residue_groups.keys()):
-            residues = chain_residue_groups[chain_id]
-            numeric_chain_id = chain_id_to_numeric[chain_id]
-
-            for res_key in sorted(residues.keys()):
-                residue_data = residues[res_key]
-                res_name = residue_data["res_name"]
-                atoms = residue_data["atoms"]
-                is_hetero = residue_data["is_hetero"]
-
-                # Skip water molecules
-                if res_name == "HOH":
-                    continue
-
-                # Determine token name
-                if not is_hetero and res_name in residue_constants.restype_3to1:
-                    # Standard amino acid
-                    token_name = res_name
-                elif res_name in ["A", "T", "G", "C", "U", "DA", "DT", "DG", "DC"]:
-                    # Nucleotide
-                    token_name = res_name
-                else:
-                    # Ligand or other molecule
-                    token_name = res_name
-
-                sequence_tokens.append(token_name)
-                chain_ids.append(
-                    numeric_chain_id
-                )  # Store the numeric chain ID for this token
-                token_start = atom_idx
-
-                # Add all atoms from this residue
-                for atom in atoms:
-                    flat_positions.append(atom.coord)
-
-                    # Get element character
-                    element = atom.element
-                    flat_elements.append(element)
-
-                    # Get atom name
-                    atom_name = atom.atom_name
-                    flat_names.append(atom_name)
-
-                    # Get hetero flag
-                    hetero_flag = atom.hetero
-                    flat_hetero.append(hetero_flag)
-
-                    atom_idx += 1
-
-                # Record token-to-atom mapping
-                token_to_atoms.append([token_start, atom_idx])
-
-                # Add confidence score (B-factor if available, otherwise 1.0)
-                bfactor = getattr(atoms[0], "b_factor", 50.0) if atoms else 50.0
-                confidence_scores.append(min(bfactor / PLDDT_B_FACTOR_SCALE, 1.0))
-
-        # Convert to numpy arrays
-        if not flat_positions:
-            # Create minimal arrays if no atoms found
-            atom_positions = np.zeros((0, 3), dtype=np.float32)
-            atom_elements = np.zeros(0, dtype=object)
-            atom_names = np.zeros(0, dtype=object)
-            atom_hetero = np.zeros(0, dtype=bool)
-            token_to_atoms_array = np.zeros((len(sequence_tokens), 2), dtype=np.int32)
-            chain_id_array = (
-                np.array(chain_ids, dtype=np.int64)
-                if chain_ids
-                else np.zeros(len(sequence_tokens), dtype=np.int64)
-            )
+            starts = np.flatnonzero(boundary)
+            first_atoms = order[starts]
+            token_to_atoms_array = np.column_stack(
+                (starts, np.r_[starts[1:], len(order)])
+            ).astype(np.int32)
         else:
-            atom_positions = np.array(flat_positions, dtype=np.float32)
-            atom_elements = np.array(flat_elements, dtype=object)
-            atom_names = np.array(flat_names, dtype=object)
-            atom_hetero = np.array(flat_hetero, dtype=bool)
-            token_to_atoms_array = np.array(token_to_atoms, dtype=np.int32)
-            chain_id_array = np.array(chain_ids, dtype=np.int64)
+            first_atoms = np.empty(0, dtype=np.int64)
+            token_to_atoms_array = np.zeros((0, 2), dtype=np.int32)
 
-        confidence_array = np.array(confidence_scores, dtype=np.float32)
-
-        # Create metadata using the chain_id_to_numeric mapping
-        if chain_residue_groups:
-            chain_lookup = {
-                numeric_id: chain_id
-                for chain_id, numeric_id in chain_id_to_numeric.items()
-            }
-        else:
-            chain_lookup = {}
+        sequence_tokens = list(names[first_atoms])
+        atom_positions = np.asarray(structure.coord[order], dtype=np.float32)
+        # fromiter retains NumPy string scalars inside the object arrays.
+        atom_elements = np.fromiter(
+            structure.element[order], dtype=object, count=len(order)
+        )
+        atom_names = np.fromiter(
+            structure.atom_name[order], dtype=object, count=len(order)
+        )
+        atom_hetero = np.asarray(structure.hetero[order], dtype=bool)
+        chain_id_array = np.asarray(chain_numbers[first_atoms], dtype=np.int64)
+        bfactors = (
+            structure.b_factor[first_atoms]
+            if "b_factor" in structure.get_annotation_categories()
+            else np.full(len(first_atoms), 50.0)
+        )
+        confidence_array = np.asarray(
+            np.minimum(bfactors / PLDDT_B_FACTOR_SCALE, 1.0), dtype=np.float32
+        )
 
         metadata = MolecularComplexMetadata(
             entity_lookup=entity_info,
@@ -678,14 +607,8 @@ class MolecularComplex:
             assembly_composition=None,
         )
 
-        # Set complex ID - if input was a path, use the stem; otherwise use default
-        if os.path.exists(inp):
-            complex_id = id or Path(inp).stem
-        else:
-            complex_id = id or "complex_from_string"
-
         return cls(
-            id=complex_id,
+            id=id,
             sequence=sequence_tokens,
             atom_positions=atom_positions,
             atom_elements=atom_elements,

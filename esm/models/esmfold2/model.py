@@ -34,6 +34,7 @@ except ImportError:
 from esm.models.esmc import EsmcModel
 from esm.models.esmc.checkpoint_layout import published_to_native_subtree
 from esm.models.esmfold2.config import EsmFold2Config, default_module_flags
+from esm.models.esmfold2.constants import MOL_TYPE_NONPOLYMER
 from esm.models.esmfold2.hf_checkpoint import hf_state_dict_to_native, is_hf_layout
 from esm.models.esmfold2.layers import (
     CHAR_VOCAB_SIZE,
@@ -60,7 +61,6 @@ from esm.models.esmfold2.layers import (
 from esm.models.hub import HubPreTrainedModel, resolve_model_dir
 
 _EPS = 1e-6
-_NONPOLYMER_ID = 4
 
 # Default for the triangle / OPM / pair-transition L² ops. Caps peak memory
 # so L≈2k folds on an 80 GB GPU (~76 GB peak at chunk=128 for L=1438;
@@ -305,7 +305,7 @@ class ConfidenceHead(nn.Module):
 
         expanded_type = self._repeat_batch(mol_type, num_diffusion_samples)
         expanded_asym = self._repeat_batch(asym_id, num_diffusion_samples)
-        is_ligand = (expanded_type == _NONPOLYMER_ID).float()
+        is_ligand = (expanded_type == MOL_TYPE_NONPOLYMER).float()
         inter_chain = (
             expanded_asym.unsqueeze(-1) != expanded_asym.unsqueeze(-2)
         ).float()

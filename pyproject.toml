@@ -1,6 +1,6 @@
 [project]
 name = "esm"
-version = "3.4.1"
+version = "3.4.1.post1"
 description = "EvolutionaryScale open model repository"
 readme = "README.md"
 requires-python = ">=3.12"
@@ -71,12 +71,11 @@ addopts = """
   --cov=esm
 	--cov-report term-missing:skip-covered
 	-n auto
-	-m 'not gpu and not nightly and not manual'
+	-m 'not gpu and not manual'
 	--ignore=tests/oss_pytests/test_oss_client.py
 """
 markers = [
   "gpu: requires a CUDA device",
-  "nightly: minutes-long, often multi-GPU; run outside CI",
   "manual: run by hand, never by CI",
   "merge_only: needs a real published checkpoint (network or staged weights)",
 ]

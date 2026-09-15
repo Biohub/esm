@@ -687,9 +687,6 @@ def atom_aligned_inputs(tiny_esmfold2):
     return features, lm_hidden_states
 
 
-@pytest.mark.skip(
-    reason="Flaky: distogram_logits are not bitwise-equal across atom-axis padding"
-)
 def test_atom_padding_does_not_move_the_deterministic_outputs(
     tiny_esmfold2, atom_aligned_inputs
 ):
@@ -703,8 +700,10 @@ def test_atom_padding_does_not_move_the_deterministic_outputs(
     the RNG differently and moves the answer for reasons that are not a masking
     bug. ``scramble_pad_rows`` below holds the atom count fixed and covers them.
 
-    atol=0: masked-out keys are dropped from the varlen attention entirely
-    rather than down-weighted, so this is exact, and measured exact.
+    Not ``atol=0``: the two arms hand the atom-axis Linears 32 rows and 64 rows,
+    and MKL's AVX2 sgemm does not return the same rows for both M (its AVX512
+    kernels do), so bit-equality here is a property of the host and not of the
+    mask. ``scramble_pad_rows`` below keeps M fixed and is exact.
     """
     features, lm_hidden_states = atom_aligned_inputs
     baseline = run_model(tiny_esmfold2, features, lm_hidden_states)
@@ -713,8 +712,11 @@ def test_atom_padding_does_not_move_the_deterministic_outputs(
     )
 
     assert padded["sample_atom_coords"].shape[1] == 2 * ATOM_BLOCK
-    assert torch.equal(baseline["distogram_logits"], padded["distogram_logits"])
-    assert torch.equal(baseline["plddt"], padded["plddt"])
+    # Measured max|Δ| 9.5e-7 under MKL's AVX2 sgemm, 0 under its AVX512 kernels.
+    torch.testing.assert_close(
+        baseline["distogram_logits"], padded["distogram_logits"], atol=1e-6, rtol=0
+    )
+    torch.testing.assert_close(baseline["plddt"], padded["plddt"], atol=1e-6, rtol=0)
 
 
 def test_garbage_in_atom_pad_rows_does_not_move_valid_outputs(

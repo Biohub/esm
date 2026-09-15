@@ -174,6 +174,9 @@ output.sae_outputs["layer60"]  # sparse.coo tensor
 print(output.sae_outputs["layer60"].shape)
 
 ```
+
+SAEs come in two kinds. Most take the hidden state `h[N]`; some take the residual update `h[N] - h[N-1]`. A repo declares which via `use_residual_update_instead_of_states` in its `config.json`, and the backbone feeds each attached SAE accordingly.
+
 ### Running SAEs Through The Biohub Platform
 
 For a tutorial on using SAEs using the Biohub Platform, see [here](https://github.com/Biohub/esm/blob/main/cookbook/tutorials/esmc_sae_feature_interpretation.ipynb).

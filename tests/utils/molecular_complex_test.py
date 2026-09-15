@@ -6,6 +6,8 @@ Verifies that from_mmcif -> to_blob -> from_blob -> to_mmcif preserves:
 3. Correct atom counts after roundtrip
 """
 
+import biotite.structure as bs
+import biotite.structure.io.pdbx as pdbx
 import numpy as np
 import pytest
 
@@ -341,3 +343,28 @@ def test_protein_complex_roundtrip_preserves_atom37_mask():
                         atol=0.01,
                         err_msg=f"Coords differ chain={chain_orig.chain_id} res={r} atom={a}",
                     )
+
+
+def test_from_mmcif_groups_residues_without_reordering_their_atoms(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    atoms = bs.AtomArray(6)
+    atoms.coord = np.arange(18, dtype=np.float32).reshape(6, 3)
+    atoms.chain_id = ["Z", "A", "AA", "A", "Z", "A"]
+    atoms.res_id = [2, 5, 1, 5, 2, 5]
+    atoms.res_name = ["ALA", "LIG", "HOH", "ALA", "ALA", "LIG"]
+    atoms.atom_name = ["CA", "C2", "O", "N", "N", "O1"]
+    atoms.element = ["C", "C", "O", "N", "N", "O"]
+    atoms.hetero = [False, True, True, False, False, True]
+    atoms.set_annotation("b_factor", np.array([160, 20, 55, 80, 5, 90]))
+    monkeypatch.setattr(pdbx, "get_structure", lambda *args, **kwargs: atoms)
+
+    actual = MolecularComplex.from_mmcif("data_grouping\n#\n")
+
+    assert actual.sequence == ["ALA", "LIG", "ALA"]
+    np.testing.assert_array_equal(actual.atom_positions, atoms.coord[[3, 1, 5, 0, 4]])
+    np.testing.assert_array_equal(actual.token_to_atoms, [[0, 1], [1, 3], [3, 5]])
+    # Water-only chains retain their chain ID, and confidence uses the first atom.
+    np.testing.assert_array_equal(actual.chain_id, [0, 0, 2])
+    assert actual.metadata.chain_lookup == {0: "A", 1: "AA", 2: "Z"}
+    np.testing.assert_array_equal(actual.plddt, np.array([0.8, 0.2, 1], np.float32))

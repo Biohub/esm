@@ -332,6 +332,29 @@ class EsmcModel(EsmcPreTrainedModel):
                 )
             self._sae_models[key] = layer
 
+    def _sae_layers_to_collect(self) -> list[int]:
+        """Backbone layers the registered SAEs need collected.
+
+        A residual-update SAE at layer ``N`` needs ``N - 1`` too, since
+        ``h[N] - h[N-1]`` is differenced after collection.
+
+        Returns
+        -------
+        list[int]
+            Sorted layer indices.
+        """
+        needed: set[int] = set()
+        for model_name, sae_module in self._sae_models.items():
+            assert isinstance(sae_module, EsmcSaeLayer)
+            layer_num = self._get_sae_layer_num_requested(model_name)
+            needed.add(layer_num)
+            if (
+                sae_module.params.use_residual_update_instead_of_states
+                and layer_num > 0
+            ):
+                needed.add(layer_num - 1)
+        return sorted(needed)
+
     def _get_sae_layer_num_requested(self, model_name: str) -> int:
         match = self._SAE_KEY_RE.fullmatch(model_name)
         assert match is not None, (
@@ -362,6 +385,21 @@ class EsmcModel(EsmcPreTrainedModel):
             requested_layer = self._get_sae_layer_num_requested(model_name)
             layer_idx = layer_to_idx[requested_layer]
             layer_states = hidden_states[layer_idx].clone().to(self.device)
+
+            # Layer 0 has no predecessor and stays the raw state, as in training.
+            if (
+                layer.params.use_residual_update_instead_of_states
+                and requested_layer > 0
+            ):
+                predecessor = requested_layer - 1
+                if predecessor not in layer_to_idx:
+                    raise KeyError(
+                        f"SAE {model_name!r} uses residual updates and needs "
+                        f"layer {predecessor} collected alongside layer "
+                        f"{requested_layer}, but the collected layers are "
+                        f"{layers_to_collect}."
+                    )
+                layer_states -= hidden_states[layer_to_idx[predecessor]].to(self.device)
 
             sae_out = layer.get_sae_output(layer_states, token_mask)
             features = sae_out.feature_magnitudes.detach()
@@ -429,9 +467,7 @@ class EsmcModel(EsmcPreTrainedModel):
                 range(self.config.num_hidden_layers + 1)
             )
         elif output_sae:
-            layers_to_collect = sorted(
-                {self._get_sae_layer_num_requested(name) for name in self._sae_models}
-            )
+            layers_to_collect = self._sae_layers_to_collect()
         else:
             layers_to_collect = []
 

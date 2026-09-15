@@ -61,7 +61,7 @@ except ImportError:
     FLASH_ATTN_ROTARY_INSTALLED = False
 
 
-if not TE_INSTALLED:
+if torch.cuda.is_available() and not TE_INSTALLED:
     logger.warning(
         "ESMC: Transformer Engine is not installed; falling back to "
         "pure-PyTorch LayerNorm+Linear / LayerNorm+MLP. Outputs will differ "
@@ -73,7 +73,7 @@ if not TE_INSTALLED:
         "reduction LayerNorm."
     )
 
-if not XFORMERS_INSTALLED and not FLASH_ATTN_INSTALLED:
+if torch.cuda.is_available() and not (XFORMERS_INSTALLED or FLASH_ATTN_INSTALLED):
     logger.warning(
         "ESMC: neither xformers nor flash-attn is installed; falling back "
         "to PyTorch ``F.scaled_dot_product_attention``. The attention "

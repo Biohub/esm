@@ -108,7 +108,9 @@ if __name__ == "__main__":
         print(
             "Please export your Forge/Biohub Platform API key as ESM_API_KEY environment variable."
         )
-    client = SequenceStructureForgeInferenceClient(token=os.environ["ESM_API_KEY"])
+    client = SequenceStructureForgeInferenceClient(
+        model="esm3-medium-2024-08", token=os.environ["ESM_API_KEY"]
+    )
     esm3_client = ESM3ForgeInferenceClient(
         model="esm3-medium-2024-08", token=os.environ["ESM_API_KEY"]
     )

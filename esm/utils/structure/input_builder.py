@@ -50,6 +50,13 @@ class LigandInput:
     smiles: str | None = None
     ccd: list[str] | None = None
 
+    def __post_init__(self):
+        if isinstance(self.ccd, str):
+            raise TypeError(
+                f"LigandInput.ccd must be a list of CCD codes, not the bare "
+                f"string {self.ccd!r}. Use ccd=[{self.ccd!r}]."
+            )
+
 
 @dataclass
 class DistogramConditioning:

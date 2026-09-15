@@ -371,9 +371,17 @@ def to_float32(x):
     return x
 
 
-def maybe_list(x, convert_nan_to_none: bool = False) -> list | None:
+def maybe_list(
+    x, convert_nan_to_none: bool = False, round_decimals: int | None = None
+) -> list | None:
     if x is None:
         return None
+
+    if round_decimals is not None:
+        if isinstance(x, torch.Tensor):
+            x = x.detach().cpu().numpy()
+        x = np.round(x.astype(np.float64), round_decimals)
+
     if not convert_nan_to_none:
         return x.tolist()
 

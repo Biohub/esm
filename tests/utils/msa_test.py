@@ -3,9 +3,10 @@
 import gzip
 
 import numpy as np
+import pytest
 
 from esm.models.esmfold2.paired_msa import msa_to_res_type_and_deletions
-from esm.utils.msa.msa import MSA, a3m_deletion_counts
+from esm.utils.msa.msa import MSA, a3m_deletion_counts, stack_a3m_deletion_counts
 from esm.utils.parsing import FastaEntry
 
 # query has no insertions (5 match columns); row1 has "aa" inserted before col2,
@@ -194,3 +195,24 @@ def test_state_dict_omits_deletions_when_absent():
     payload = MSA.from_sequences(["MKLNT", "MKLNT"]).state_dict(json_serializable=True)
     assert "deletions" not in payload
     assert MSA.from_state_dict(payload).deletions is None
+
+
+def test_stack_a3m_deletion_counts_matches_per_row_counts():
+    """The stacked matrix is exactly the per-row counts, in order."""
+    rows = ["MKLNT", "MKaaLNT", "M-LNcT"]
+    stacked = stack_a3m_deletion_counts(rows)
+
+    assert stacked is not None
+    assert stacked.dtype == np.float32
+    np.testing.assert_array_equal(stacked, _EXPECTED_DELETIONS)
+    for index, seq in enumerate(rows):
+        np.testing.assert_array_equal(stacked[index], a3m_deletion_counts(seq))
+
+
+def test_stack_a3m_deletion_counts_edges():
+    assert stack_a3m_deletion_counts([]) is None
+    single = stack_a3m_deletion_counts(["MKaaLNT"])
+    assert single is not None and single.shape == (1, 5)
+    # A row describing a different number of match columns cannot be stacked.
+    with pytest.raises(ValueError, match="match-column count mismatch"):
+        stack_a3m_deletion_counts(["MKLNT", "MKLN"])

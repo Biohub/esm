@@ -34,6 +34,7 @@ from torch import Tensor
 from esm.models.esmc import EsmcModel
 from esm.models.esmc.checkpoint_layout import published_to_native_subtree
 from esm.models.esmfold2.config import EsmFold2Config
+from esm.models.esmfold2.constants import MOL_TYPE_NONPOLYMER
 from esm.models.esmfold2.layers import (
     CHAR_VOCAB_SIZE,
     MAX_ATOMIC_NUMBER,
@@ -63,7 +64,6 @@ from esm.models.esmfold2.model import _IGNORED_FEATURE_KEYS
 from esm.models.hub import HubPreTrainedModel, resolve_model_dir
 
 _EPS = 1e-5
-_NONPOLYMER_ID: int = 3
 
 
 # ===========================================================================
@@ -246,7 +246,7 @@ class ConfidenceHead(nn.Module):
         # Complex ipLDDT (interface-weighted)
         expanded_type = self._repeat_batch(mol_type, num_diffusion_samples)
         expanded_asym = self._repeat_batch(asym_id, num_diffusion_samples)
-        is_ligand = (expanded_type == _NONPOLYMER_ID).float()
+        is_ligand = (expanded_type == MOL_TYPE_NONPOLYMER).float()
         inter_chain = (
             expanded_asym.unsqueeze(-1) != expanded_asym.unsqueeze(-2)
         ).float()
@@ -892,6 +892,8 @@ class EsmFold2ExperimentalModel(HubPreTrainedModel):
         max_inference_sigma: float | None = 256.0,
         seed: int | None = None,
         provide_soft_sequence_to_msa_and_profile: bool = True,
+        disto_cond: Tensor | None = None,
+        disto_cond_mask: Tensor | None = None,
         include_embeddings: bool = False,
         **unused_features: Tensor,
     ) -> dict[str, Tensor]:
@@ -907,6 +909,15 @@ class EsmFold2ExperimentalModel(HubPreTrainedModel):
             raise TypeError(
                 f"{type(self).__name__}.forward() got unexpected keyword "
                 f"argument(s) {unexpected}."
+            )
+
+        # Named rather than left to **kwargs so conditioning cannot be swallowed
+        # and the fold silently run unconditioned. This model has no
+        # disto_conditioning_proj that would consume these.
+        if disto_cond_mask is not None and disto_cond_mask.any():
+            raise NotImplementedError(
+                "distogram conditioning is not implemented for ESMFold2; "
+                "fold without it."
             )
 
         tok_mask = token_attention_mask
