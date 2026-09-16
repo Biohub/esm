@@ -512,7 +512,7 @@ def test_sampling_steps_converge(sampler_model):
     Asserted on the mean over eight seeds, not per seed: on a randomly-
     initialised model the sampler is noise-dominated and one seed in eight
     (seed 2: 3.52 then 3.80 A) goes the other way. Cheap enough to stay in the
-    fast tier - all 24 forwards take ~2 s on CPU, so no ``nightly`` marker.
+    fast tier - all 24 forwards take ~2 s on CPU.
     """
     features, lm_hidden_states = esmfold2_inputs(
         sampler_model, ESMFOLD2_SEQUENCES["tiny"]

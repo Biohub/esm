@@ -50,6 +50,13 @@ class LigandInput:
     smiles: str | None = None
     ccd: list[str] | None = None
 
+    def __post_init__(self):
+        if isinstance(self.ccd, str):
+            raise TypeError(
+                f"LigandInput.ccd must be a list of CCD codes, not the bare "
+                f"string {self.ccd!r}. Use ccd=[{self.ccd!r}]."
+            )
+
 
 @dataclass
 class DistogramConditioning:
@@ -65,6 +72,10 @@ class PocketConditioning:
 
 @dataclass
 class CovalentBond:
+    """``res_idx`` and ``atom_idx`` are 0-based. Use care when working with PDB
+    files residue numbers that are 1-based.
+    """
+
     chain_id1: str
     res_idx1: int
     atom_idx1: int

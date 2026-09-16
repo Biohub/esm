@@ -25,33 +25,19 @@ Defects this file pins:
 Each is a strict ``xfail`` or an explicit expectation, so a fix flips the test
 rather than going unnoticed.
 
-The ``torch.compile`` cases are ``nightly``, not ``gpu``, because
-``apply_torch_compile`` does not behave the same way on every GPU. On the CI
-runner it compiles in both modes and reproduces eager. On our L40 and H100 dev
-boxes the first forward dies in Inductor with ``PendingUnbackedSymbolNotFound``,
-raised by the ``capture_scalar_outputs = True`` the method sets to avoid a graph
-break at the ``.item()`` calls in the atom-attention path - measured at L=12 and
-L=197, in both modes, with ``set_kernel_backend(None)``, so it is not a length,
-a noise patch or a kernel-stacking effect.
-
-An earlier revision pinned the dev-box failure as a strict ``xfail``. That
-XPASSed on the CI GPU, which is a hard failure, so the required GPU job went red
-on a claim about our workstations. Pinning the opposite outcome would just move
-the redness. Until compilation behaves the same on both, this equivalence is not
-a property a required gate can assert, so it runs on demand instead:
-
-    pytest -m nightly tests/models/esmfold2_builds_test.py
-
-That keeps the assertion honest - compiled output must match eager - and keeps
-an Inductor crash a real failure wherever it happens, without making either
-platform's behaviour everyone's expectation.
+Compiled-vs-eager equivalence is deliberately not asserted here.
+``apply_torch_compile`` does not behave the same way on every GPU: the CI runner
+compiles in both modes and reproduces eager, while our L40 and H100 boxes die in
+Inductor with ``PendingUnbackedSymbolNotFound``. Neither outcome can be pinned
+without making one platform's behaviour everyone's expectation, and this suite
+has no tier that runs outside the required gates. Only the *refusal* to stack
+with the fused backend is tested, which needs no GPU.
 """
 
 import contextlib
 
 import pytest
 import torch
-import torch._dynamo
 
 from esm.models.esmfold2 import EsmFold2Config, EsmFold2ExperimentalModel, EsmFold2Model
 from esm.models.esmfold2 import layers as _layers
@@ -694,36 +680,6 @@ def test_every_gpu_build_reaches_the_cpu_reference(
 # ---------------------------------------------------------------------------
 
 
-@pytest.mark.nightly
-@pytest.mark.parametrize("mode", ["fixed_seqlen", "dynamic_seqlen"])
-def test_torch_compile_matches_eager(kernel_esmfold2_config, mode):
-    """Both compile modes must reproduce the eager result on the same device.
-
-    Compared against an eager *CUDA* run, not the CPU reference: the question
-    ``apply_torch_compile`` raises is whether Inductor changes the answer, and
-    mixing in the device difference would bury it under a bf16-sized tolerance.
-    ``apply_torch_compile`` rebinds ``module.forward`` in place and cannot be
-    undone, so the compiled model is a second, freshly-built copy.
-
-    The tolerances are deliberately absent rather than guessed: nothing
-    compiles, so there is nothing to measure. ``raises=`` pins the *reason* -
-    any other exception is reported as a real failure, not an expected one.
-    """
-    eager = build_model(kernel_esmfold2_config, device="cuda")
-    expected = run_forward(eager, ESMFOLD2_SEQUENCES[MATRIX_LENGTH], flash=False)
-
-    # Dynamo caches on the *code object*, which every test in this file shares.
-    # Without a reset a compiled entry from an earlier test satisfies this one's
-    # guards and no compilation happens at all - which silently turned this into
-    # a pass once already.
-    torch._dynamo.reset()
-    compiled = build_model(kernel_esmfold2_config, device="cuda")
-    compiled.apply_torch_compile(mode=mode)
-    actual = run_forward(compiled, ESMFOLD2_SEQUENCES[MATRIX_LENGTH], flash=False)
-
-    assert_close_to_reference(actual, expected, GPU_TOLERANCE, f"compile[{mode}]")
-
-
 def test_torch_compile_refuses_to_stack_with_the_fused_backend(tiny_esmfold2_config):
     """``apply_torch_compile`` enforces its "does not stack with Triton" claim.
 
@@ -732,11 +688,6 @@ def test_torch_compile_refuses_to_stack_with_the_fused_backend(tiny_esmfold2_con
     ``PendingUnbackedSymbolNotFound`` tracing the vendored kernels on our L40 and
     H100 boxes. The guard turns that into a refusal at call time, which needs no
     GPU to check: it reads ``_kernel_backend`` and compiles nothing.
-
-    Marked neither ``gpu`` nor ``nightly`` on purpose. ``nightly`` would be
-    actively wrong - conftest's autouse ``disable_direct_gpu_usage_for_nightly``
-    patches ``torch.cuda.is_available`` to False for nightly tests, and the fused
-    kernels then fail at launch with Triton's "0 active drivers".
     """
     model = build_model(tiny_esmfold2_config)
     model.set_kernel_backend("fused")

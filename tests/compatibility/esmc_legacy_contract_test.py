@@ -118,16 +118,17 @@ def test_v3_readme_quickstart_runs_verbatim_against_a_stand_in_checkpoint(
     assert out.embeddings.shape == (1, 7, D_MODEL)
 
 
-@pytest.mark.nightly
 def test_v3_readme_quickstart_runs_verbatim_on_the_published_esmc_300m(
-    published_esm_namespace,
+    esmc_300m_dir, published_esm_namespace
 ):
-    """The same block with nothing substituted, against the real checkpoint."""
+    """The same block against the real checkpoint, on CPU.
+
+    ``esmc_300m_dir`` is never read: it resolves the snapshot up front, which
+    skips an offline runner and earns the conftest's ``merge_only`` marker. The
+    snippet's own ``# or "cpu"`` sanctions the one substitution.
+    """
     namespace: dict = {}
-    source = V3_README_QUICKSTART
-    if not torch.cuda.is_available():
-        source = source.replace('"cuda"', '"cpu"')
-    exec(source, namespace)  # noqa: S102
+    exec(V3_README_QUICKSTART.replace('"cuda"', '"cpu"'), namespace)  # noqa: S102
 
     out = namespace["logits_output"]
     assert out.logits is not None and out.logits.sequence is not None

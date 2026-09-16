@@ -18,7 +18,10 @@ from esm.utils.structure.protein_chain import ProteinChain
 from esm.utils.types import FunctionAnnotation
 
 
+# The open weights are bf16, so calling `forward` directly needs autocast; the SDK
+# generate/logits paths set it up for you.
 @torch.no_grad()
+@torch.autocast("cuda", dtype=torch.bfloat16)
 def inverse_folding_example():
     tokenizer = EsmSequenceTokenizer()
     encoder = ESM3_structure_encoder_v0("cuda")
@@ -47,6 +50,7 @@ def inverse_folding_example():
 
 
 @torch.no_grad()
+@torch.autocast("cuda", dtype=torch.bfloat16)
 def conditioned_prediction_example():
     tokenizers = get_esm3_model_tokenizers()
 

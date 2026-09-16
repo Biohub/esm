@@ -32,6 +32,7 @@ class EsmcSaeParams:
     codebook_dim: int = 65536
     k: int = 64
     layer: int = 0
+    use_residual_update_instead_of_states: bool = False
 
 
 @dataclass
@@ -55,6 +56,10 @@ class EsmcSaeConfig:
         Top-k sparsity per SAE.
     available_layers : list[int]
         Which backbone-layer indices the repo ships.
+    use_residual_update_instead_of_states : bool
+        ``True`` when these SAEs were trained on the residual update
+        ``h[i] - h[i-1]`` rather than the hidden state ``h[i]``. Mirrors the
+        training-time flag of the same meaning.
     """
 
     model_type = "esmc_sae"
@@ -63,6 +68,7 @@ class EsmcSaeConfig:
     codebook_dim: int = 65536
     k: int = 64
     available_layers: list[int] | None = None
+    use_residual_update_instead_of_states: bool = False
 
     def __post_init__(self) -> None:
         self.available_layers = (
@@ -78,6 +84,10 @@ class EsmcSaeConfig:
             codebook_dim=raw["codebook_dim"],
             k=raw["k"],
             available_layers=raw.get("available_layers"),
+            # The 97 repos published before this flag existed carry no key.
+            use_residual_update_instead_of_states=raw.get(
+                "use_residual_update_instead_of_states", False
+            ),
         )
 
     def save_pretrained(self, directory: str | os.PathLike) -> None:
@@ -285,6 +295,9 @@ class EsmcSaeModel(nn.Module):
                 codebook_dim=self.config.codebook_dim,
                 k=self.config.k,
                 layer=layer_idx,
+                use_residual_update_instead_of_states=(
+                    self.config.use_residual_update_instead_of_states
+                ),
             )
             # Build on the meta device so we don't allocate weights that
             # ``load_state_dict`` would immediately overwrite.

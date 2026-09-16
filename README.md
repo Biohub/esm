@@ -37,14 +37,30 @@ The **[ESM Atlas](https://biohub.ai/esm/protein/atlas)** is a map of 6.8 billion
 For information on using ESM3, see the [ESM3 README](https://github.com/Biohub/esm/blob/main/_assets/ESM3_README.md).
 
 ## Table of Contents
-
+- [ESM on PyPI](#esm-on-pypi)
+- [ESM Package vs. Hugging Face Transformers Usage](#esm-package-vs-hugging-face-transformers-usage)
 - [ESMC](#esmc)
 - [ESMC Sparse Autoencoders](#esmc-sparse-autoencoders)
 - [ESMFold2](#esmfold2)
-- [Batch Inference](#batch-inference)
+- [Parallel Job Execution](#parallel-job-execution)
 - [Frontier-Safety](#frontier-safety)
 - [Licenses](#licenses)
 - [Citations](#citations)
+
+## ESM on PyPI
+<a name="esm-on-pypi"></a>
+
+[`esm v3.4.post1`](https://github.com/Biohub/esm/releases/tag/v3.4.1.post1) is now available on PyPI with full support for ESMC and ESMFold2.
+
+## ESM Package vs. Hugging Face Transformers Usage
+<a name="esm-package-vs-hugging-face-transformers-usage"></a>
+ESMC and ESMFold2 are now available in Hugging Face Transformers starting with [v5.16.0](https://github.com/huggingface/transformers/releases/tag/v5.16.0) (and subsequent releases, including v5.16.1).
+
+The ESM package and the Hugging Face Transformers implementation are suited for differing purposes:
+
+|  | Esm Package | Hugging Face Transformers |
+| :---- | :---- | :---- |
+| Use cases | <ul><li> Use for production inference because it contains the optimized dependencies and inference path. </li><li> Full support for ESMC and ESMFold2 along with [Fold-CP](https://arxiv.org/abs/2603.14806) for folding longer sequences. | <ul><li>Access ESMC and ESMFold2 using the familiar Transformers API alongside thousands of other models, lowering the barrier for experimentation, benchmarking, and integration into existing ML workflows. </li><li>Use ESM models within the broader Hugging Face ecosystem, including downstream libraries and tooling. Quickly evaluate the models Note that the Transformers implementation uses a different dependency stack to conform to Transformers requirements. |
 
 ## ESMC
 <a name="esmc"></a>
@@ -174,6 +190,9 @@ output.sae_outputs["layer60"]  # sparse.coo tensor
 print(output.sae_outputs["layer60"].shape)
 
 ```
+
+SAEs come in two kinds. Most take the hidden state `h[N]`; some take the residual update `h[N] - h[N-1]`. A repo declares which via `use_residual_update_instead_of_states` in its `config.json`, and the backbone feeds each attached SAE accordingly.
+
 ### Running SAEs Through The Biohub Platform
 
 For a tutorial on using SAEs using the Biohub Platform, see [here](https://github.com/Biohub/esm/blob/main/cookbook/tutorials/esmc_sae_feature_interpretation.ipynb).
@@ -294,6 +313,7 @@ with open("result.cif", "w") as f:
 For tutorials on how to use ESMFold2, see our [tutorials](https://github.com/Biohub/esm/tree/main/cookbook/tutorials).
 
 ## Parallel Job Execution
+<a name="parallel-job-execution"></a>
 For jobs that require processing multiple inputs, the Parallel Executor sends parallel requests, executing them concurrently and efficiently while respecting rate limits and adapting to request latency. The following example provides an example of using the parallel_executor context manager when embedding sequences.
 
 ```py

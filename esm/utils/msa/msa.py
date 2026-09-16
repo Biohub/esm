@@ -58,14 +58,21 @@ def stack_a3m_deletion_counts(sequences: Sequence[str]) -> np.ndarray | None:
     Raises on a ragged alignment, where the rows disagree on how many match columns
     they describe.
     """
-    rows = [a3m_deletion_counts(seq) for seq in sequences]
-    for row in rows[1:]:
-        if len(row) != len(rows[0]):
+    if len(sequences) == 0:
+        return None
+    first = a3m_deletion_counts(sequences[0])
+    # Filled row by row
+    out = np.empty((len(sequences), len(first)), dtype=np.float32)
+    out[0] = first
+    for index in range(1, len(sequences)):
+        row = a3m_deletion_counts(sequences[index])
+        if len(row) != out.shape[1]:
             raise ValueError(
                 "A3M match-column count mismatch. "
-                f"Expected: {len(rows[0])}, Received: {len(row)}"
+                f"Expected: {out.shape[1]}, Received: {len(row)}"
             )
-    return np.stack(rows).astype(np.float32) if rows else None
+        out[index] = row
+    return out
 
 
 @dataclass(frozen=True)
@@ -105,21 +112,19 @@ class MSA(SequentialDataclass):
         max_sequences: int | None = None,
     ) -> MSA:
         entries = []
-        deletion_rows: list[np.ndarray] = []
+        # Only kept when the insertions are about to be stripped out of `entries`,
+        # since they are what the counts are derived from.
+        stripped_from: list[str] = []
         for header, raw in islice(read_sequences(path), max_sequences):
-            deletion_row = a3m_deletion_counts(raw)
-            if deletion_rows and len(deletion_row) != len(deletion_rows[0]):
-                raise ValueError(
-                    "A3M match-column count mismatch. "
-                    f"Expected: {len(deletion_rows[0])}, Received: {len(deletion_row)}"
-                )
-            deletion_rows.append(deletion_row)
-            seq = remove_insertions_from_sequence(raw) if remove_insertions else raw
-            entries.append(FastaEntry(header, seq))
-        deletions = (
-            np.stack(deletion_rows).astype(np.float32) if deletion_rows else None
+            if remove_insertions:
+                stripped_from.append(raw)
+                entries.append(FastaEntry(header, remove_insertions_from_sequence(raw)))
+            else:
+                entries.append(FastaEntry(header, raw))
+        counted_from = (
+            stripped_from if remove_insertions else [e.sequence for e in entries]
         )
-        return cls(entries, deletions=deletions)
+        return cls(entries, deletions=stack_a3m_deletion_counts(counted_from))
 
     def to_a3m(self, path: PathOrBuffer) -> None:
         write_sequences(self.entries, path)
