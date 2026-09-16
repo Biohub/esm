@@ -1,7 +1,7 @@
 import pytest
 import torch
 
-from esm.utils.sampling import sample_logits
+from esm.utils.sampling import sample_logits, top_p_logits
 
 
 def test_sample_logits():
@@ -35,4 +35,18 @@ def test_sample_logits():
         )
 
 
+def test_top_p_logits_reaches_threshold():
+    # top-p keeps the smallest set of tokens whose cumulative probability reaches
+    # top_p, including the token that crosses the threshold; the kept mass must be
+    # >= top_p, not < top_p.
+    probs = torch.tensor([0.4, 0.3, 0.2, 0.1])
+    logits = torch.log(probs).unsqueeze(0)
+    for top_p, expected_kept in [(0.8, [0, 1, 2]), (0.7, [0, 1]), (0.35, [0])]:
+        out = top_p_logits(logits.clone(), top_p=top_p)
+        kept = (out.squeeze(0) > torch.finfo(out.dtype).min).nonzero().squeeze(-1)
+        assert kept.tolist() == expected_kept
+        assert probs[kept].sum().item() >= top_p - 1e-6
+
+
 test_sample_logits()
+test_top_p_logits_reaches_threshold()

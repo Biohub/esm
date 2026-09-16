@@ -299,8 +299,14 @@ def top_p_logits(logits: torch.Tensor, top_p: float | torch.Tensor) -> torch.Ten
 
     # Sort logits in descending order and extract the mask for the top_p
     sorted_logits, sorted_indices = torch.sort(logits, dim=-1, descending=True)
-    cumsum_logits = sorted_logits.softmax(-1).cumsum(-1)
-    top_p_mask = cumsum_logits <= top_p[:, None]
+    sorted_probs = sorted_logits.softmax(-1)
+    cumsum_logits = sorted_probs.cumsum(-1)
+    # Keep the smallest set of tokens whose cumulative probability reaches top_p,
+    # including the token that crosses the threshold (the cumulative mass *before*
+    # it is still below top_p). Masking on the inclusive cumulative sum
+    # (`cumsum <= top_p`) drops that crossing token, leaving the kept mass below
+    # top_p.
+    top_p_mask = (cumsum_logits - sorted_probs) < top_p[:, None]
 
     # Make sure at least one token is sampled
     top_p_mask[:, 0] = True
