@@ -70,8 +70,8 @@ def raw_forward(model: EsmcForMaskedLM):
     tokenizer = EsmcTokenizer()
     encoded = tokenizer(sequences, return_tensors="pt", padding=True)
     output = model(
-        input_ids=encoded["input_ids"],
-        attention_mask=encoded["attention_mask"],
+        input_ids=encoded["input_ids"].to(model.device),
+        attention_mask=encoded["attention_mask"].to(model.device),
         output_hidden_states=True,
     )
     logits, embeddings, hiddens = (

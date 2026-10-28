@@ -20,7 +20,7 @@ pins, so take the prebuilt wheel from the
 [EvolutionaryScale wheels release](https://github.com/evolutionaryscale/wheels/releases).
 
 ```bash
-pip install "esm[gpu] @ git+https://github.com/Biohub/esm.git@main"
+pip install "esm @ git+https://github.com/Biohub/esm.git@main"
 ```
 
 Use [esmfold2-cp.py](esmfold2-cp.py) as the CP version of the single-GPU

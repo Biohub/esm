@@ -27,7 +27,8 @@ dependencies = [
   "transformers>=4.57.6,<5.0.0",
   "ipython",
   "einops",
-  "biotite>=1.0.0",
+  # biotite 2 renamed RigidTransformation fields and annotate_sse output, breaking from_rcsb.
+  "biotite>=1.0.0,<2",
   "rdkit",
   "msgpack-numpy",
   "biopython",
@@ -61,7 +62,7 @@ addopts = """
   --cov=esm
 	--cov-report term-missing:skip-covered
 	-n auto
-	-m 'not gpu and not manual and not merge_only'
+	-m 'not gpu and not manual'
 	--ignore=tests/oss_pytests/test_oss_client.py
 """
 markers = [

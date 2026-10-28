@@ -292,7 +292,10 @@ async def test_run_accepts_single_task_response(api, asynchronous):
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize("asynchronous", [False, True], ids=["sync", "async"])
-@pytest.mark.parametrize("model", ["esmfold2-2026-05", "esmfold2-fast-2026-05"])
+@pytest.mark.parametrize(
+    "model",
+    ["esmfold2-2026-05", "esmfold2-fast-2026-05", "esmfold2-2026-05-cutoff-2025"],
+)
 @pytest.mark.parametrize("endpoint", ["fold", "fold_all_atom"])
 async def test_public_folding_submit_and_decode(api, asynchronous, model, endpoint):
     client = api.client(model=model)

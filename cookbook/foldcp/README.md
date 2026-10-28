@@ -24,7 +24,7 @@ Start from the NVIDIA PyTorch container, then install the dependencies:
 docker run --gpus all -it --rm nvcr.io/nvidia/pytorch:26.03-py3 bash -l
 
 # ESM plus the Triton kernels
-pip install "esm[gpu] @ git+https://github.com/Biohub/esm.git@main"
+pip install "esm @ git+https://github.com/Biohub/esm.git@main"
 ```
 
 Context parallelism additionally needs `transformer-engine`, which is not
