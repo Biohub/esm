@@ -583,7 +583,6 @@ class FoldRequest:
     sequence: str | None = None
     config: FoldingConfig | None = None
     msa: MSAInput = None
-    target_structure: ProteinComplex | None = None
     chains: list[ChainInput] | None = None
     residues_of_interest: list[ResidueRef] | None = None
     interface_chain_id: str | None = None

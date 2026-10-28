@@ -27,7 +27,6 @@ from esm.sdk.api import (
     InverseFoldingConfig,
     LogitsConfig,
     LogitsOutput,
-    ProteinComplex,
     ProteinType,
     ResidueGeometry,
     ResidueMetrics,
@@ -216,7 +215,6 @@ class SequenceStructureForgeInferenceClient(_BaseForgeInferenceClient):
         sequence: str | None,
         msa: MSAInput,
         config: FoldingConfig,
-        target_structure: ProteinComplex | None,
         model_name: str | None,
         chains: list[ChainInput] | None = None,
         residues_of_interest: list[ResidueRef] | None = None,
@@ -274,11 +272,6 @@ class SequenceStructureForgeInferenceClient(_BaseForgeInferenceClient):
         request["lm_mask_pct"] = _resolve_lm_mask_pct(config.lm_mask_pct, model_name)
         request["msa_max_depth"] = config.msa_max_depth
         request["msa_column_mask_rate"] = config.msa_column_mask_rate
-        request["target_structure"] = (
-            target_structure.state_dict(json_serializable=True)
-            if target_structure
-            else None
-        )
         request["include_embeddings"] = config.include_embeddings
 
         request["model"] = model_name
@@ -343,7 +336,6 @@ class SequenceStructureForgeInferenceClient(_BaseForgeInferenceClient):
         model_name: str | None = None,
         msa: MSAInput = None,
         config: FoldingConfig = FoldingConfig(),
-        target_structure: ProteinComplex | None = None,
         chains: list[ChainInput] | None = None,
         residues_of_interest: list[ResidueRef] | None = None,
         interface_chain_id: str | None = None,
@@ -356,7 +348,6 @@ class SequenceStructureForgeInferenceClient(_BaseForgeInferenceClient):
             model_name: Override the client level model name if needed.
             msa: Optional multi-sequence alignment data that may help some models fold the sequence.
             config: Optional configuration for folding parameters.
-            target_structure: Optional target structure to use for distogram conditioning.
             chains: The complex as named chains, the addressable form of `sequence`.
                 Supply this or `sequence`, not both.
             residues_of_interest: Residues to measure, each addressed as
@@ -370,13 +361,11 @@ class SequenceStructureForgeInferenceClient(_BaseForgeInferenceClient):
                 and ignored by the folding endpoint.
         """
         del potential_sequence_of_concern
-        _, folded_sequence = _fold_target(sequence, chains)
 
         request = self._process_fold_request(
             sequence,
             msa,
             config,
-            target_structure,
             model_name if model_name is not None else self.model,
             chains,
             residues_of_interest,
@@ -403,7 +392,6 @@ class SequenceStructureForgeInferenceClient(_BaseForgeInferenceClient):
         model_name: str | None = None,
         msa: MSAInput = None,
         config: FoldingConfig = FoldingConfig(),
-        target_structure: ProteinComplex | None = None,
         chains: list[ChainInput] | None = None,
         residues_of_interest: list[ResidueRef] | None = None,
         interface_chain_id: str | None = None,
@@ -416,7 +404,6 @@ class SequenceStructureForgeInferenceClient(_BaseForgeInferenceClient):
             model_name: Override the client level model name if needed.
             msa: Optional multi-sequence alignment data that may help some models fold the sequence.
             config: Optional configuration for folding parameters.
-            target_structure: Optional target structure to use for distogram conditioning.
             chains: The complex as named chains, the addressable form of `sequence`.
                 Supply this or `sequence`, not both.
             residues_of_interest: Residues to measure, each addressed as
@@ -436,7 +423,6 @@ class SequenceStructureForgeInferenceClient(_BaseForgeInferenceClient):
             sequence,
             msa,
             config,
-            target_structure,
             model_name if model_name is not None else self.model,
             chains,
             residues_of_interest,
@@ -1647,7 +1633,6 @@ class FoldHandler(EndpointHandler[FoldRequest, ESMProtein]):
             request.sequence,
             request.msa,
             request.config if request.config is not None else FoldingConfig(),
-            request.target_structure,
             _require_model(self.endpoint_name, model),
             request.chains,
             request.residues_of_interest,
