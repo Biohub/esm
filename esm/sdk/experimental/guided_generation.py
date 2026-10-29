@@ -113,7 +113,10 @@ class ESM3GuidedDecoding:
                         pt=[protein_tensor] * num_samples_per_step,
                     )
 
-                # Separate samples and their scores returned by the executor
+                # The executor returns failures in place of results after its retries.
+                for result in results:
+                    if isinstance(result, Exception):
+                        raise result
                 samples, scores = zip(*results)
             else:
                 # ----------------------------------------------
@@ -222,10 +225,13 @@ class ESM3GuidedDecoding:
                 structure=SamplingTrackConfig(temperature=temperature),
             ),
         )
-        assert not isinstance(denoised_protein_tensor_output, ESMProteinError)
+        # Raise the ESMProteinError itself so parallel_executor can retry transient ones.
+        if isinstance(denoised_protein_tensor_output, ESMProteinError):
+            raise denoised_protein_tensor_output
         denoised_protein_tensor = denoised_protein_tensor_output.protein_tensor
         denoised_protein = self.client.decode(denoised_protein_tensor)
-        assert not isinstance(denoised_protein, ESMProteinError)
+        if isinstance(denoised_protein, ESMProteinError):
+            raise denoised_protein
         return denoised_protein
 
     def maybe_add_default_structure_tokens(

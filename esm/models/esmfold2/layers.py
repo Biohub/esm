@@ -726,8 +726,40 @@ class SWAAtomBlock(nn.Module):
             else _gated_residual_raw
         )
 
-    def forward(self, x: Tensor, c_l: Tensor, attention_params: tuple) -> Tensor:
-        mod = self.adaln_modulation(c_l)
+    def _adaln_modulation_cached(
+        self, c_l: Tensor, inference_cache: dict[str, Any] | None
+    ) -> Tensor:
+        """``adaln_modulation(c_l)``, computed once per fold instead of per step.
+
+        ``c_l`` is the diffusion conditioning, which ``inference_cache`` already
+        holds fixed for the whole fold, so every diffusion step recomputes the
+        identical SiLU + Linear. One slot per block instance, in the caller's
+        per-fold cache, so nothing survives ``fold()``.
+
+        Keyed on the *identity* of ``c_l``: a different tensor object recomputes.
+        That makes the cache correct even where the conditioning is not actually
+        step-invariant -- it only stops paying off. In-place mutation of a cached
+        ``c_l`` would go unnoticed; nothing in the diffusion path does that.
+        """
+        if inference_cache is None or torch.is_grad_enabled() or c_l.requires_grad:
+            return self.adaln_modulation(c_l)
+        slot: dict[str, Any] = inference_cache.setdefault("atom_adaln", {}).setdefault(
+            self, {}
+        )
+        if slot.get("c_l") is not c_l:
+            slot.clear()
+            slot["c_l"] = c_l
+            slot["mod"] = self.adaln_modulation(c_l)
+        return slot["mod"]
+
+    def forward(
+        self,
+        x: Tensor,
+        c_l: Tensor,
+        attention_params: tuple,
+        inference_cache: dict[str, Any] | None = None,
+    ) -> Tensor:
+        mod = self._adaln_modulation_cached(c_l, inference_cache)
         if mod.dim() == 2:
             mod = mod.unsqueeze(1)
         shift_a, scale_a, gate_a, shift_f, scale_f, gate_f = mod.chunk(6, dim=-1)
@@ -796,10 +828,11 @@ class SWAAtomTransformer(nn.Module):
         c_l: Tensor,
         attention_params: tuple,
         return_intermediates: bool = False,
+        inference_cache: dict[str, Any] | None = None,
     ) -> Tensor | tuple[Tensor, list[Tensor]]:
         intermediates: list[Tensor] = []
         for block in self.blocks:
-            q_l = block(q_l, c_l, attention_params)
+            q_l = block(q_l, c_l, attention_params, inference_cache=inference_cache)
             if return_intermediates:
                 intermediates.append(q_l)
         if return_intermediates:
@@ -941,13 +974,24 @@ class EsmFold2AtomEncoder(nn.Module):
             r_to_q = self.coords_linear(r_input)
             q = q + r_to_q
 
-        c = c.repeat_interleave(num_diffusion_samples, 0)
+        # repeat_interleave allocates a fresh tensor of identical values on every
+        # diffusion step. Cache the expanded conditioning next to c_base so the
+        # blocks downstream see one object per fold and can key caches on it.
+        if layer_cache is not None:
+            c_exp = layer_cache.get("c_expanded")
+            if c_exp is None:
+                c_exp = c.repeat_interleave(num_diffusion_samples, 0)
+                layer_cache["c_expanded"] = c_exp
+            c = c_exp
+        else:
+            c = c.repeat_interleave(num_diffusion_samples, 0)
 
         result = self.atom_transformer(
             q_l=q,
             c_l=c,
             attention_params=attention_params,
             return_intermediates=return_intermediates,
+            inference_cache=inference_cache,
         )
         if return_intermediates:
             q, intermediates = result
@@ -1018,6 +1062,7 @@ class EsmFold2AtomDecoder(nn.Module):
         atom_attention_mask: Tensor,
         num_diffusion_samples: int = 1,
         return_intermediates: bool = False,
+        inference_cache: dict[str, Any] | None = None,
     ) -> tuple[Tensor, list[Tensor]]:
         """Returns (r_update, intermediates)."""
         atom_to_token_exp = atom_to_token.repeat_interleave(num_diffusion_samples, 0)
@@ -1030,6 +1075,7 @@ class EsmFold2AtomDecoder(nn.Module):
             c_l=c_l,
             attention_params=p_lm,
             return_intermediates=return_intermediates,
+            inference_cache=inference_cache,
         )
         if return_intermediates:
             q_l, intermediates = result
@@ -1686,6 +1732,7 @@ class DiffusionModule(nn.Module):
             atom_attention_mask=ref_mask,
             num_diffusion_samples=num_diffusion_samples,
             return_intermediates=return_atom_repr,
+            inference_cache=inference_cache,
         )
 
         # Step 8: compute denoised output

@@ -25,6 +25,101 @@ class ProteinType(ABC): ...
 
 ## Basic Types
 @define
+class ChainInput:
+    """One named chain of a complex.
+
+    Naming a chain rather than numbering it is what makes a residue address
+    survive its container changing. A positional index only means anything
+    against the exact string it was written against.
+
+    id (str): Chain identifier, unique within the request. One character, from
+        A-Z, a-z or 0-9, because that is all a PDB chain field holds.
+    sequence (str): This chain's residues. A '|' or ':' is rejected: the chain
+        list already names the boundaries, so a separator here would fold one
+        chain more than the request describes.
+    """
+
+    id: str
+    sequence: str
+
+
+@define
+class ResidueRef:
+    """A residue addressed per chain, which is what makes it unambiguous.
+
+    A count over the concatenated sequence shifts by one for each preceding chain
+    separator, so a caller who counts off the raw string names the wrong residue.
+    The chain id removes that failure mode.
+
+    position (int): 1-indexed position within the chain.
+    chain (str | None): Id of the chain holding this residue: one the request
+        named, or one of the A, B, C labels the server gives the '|'-separated
+        chains of a plain sequence. Optional for a single-chain input, required
+        when there are several, so omitting it cannot silently mean the first.
+    """
+
+    position: int
+    chain: str | None = None
+
+
+@define
+class ResolvedResidue:
+    """A requested residue with the one-letter amino acid it landed on.
+
+    The server echoes every address in one shape, whether the request named
+    chains or used the plain-sequence shorthand, so a caller never branches on
+    how it asked. A wrong position shows as a wrong amino acid rather than as a
+    plausible result.
+    """
+
+    chain: str
+    position: int
+    residue: str
+
+
+@define
+class ResidueGeometry:
+    """Whether the requested residues form one compact, reachable patch.
+
+    pairwise_ca_distances_angstrom holds {i, j, distance_angstrom} records over
+    unordered pairs, so it grows quadratically with the number of residues.
+    """
+
+    max_ca_distance_angstrom: float | None
+    pairwise_ca_distances_angstrom: list[dict]
+
+
+@define
+class ResidueMetrics:
+    """What a fold measured at the residues the request asked about.
+
+    Present only when the request set `residues_of_interest`, and every list is
+    in the order those residues were given.
+
+    plddt is returned per residue rather than as a mean because a complex's
+    `plddt` carries one slot per chain separator: indexing it directly is right
+    for a single chain and silently wrong for several.
+
+    resolved (list[ResolvedResidue]): Which residue each address landed on.
+    plddt (list[float | None]): pLDDT at each requested residue.
+    geometry (ResidueGeometry | None): How spread out the requested residues are.
+    min_distances_to_interface_angstrom (list[float | None]): Closest heavy-atom
+        approach to the interface chain. None for a residue with no resolved
+        atoms -- unknown, not far. Only for a multi-chain input.
+    relative_sasa (list[float | None] | None): Solvent accessibility of each
+        requested residue, divided by its Gly-X-Gly maximum. Can exceed 1.0. None
+        for a residue that the server cannot measure. The whole field is None when
+        the server cannot measure the structure.
+    """
+
+    resolved: list[ResolvedResidue] = attr.Factory(list)
+    plddt: list[float | None] = attr.Factory(list)
+    geometry: ResidueGeometry | None = None
+    min_distances_to_interface_angstrom: list[float | None] = attr.Factory(list)
+    relative_sasa: list[float | None] | None = None
+
+
+@define
 class ESMProtein(ProteinType):
     # Tracks
     sequence: str | None = None
@@ -47,6 +142,20 @@ class ESMProtein(ProteinType):
     output_embedding_pair_pooled: torch.Tensor | None = None
     residue_index: torch.Tensor | None = None
     entity_id: torch.Tensor | None = None
+
+    # Chain names in the order they were folded, whether the request supplied them
+    # or the server assigned A, B, C. `coordinates` is one flat positional array,
+    # so entry i here is the i-th chain of it and the caller splits by chain length.
+    chains: list[str] | None = None
+    # pLDDT split per chain, with the separator slots removed, in the order the
+    # chains were folded. This is what a per-chain or whole-complex mean should be
+    # computed from: `plddt` keeps the decoder's raw layout and reports NaN per
+    # separator. An entry is NaN only where the model gave no confidence for that
+    # residue. Present for every multi-chain fold, including one named by
+    # `sequence` alone -- so this can be set while `chains` is None.
+    chain_plddt: list[torch.Tensor] | None = None
+    # Only when the request set `residues_of_interest`.
+    residue_metrics: ResidueMetrics | None = None
 
     # When calling EvolutionaryScale API, use this flag to disclose any
     # sequences that may potentially have concerns.
@@ -201,6 +310,12 @@ class ESMProtein(ProteinType):
         else:
             plddt = self.plddt
 
+        if self.chains is not None and len(self.chains) != len(chain_boundaries):
+            raise ValueError(
+                f"ESMProtein names {len(self.chains)} chains but its sequence has "
+                f"{len(chain_boundaries)}"
+            )
+
         pred_chains = []
         for i, (start, end) in enumerate(chain_boundaries):
             if i >= len(SINGLE_LETTER_CHAIN_IDS):
@@ -213,6 +328,8 @@ class ESMProtein(ProteinType):
                 sequence=self.sequence[start:end],
                 chain_id=gt_chains[i].chain_id
                 if gt_chains is not None
+                else self.chains[i]
+                if self.chains is not None
                 else SINGLE_LETTER_CHAIN_IDS[i],
                 residue_index=self.residue_index[start:end]
                 if self.residue_index is not None
@@ -462,10 +579,13 @@ class FoldMaxAccuracyRequest:
 
 @define
 class FoldRequest:
-    sequence: str
+    # Exactly one of sequence and chains names the target.
+    sequence: str | None = None
     config: FoldingConfig | None = None
     msa: MSAInput = None
-    target_structure: ProteinComplex | None = None
+    chains: list[ChainInput] | None = None
+    residues_of_interest: list[ResidueRef] | None = None
+    interface_chain_id: str | None = None
 
 
 @define

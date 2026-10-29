@@ -10,6 +10,7 @@ import attr
 import torch
 
 from esm.sdk.api import (
+    ChainInput,
     ESM3InferenceClient,
     ESMCInferenceClient,
     ESMProtein,
@@ -26,8 +27,11 @@ from esm.sdk.api import (
     InverseFoldingConfig,
     LogitsConfig,
     LogitsOutput,
-    ProteinComplex,
     ProteinType,
+    ResidueGeometry,
+    ResidueMetrics,
+    ResidueRef,
+    ResolvedResidue,
     SamplingConfig,
     SamplingTrackConfig,
 )
@@ -99,6 +103,70 @@ def _maybe_b64_decode(obj, return_bytes: bool):
     )
 
 
+def _attrs_from_dict(cls, data: dict | None):
+    """Build an attrs response type from the API's dict.
+
+    Unknown keys are dropped, so a field the API adds does not break an older SDK.
+    A required key that the API stops sending raises rather than reads as a
+    plausible value.
+    """
+    if data is None:
+        return None
+    names = {field.name for field in attr.fields(cls)}
+    return cls(**{key: value for key, value in data.items() if key in names})
+
+
+def _fold_target(
+    sequence: str | None, chains: list[ChainInput] | None
+) -> tuple[dict[str, Any], str]:
+    """The request fields naming what to fold, and the '|'-joined sequence.
+
+    The joined form is what an MSA lookup takes, so a chain-addressed request
+    still needs it.
+    """
+    if (sequence is None) == (chains is None):
+        raise ValueError("Supply exactly one of sequence or chains.")
+    if chains is not None:
+        if not chains:
+            raise ValueError("chains is empty. Please provide a valid input.")
+        return (
+            {"chains": [attr.asdict(chain) for chain in chains]},
+            "|".join(chain.sequence for chain in chains),
+        )
+    assert sequence is not None
+    if len(sequence) == 0:
+        raise ValueError("Input sequence length is 0. Please provide a valid input.")
+    return {"sequence": sequence}, sequence
+
+
+def _chain_plddt(data: dict[str, Any]) -> list[torch.Tensor] | None:
+    """Per-chain pLDDT as tensors, with NaN where the model gave no confidence."""
+    chain_plddt = data.get("chain_plddt", None)
+    if chain_plddt is None:
+        return None
+    return [
+        torch.tensor([float("nan") if value is None else value for value in chain])
+        for chain in chain_plddt
+    ]
+
+
+def _residue_metrics(data: dict[str, Any]) -> ResidueMetrics | None:
+    """The per-residue block of a fold reply, or None when none was asked for."""
+    resolved = data.get("resolved_residues", None)
+    if resolved is None:
+        return None
+    geometry = data.get("residue_geometry", None)
+    return ResidueMetrics(
+        resolved=[_attrs_from_dict(ResolvedResidue, residue) for residue in resolved],
+        plddt=data.get("residue_plddt", None) or [],
+        geometry=_attrs_from_dict(ResidueGeometry, geometry),
+        min_distances_to_interface_angstrom=(
+            data.get("min_distances_to_interface_angstrom", None) or []
+        ),
+        relative_sasa=data.get("residue_relative_sasa", None),
+    )
+
+
 def _validate_protein_tensor_input(input):
     if isinstance(input, ESMProteinError):
         raise ValueError(
@@ -144,23 +212,35 @@ class SequenceStructureForgeInferenceClient(_BaseForgeInferenceClient):
 
     @staticmethod
     def _process_fold_request(
-        sequence: str,
+        sequence: str | None,
         msa: MSAInput,
         config: FoldingConfig,
-        target_structure: ProteinComplex | None,
         model_name: str | None,
+        chains: list[ChainInput] | None = None,
+        residues_of_interest: list[ResidueRef] | None = None,
+        interface_chain_id: str | None = None,
     ):
         if config.include_distogram:
             raise ValueError(
                 "include_distogram is not supported for Forge/Biohub Platform right now"
             )
 
-        if len(sequence) == 0:
-            raise ValueError(
-                "Input sequence length is 0. Please provide a valid input."
-            )
+        target, _ = _fold_target(sequence, chains)
+        request: dict[str, Any] = dict(target)
 
-        request: dict[str, Any] = {"sequence": sequence}
+        if residues_of_interest is not None:
+            # Omitting the field and sending an empty list are different requests to
+            # the server: one wants no metrics, the other asks for metrics on nothing.
+            if not residues_of_interest:
+                raise ValueError(
+                    "residues_of_interest is empty. Omit it to ask for no residue "
+                    "metrics."
+                )
+            request["residues_of_interest"] = [
+                attr.asdict(residue) for residue in residues_of_interest
+            ]
+        if interface_chain_id is not None:
+            request["interface_chain_id"] = interface_chain_id
 
         if msa is None:
             request["msa"] = None
@@ -201,7 +281,9 @@ class SequenceStructureForgeInferenceClient(_BaseForgeInferenceClient):
     @staticmethod
     def _process_fold_response(data: dict[str, Any]) -> ESMProtein:
         return ESMProtein(
-            sequence=data["sequence"],
+            # The server echoes the request's raw separators, and ':' is also one, but
+            # ESMProtein splits chains only on '|'.
+            sequence=data["sequence"].replace(":", "|"),
             coordinates=maybe_tensor(data["coordinates"], convert_none_to_nan=True),
             ptm=maybe_tensor(data.get("ptm", None)),
             plddt=maybe_tensor(data.get("plddt", None), convert_none_to_nan=True),
@@ -220,6 +302,9 @@ class SequenceStructureForgeInferenceClient(_BaseForgeInferenceClient):
             entity_id=maybe_tensor(
                 data.get("entity_id", None), convert_none_to_nan=True
             ),
+            chains=data.get("chains", None),
+            chain_plddt=_chain_plddt(data),
+            residue_metrics=_residue_metrics(data),
         )
 
     @staticmethod
@@ -246,22 +331,29 @@ class SequenceStructureForgeInferenceClient(_BaseForgeInferenceClient):
     @retry_decorator
     async def async_fold(
         self,
-        sequence: str,
+        sequence: str | None = None,
         potential_sequence_of_concern: bool = False,
         model_name: str | None = None,
         msa: MSAInput = None,
         config: FoldingConfig = FoldingConfig(),
-        target_structure: ProteinComplex | None = None,
+        chains: list[ChainInput] | None = None,
+        residues_of_interest: list[ResidueRef] | None = None,
+        interface_chain_id: str | None = None,
         disable_cache: bool = False,
     ) -> ESMProtein | ESMProteinError:
         """Predict coordinates for a protein sequence.
 
         Args:
-            sequence: Protein sequence to be folded.
+            sequence: Protein sequence to be folded; '|' separates chains.
             model_name: Override the client level model name if needed.
             msa: Optional multi-sequence alignment data that may help some models fold the sequence.
             config: Optional configuration for folding parameters.
-            target_structure: Optional target structure to use for distogram conditioning.
+            chains: The complex as named chains, the addressable form of `sequence`.
+                Supply this or `sequence`, not both.
+            residues_of_interest: Residues to measure, each addressed as
+                {chain, position}. The result then carries `residue_metrics`.
+            interface_chain_id: Chain to measure interface distances against. Every
+                other chain is the far side. Defaults to the last chain.
             disable_cache: Optional flag to disable caching
 
         Deprecated:
@@ -274,8 +366,10 @@ class SequenceStructureForgeInferenceClient(_BaseForgeInferenceClient):
             sequence,
             msa,
             config,
-            target_structure,
             model_name if model_name is not None else self.model,
+            chains,
+            residues_of_interest,
+            interface_chain_id,
         )
 
         try:
@@ -293,22 +387,29 @@ class SequenceStructureForgeInferenceClient(_BaseForgeInferenceClient):
     @retry_decorator
     def fold(
         self,
-        sequence: str,
+        sequence: str | None = None,
         potential_sequence_of_concern: bool = False,
         model_name: str | None = None,
         msa: MSAInput = None,
         config: FoldingConfig = FoldingConfig(),
-        target_structure: ProteinComplex | None = None,
+        chains: list[ChainInput] | None = None,
+        residues_of_interest: list[ResidueRef] | None = None,
+        interface_chain_id: str | None = None,
         disable_cache: bool = False,
     ) -> ESMProtein | ESMProteinError:
         """Predict coordinates for a protein sequence.
 
         Args:
-            sequence: Protein sequence to be folded.
+            sequence: Protein sequence to be folded; '|' separates chains.
             model_name: Override the client level model name if needed.
             msa: Optional multi-sequence alignment data that may help some models fold the sequence.
             config: Optional configuration for folding parameters.
-            target_structure: Optional target structure to use for distogram conditioning.
+            chains: The complex as named chains, the addressable form of `sequence`.
+                Supply this or `sequence`, not both.
+            residues_of_interest: Residues to measure, each addressed as
+                {chain, position}. The result then carries `residue_metrics`.
+            interface_chain_id: Chain to measure interface distances against. Every
+                other chain is the far side. Defaults to the last chain.
             disable_cache: Optional flag to disable caching
 
         Deprecated:
@@ -322,8 +423,10 @@ class SequenceStructureForgeInferenceClient(_BaseForgeInferenceClient):
             sequence,
             msa,
             config,
-            target_structure,
             model_name if model_name is not None else self.model,
+            chains,
+            residues_of_interest,
+            interface_chain_id,
         )
 
         try:
@@ -1530,8 +1633,10 @@ class FoldHandler(EndpointHandler[FoldRequest, ESMProtein]):
             request.sequence,
             request.msa,
             request.config if request.config is not None else FoldingConfig(),
-            request.target_structure,
             _require_model(self.endpoint_name, model),
+            request.chains,
+            request.residues_of_interest,
+            request.interface_chain_id,
         )
 
     def _process_response(self, response: dict) -> ESMProtein:

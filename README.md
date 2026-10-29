@@ -55,31 +55,18 @@ For information on using ESM3, see the [ESM3 README](https://github.com/Biohub/e
 
 ### Installation of ESM Package
 
-| Command | Contents |
-| :---- | :---- |
-| `pip install esm` | The models and the reference PyTorch path. No CUDA kernels. |
-| `pip install "esm[gpu]"` | Adds the xformers and cuequivariance kernels. Linux x86-64 only; a no-op elsewhere. |
+```
+pip install esm
+```
 
-> **Changed in this release.** `pip install esm` no longer installs the
-> cuequivariance backend. Install `"esm[gpu]"` to keep it.
-
-Notes:
-
-- Kernels are optional at runtime. The default install runs everywhere, it is only slower on a GPU.
-- Triton is not one of the extras. Torch requires it on Linux, so the `"fused"` backend already works in the default install.
+This installs the models, the reference PyTorch path, and Triton on Linux x86-64, so the ESMFold2 `"fused"` backend works without extra packages.
 
 #### Install size
 
-| Install | Size |
-| :---- | :---- |
-| `pip install esm` | about 5.6 GB |
-| `pip install "esm[gpu]"` | about 5.8 GB |
-
-The two are nearly the same size because torch on PyPI is always the CUDA
-build, about 4.6 GB of either total. The extra adds roughly 0.2 GB on top.
+`pip install esm` is about 5.6 GB, of which about 4.6 GB is the CUDA build of torch that PyPI always serves.
 
 Installing torch from its CPU-only index replaces that 4.6 GB CUDA build with
-an 0.8 GB CPU build, which is where the real saving is:
+an 0.8 GB CPU build:
 
 ```
 pip install esm --index-url https://download.pytorch.org/whl/cpu --extra-index-url https://pypi.org/simple
@@ -354,7 +341,7 @@ For high quality structure prediction, see the [maximum-accuracy folding SDK gui
 
 ## Batch API
 
-The Biohub Batch API processes larger or longer-running workloads in the background and offers higher limits. See `ForgeBatchClient` and the [Batch API guide](cookbook/snippets/batch.md) for examples of submission, progress checks, result retrieval, cache control, and cancellation. Queued tasks expire after 24 hours; results are retained for 31 days after submission.
+The Biohub Batch API processes larger or longer-running workloads in the background and offers higher limits, including folding inputs up to 4096 tokens rather than the Sync API's 768. See `ForgeBatchClient` and the [Batch API guide](cookbook/snippets/batch.md) for examples of submission, progress checks, result retrieval, cache control, and cancellation. Queued tasks expire after 24 hours; results are retained for 31 days after submission.
 
 ## Parallel Job Execution
 <a name="parallel-job-execution"></a>

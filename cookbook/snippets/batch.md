@@ -12,6 +12,8 @@ Use the Biohub Batch API to process larger or longer-running workloads in the ba
 | `fold_all_atom` | Molecular-complex prediction with ESMFold2 | [Input guide](../../README.md#running-esmfold2-through-the-biohub-platform) |
 | `fold_max_accuracy` | Maximum-accuracy molecular-complex prediction | [SDK guide](fold_max_accuracy.md) |
 
+Every fold service accepts inputs up to 4096 tokens, against 768 over the Sync API.
+
 We will be launching more models/services soon!
 
 ## Submit, wait, and retrieve results

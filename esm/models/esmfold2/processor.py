@@ -183,6 +183,11 @@ def clean_esmfold2_input(input: StructurePredictionInput) -> StructurePrediction
     )
 
 
+def _on_cpu(t: torch.Tensor | None, i: int = 0) -> torch.Tensor | None:
+    """``t[i]`` detached on the host, or ``None`` when the output is absent."""
+    return t[i].detach().cpu() if t is not None else None
+
+
 class ESMFold2InputBuilder:
     def __init__(self, ccd_cache: Path | None = None):
         load_ccd(ccd_cache)
@@ -283,6 +288,15 @@ class ESMFold2InputBuilder:
         emb_seq_t = output.get("output_embedding_sequence")
         emb_pair_pooled_t = output.get("output_embedding_pair_pooled")
 
+        # Sample-invariant outputs: indexing [0] inside the loop re-ran the DtoH
+        # copy once per diffusion sample. The distogram is L*L*64 fp32, so at
+        # L=1000, Bm=5 that was 5 x 256 MB of pageable copies.
+        distogram_c = _on_cpu(distogram_t)
+        residue_index_c = _on_cpu(residue_index_t)
+        entity_id_c = _on_cpu(entity_id_t)
+        emb_seq_c = _on_cpu(emb_seq_t)
+        emb_pair_pooled_c = _on_cpu(emb_pair_pooled_t)
+
         results: list[MolecularComplexResult] = []
         for i in range(Bm):
             mc = build_molecular_complex_from_features(
@@ -300,35 +314,13 @@ class ESMFold2InputBuilder:
                     plddt=plddts[i].detach().cpu(),
                     ptm=float(ptm_t[i].item()) if ptm_t is not None else None,
                     iptm=float(iptm_t[i].item()) if iptm_t is not None else None,
-                    pae=pae_t[i].detach().cpu() if pae_t is not None else None,
-                    distogram=(
-                        distogram_t[0].detach().cpu()
-                        if distogram_t is not None
-                        else None
-                    ),
-                    pair_chains_iptm=(
-                        pair_chains_t[i].detach().cpu()
-                        if pair_chains_t is not None
-                        else None
-                    ),
-                    residue_index=(
-                        residue_index_t[0].detach().cpu()
-                        if residue_index_t is not None
-                        else None
-                    ),
-                    entity_id=(
-                        entity_id_t[0].detach().cpu()
-                        if entity_id_t is not None
-                        else None
-                    ),
-                    output_embedding_sequence=(
-                        emb_seq_t[0].detach().cpu() if emb_seq_t is not None else None
-                    ),
-                    output_embedding_pair_pooled=(
-                        emb_pair_pooled_t[0].detach().cpu()
-                        if emb_pair_pooled_t is not None
-                        else None
-                    ),
+                    pae=_on_cpu(pae_t, i),
+                    distogram=distogram_c,
+                    pair_chains_iptm=_on_cpu(pair_chains_t, i),
+                    residue_index=residue_index_c,
+                    entity_id=entity_id_c,
+                    output_embedding_sequence=emb_seq_c,
+                    output_embedding_pair_pooled=emb_pair_pooled_c,
                 )
             )
 

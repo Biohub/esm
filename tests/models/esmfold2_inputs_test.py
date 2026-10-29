@@ -789,6 +789,48 @@ def test_decode_returns_one_result_for_one_sample_and_a_list_for_more(
     )
 
 
+def test_decode_copies_sample_invariant_outputs_once(tiny_esmfold2, input_builder):
+    """Sample-invariant fields must be one host copy shared by every result.
+
+    The distogram is L*L*64 fp32, so a per-sample ``.cpu()`` cost 5x130 ms at
+    L=1000. Identity, not equality, is what pins the copy count.
+    """
+    features, lm_hidden_states, chain_infos = esmfold2_complex_features(
+        tiny_esmfold2, DECODE_CHAINS
+    )
+
+    with torch.no_grad():
+        output = tiny_esmfold2(
+            **features,
+            lm_hidden_states=lm_hidden_states,
+            num_loops=1,
+            num_sampling_steps=2,
+            num_diffusion_samples=3,
+            include_embeddings=True,  # otherwise the two embedding fields are None
+        )
+
+    results = input_builder.decode(
+        output, features, chain_infos, num_diffusion_samples=3
+    )
+    assert len(results) == 3
+    # All five fields the hoist covers. Four carry a tensor and are pinned by
+    # identity; output_embedding_sequence is never produced (see decode's
+    # docstring: it "stays None, as it does over the API"), so it is pinned as
+    # absent instead -- if it ever starts being emitted, this fails and the
+    # identity check above must grow to cover it.
+    shared = ("distogram", "residue_index", "entity_id", "output_embedding_pair_pooled")
+    for field in shared:
+        first = getattr(results[0], field)
+        assert first is not None, f"{field} is absent, so the test cannot pin it"
+        for other in results[1:]:
+            assert getattr(other, field) is first, f"{field} was copied per sample"
+    assert all(r.output_embedding_sequence is None for r in results)
+
+    # Per-sample fields must still be distinct objects.
+    assert results[0].plddt is not results[1].plddt
+    assert results[0].pae is not results[1].pae
+
+
 def test_decode_keeps_every_chain_and_round_trips_through_mmcif(
     input_builder, folded_complex
 ):

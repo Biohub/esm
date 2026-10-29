@@ -27,7 +27,8 @@ dependencies = [
   "transformers>=4.57.6,<5.0.0",
   "ipython",
   "einops",
-  "biotite>=1.0.0",
+  # biotite 2 renamed RigidTransformation fields and annotate_sse output, breaking from_rcsb.
+  "biotite>=1.0.0,<2",
   "rdkit",
   "msgpack-numpy",
   "biopython",

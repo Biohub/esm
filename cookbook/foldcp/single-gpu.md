@@ -75,11 +75,7 @@ The "fused" backend uses Triton, a Python-based language for writing custom GPU 
 
 ### Dependencies
 
-The "fused" backend needs Triton 3. It's GPU-only (Triton JIT-compiles to PTX) and **inference-only** (falls back to reference under autograd).
-
-```bash
-pip install "esm[gpu]"  # brings triton>=3,<4
-```
+The "fused" backend needs Triton 3, which `pip install esm` installs on Linux x86-64. It's GPU-only (Triton JIT-compiles to PTX) and **inference-only** (falls back to reference under autograd).
 
 > If Triton is not importable, `set_kernel_backend("fused")` silently runs the reference path. Check that Triton can be imported if `"fused"` is unexpectedly slow.
 

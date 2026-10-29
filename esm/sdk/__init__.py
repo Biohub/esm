@@ -17,7 +17,7 @@ def client(
     model="esm3-sm-open-v1",
     url="https://biohub.ai",
     token=os.environ.get("ESM_API_KEY", ""),
-    request_timeout=None,
+    request_timeout: int | None = 125,
 ) -> ESM3InferenceClient:
     """
     Args:
@@ -25,7 +25,7 @@ def client(
         url: URL of a Forge/Biohub Platform server.
         token: User's API token.
         request_timeout: Amount of time to wait for a request to finish.
-            Default is wait indefinitely.
+            None waits indefinitely, which can hang on a dropped connection.
     """
     if not model.startswith("esm3"):
         raise ValueError(f"Invalid model name: {model}")
@@ -36,7 +36,7 @@ def esmc_client(
     model="esmc-300m-2024-12",
     url="https://biohub.ai",
     token=os.environ.get("ESM_API_KEY", ""),
-    request_timeout=None,
+    request_timeout: int | None = 125,
 ) -> ESMCInferenceClient:
     """
     Args:
@@ -44,7 +44,7 @@ def esmc_client(
         url: URL of a Forge/Biohub Platform server.
         token: User's API token.
         request_timeout: Amount of time to wait for a request to finish.
-            Default is wait indefinitely.
+            None waits indefinitely, which can hang on a dropped connection.
     """
     if not model.startswith("esmc"):
         raise ValueError(f"Invalid model name: {model}")
@@ -55,7 +55,7 @@ def esmfold2_client(
     model="esmfold2-fast-2026-05",
     url="https://biohub.ai",
     token=os.environ.get("ESM_API_KEY", ""),
-    request_timeout=None,
+    request_timeout: int | None = 125,
 ) -> SequenceStructureForgeInferenceClient:
     """
     Args:
@@ -63,7 +63,7 @@ def esmfold2_client(
         url: URL of a Forge/Biohub Platform server.
         token: User's API token.
         request_timeout: Amount of time to wait for a request to finish.
-            Default is wait indefinitely.
+            None waits indefinitely, which can hang on a dropped connection.
     """
     if not model.startswith("esmfold2"):
         raise ValueError(f"Invalid model name: {model}")
