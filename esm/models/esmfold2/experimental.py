@@ -821,6 +821,29 @@ class EsmFold2ExperimentalModel(HubPreTrainedModel):
 
         return _output_to_pdb(output)
 
+    def compute_lm_hidden_states(
+        self,
+        input_ids: Tensor,
+        asym_id: Tensor,
+        residue_index: Tensor,
+        mol_type: Tensor,
+        token_attention_mask: Tensor,
+        lm_mask_pct: float | None = None,
+    ) -> Tensor:
+        """ESMC hidden states as ``forward`` computes them, for ``lm_hidden_states``."""
+        if self.esmc is None:
+            raise ValueError("compute_lm_hidden_states() needs an ESMC backbone.")
+        if lm_mask_pct is None:
+            lm_mask_pct = self.config.lm_mask_pct
+        return self._compute_lm_hidden_states(
+            input_ids,
+            asym_id,
+            residue_index,
+            mol_type,
+            token_attention_mask,
+            lm_mask_pct=lm_mask_pct,
+        )
+
     def _compute_lm_hidden_states(
         self,
         input_ids: Tensor,
@@ -895,6 +918,9 @@ class EsmFold2ExperimentalModel(HubPreTrainedModel):
         """Full ESMFold2 inference pipeline.
 
         Accepts tensors directly from ESMFold2InputBuilder.prepare_input().
+
+        Without ``lm_hidden_states`` or an attached ESMC the LM pathway is
+        skipped (``ESMFold2InputBuilder.fold`` refuses this).
 
         Returns:
             dict with sample_atom_coords, plddt, pae, distogram_logits, etc.

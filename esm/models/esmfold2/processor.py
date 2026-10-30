@@ -85,6 +85,39 @@ def _lm_dropout_context(model: Any, lm_dropout: float | None):
         )
 
 
+def _check_lm_hidden_states(
+    model: Any, lm_hidden_states: torch.Tensor, features: dict
+) -> None:
+    """Check supplied LM states against the features and the model's LM shim."""
+    token_mask = features["token_attention_mask"]
+    shape = tuple(lm_hidden_states.shape)
+    if lm_hidden_states.dim() != 4:
+        raise ValueError(f"lm_hidden_states must be 4-D, got shape {shape}")
+    if shape[:2] != tuple(token_mask.shape):
+        raise ValueError(
+            f"lm_hidden_states (batch, tokens) {shape[:2]} does not match the "
+            f"input {tuple(token_mask.shape)}"
+        )
+    shim = getattr(model, "language_model", None)
+    if shim is not None:
+        n_layers = shim.base_z_combine.numel()
+        width = shim.base_z_linear[0].normalized_shape[-1]
+        if shape[2:] != (n_layers, width):
+            raise ValueError(
+                f"lm_hidden_states (layers, width) {shape[2:]} does not match the "
+                f"model's LM shim {(n_layers, width)}"
+            )
+    if not lm_hidden_states.is_floating_point():
+        raise ValueError(
+            f"lm_hidden_states must be floating point, got {lm_hidden_states.dtype}"
+        )
+    if lm_hidden_states.device != token_mask.device:
+        raise ValueError(
+            f"lm_hidden_states is on {lm_hidden_states.device}, the model on "
+            f"{token_mask.device}"
+        )
+
+
 def clean_esmfold2_input(input: StructurePredictionInput) -> StructurePredictionInput:
     """Group identical protein sequences into the same ProteinInput with multiple ids.
 
@@ -341,6 +374,7 @@ class ESMFold2InputBuilder:
         step_scale: float | None = None,
         max_inference_sigma: float | None = None,
         lm_mask_pct: float | None = None,
+        lm_hidden_states: torch.Tensor | None = None,
         lm_dropout: float | None = 0.3,
         early_exit: bool | None = None,
         msa_max_depth: int | None = 1024,
@@ -350,6 +384,9 @@ class ESMFold2InputBuilder:
         complex_id: str = "pred",
     ) -> MolecularComplexResult | list[MolecularComplexResult]:
         """Fold a structure end-to-end: encode → model → decode.
+
+        Raises if the model has no ESMC and no ``lm_hidden_states`` are given;
+        call ``model(...)`` directly to fold without the LM pathway.
 
         Parameters
         ----------
@@ -365,7 +402,11 @@ class ESMFold2InputBuilder:
             Optional sampler overrides forwarded to the model when not None.
         lm_mask_pct : float, optional
             Fraction of sequence residues randomly masked before the PLM backbone.
-            Overrides the checkpoint config when not None.
+            Overrides the checkpoint config when not None. Cannot be combined
+            with ``lm_hidden_states``.
+        lm_hidden_states : Tensor, optional
+            Precomputed ESMC states (``model.compute_lm_hidden_states``) used
+            instead of the model's own ESMC pass; cast to the LM shim's dtype.
         lm_dropout : float, optional
             LM-embedding dropout for this fold (fresh mask per loop → diverse
             ensemble on repeated folds). Defaults to ``0.3`` (paper folding-eval
@@ -401,10 +442,26 @@ class ESMFold2InputBuilder:
                 DeprecationWarning,
                 stacklevel=2,
             )
+        if lm_hidden_states is not None and lm_mask_pct is not None:
+            raise ValueError("lm_mask_pct cannot be combined with lm_hidden_states")
+        # The HF adapter always carries its LM and has no ``esmc`` attribute.
+        if lm_hidden_states is None and hasattr(model, "esmc") and model.esmc is None:
+            raise ValueError(
+                "model has no ESMC backbone; attach one or pass lm_hidden_states"
+            )
 
         features, chain_infos = self.prepare_input(
             input, seed=seed, device=model.device
         )
+        if lm_hidden_states is not None:
+            _check_lm_hidden_states(model, lm_hidden_states, features)
+            shim = getattr(model, "language_model", None)
+            if shim is not None:
+                # Match the shim's parameters; under CUDA autocast this is what
+                # the shim's ops would cast to anyway.
+                lm_hidden_states = lm_hidden_states.to(
+                    shim.base_z_linear[0].weight.dtype
+                )
 
         sampler_kwargs: dict[str, Any] = {}
         if noise_scale is not None:
@@ -421,6 +478,7 @@ class ESMFold2InputBuilder:
                 with _lm_dropout_context(model, lm_dropout):
                     output = model(
                         **features,
+                        lm_hidden_states=lm_hidden_states,
                         num_loops=num_loops,
                         num_sampling_steps=num_sampling_steps,
                         num_diffusion_samples=num_diffusion_samples,

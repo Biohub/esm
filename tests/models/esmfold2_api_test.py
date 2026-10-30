@@ -1,8 +1,9 @@
 """ESMFold2 public-API tests — ``fold``, ``infer_protein``, ``infer_protein_as_pdb``.
 
-All cases run on CPU against a tiny randomly-initialised model with no PLM
-backbone attached, so the assertions are about plumbing rather than structure
-quality.
+All cases run on CPU against a tiny randomly-initialised model, so the
+assertions are about plumbing rather than structure quality. ``fold`` refuses a
+model with no PLM backbone, so the ``fold`` cases attach a tiny random ESMC
+(``tiny_esmfold2_lm``); raw ``forward`` cases pass synthetic LM states instead.
 
 The ``sampler override`` group pins that ``fold``'s ``noise_scale`` /
 ``step_scale`` / ``max_inference_sigma`` reach the sampler:
@@ -22,7 +23,7 @@ from esm.models.esmfold2.protein_utils import (
 )
 from esm.models.esmfold2.types import ProteinInput, StructurePredictionInput
 from esm.utils.structure.molecular_complex import MolecularComplexResult
-from tests.conftest import ESMFOLD2_SEQUENCES, esmfold2_inputs
+from tests.conftest import ESMFOLD2_SEQUENCES, _synthetic_lm_states, esmfold2_inputs
 
 TINY_SEQUENCE = ESMFOLD2_SEQUENCES["tiny"]
 
@@ -61,6 +62,17 @@ def builder(ccd_pickle) -> ESMFold2InputBuilder:
     dominant cost of every case here; the builder itself is stateless.
     """
     return ESMFold2InputBuilder()
+
+
+@pytest.fixture
+def tiny_esmfold2_lm(tiny_esmfold2, tiny_esmc):
+    """``tiny_esmfold2`` with a tiny random ESMC attached as its backbone.
+
+    The tiny ESMC's 2 layers x 32 wide match the tiny config's ``lm_num_layers``
+    / ``lm_d_model``, so the shim accepts its hidden states unchanged.
+    """
+    tiny_esmfold2.esmc = tiny_esmc
+    return tiny_esmfold2
 
 
 def protein_input(sequence: str = TINY_SEQUENCE) -> StructurePredictionInput:
@@ -131,13 +143,13 @@ def test_forward_accepts_the_featurizer_key_set(tiny_esmfold2, ccd_pickle):
     ids=["noise_scale", "step_scale", "max_inference_sigma"],
 )
 def test_fold_forwards_sampler_overrides_to_the_sampler(
-    tiny_esmfold2, builder, override, expected
+    tiny_esmfold2_lm, builder, override, expected
 ):
     """Each override reaches ``DiffusionStructureHead.sample`` with its value."""
-    calls = record_sample_kwargs(tiny_esmfold2)
+    calls = record_sample_kwargs(tiny_esmfold2_lm)
 
     builder.fold(
-        tiny_esmfold2,
+        tiny_esmfold2_lm,
         protein_input(),
         seed=0,
         lm_dropout=None,
@@ -154,7 +166,9 @@ def test_fold_forwards_sampler_overrides_to_the_sampler(
     [{"noise_scale": 2.0}, {"step_scale": 2.5}, {"max_inference_sigma": 100.0}],
     ids=["noise_scale", "step_scale", "max_inference_sigma"],
 )
-def test_fold_sampler_overrides_change_the_structure(tiny_esmfold2, builder, override):
+def test_fold_sampler_overrides_change_the_structure(
+    tiny_esmfold2_lm, builder, override
+):
     """The overrides are not just delivered, they move the coordinates.
 
     Delivery alone would still pass if the sampler ignored them, and the
@@ -165,8 +179,8 @@ def test_fold_sampler_overrides_change_the_structure(tiny_esmfold2, builder, ove
     settings = dict(
         FAST_FOLD, num_sampling_steps=SAMPLER_OVERRIDE_STEPS, seed=0, lm_dropout=None
     )
-    baseline = builder.fold(tiny_esmfold2, protein_input(), **settings)
-    overridden = builder.fold(tiny_esmfold2, protein_input(), **settings, **override)
+    baseline = builder.fold(tiny_esmfold2_lm, protein_input(), **settings)
+    overridden = builder.fold(tiny_esmfold2_lm, protein_input(), **settings, **override)
 
     assert isinstance(baseline, MolecularComplexResult)
     assert isinstance(overridden, MolecularComplexResult)
@@ -176,15 +190,15 @@ def test_fold_sampler_overrides_change_the_structure(tiny_esmfold2, builder, ove
     assert not torch.allclose(before, after, atol=1e-3)
 
 
-def test_fold_is_reproducible_under_a_seed(tiny_esmfold2, builder):
+def test_fold_is_reproducible_under_a_seed(tiny_esmfold2_lm, builder):
     """Two folds with the same seed agree bit-for-bit.
 
     This is what makes the override comparison above meaningful: without it, a
     difference in coordinates would only show that the sampler is stochastic.
     """
     settings = dict(FAST_FOLD, seed=7, lm_dropout=None)
-    first = builder.fold(tiny_esmfold2, protein_input(), **settings)
-    second = builder.fold(tiny_esmfold2, protein_input(), **settings)
+    first = builder.fold(tiny_esmfold2_lm, protein_input(), **settings)
+    second = builder.fold(tiny_esmfold2_lm, protein_input(), **settings)
     torch.testing.assert_close(
         torch.as_tensor(first.complex.atom_positions),
         torch.as_tensor(second.complex.atom_positions),
@@ -200,11 +214,11 @@ def test_fold_is_reproducible_under_a_seed(tiny_esmfold2, builder):
 
 @pytest.mark.parametrize("num_diffusion_samples", [1, 2])
 def test_fold_return_shape_follows_the_sample_count(
-    tiny_esmfold2, builder, num_diffusion_samples
+    tiny_esmfold2_lm, builder, num_diffusion_samples
 ):
     """One sample returns a result; more than one returns a list of that length."""
     result = builder.fold(
-        tiny_esmfold2,
+        tiny_esmfold2_lm,
         protein_input(),
         seed=0,
         lm_dropout=None,
@@ -243,6 +257,369 @@ def test_fold_rejects_an_unknown_sampler_override(tiny_esmfold2, builder):
         builder.fold(
             tiny_esmfold2, protein_input(), seed=0, noize_scale=2.0, **FAST_FOLD
         )
+
+
+# ---------------------------------------------------------------------------
+# The LM pathway: fold() cannot drop it, forward() still can
+# ---------------------------------------------------------------------------
+
+
+LM_FEATURE_KEYS = (
+    "input_ids",
+    "asym_id",
+    "residue_index",
+    "mol_type",
+    "token_attention_mask",
+)
+
+
+def lm_inputs(features: dict) -> dict:
+    """The feature tensors ``compute_lm_hidden_states`` takes, by name."""
+    return {key: features[key] for key in LM_FEATURE_KEYS}
+
+
+def record_shim_inputs(model) -> list[torch.Tensor]:
+    """Capture the hidden states every call to the LM shim receives."""
+    seen: list[torch.Tensor] = []
+    model.language_model.register_forward_hook(
+        lambda module, args, out: seen.append(args[0])
+    )
+    return seen
+
+
+def synthetic_states_for(model, builder, input) -> torch.Tensor:
+    features, _ = builder.prepare_input(input, seed=0, device=model.device)
+    return _synthetic_lm_states(model, features, seed=0)
+
+
+@pytest.mark.parametrize("fixture", ["tiny_esmfold2", "tiny_experimental"])
+def test_fold_refuses_a_model_without_an_lm_backbone(fixture, request, builder):
+    model = request.getfixturevalue(fixture)
+    assert model.esmc is None
+    calls = record_sample_kwargs(model)
+    with pytest.raises(ValueError, match="no ESMC backbone"):
+        builder.fold(model, protein_input(), seed=0, **FAST_FOLD)
+    assert calls == []
+
+
+def test_fold_forwards_supplied_lm_hidden_states(tiny_esmfold2, builder):
+    states = synthetic_states_for(tiny_esmfold2, builder, protein_input())
+    seen = record_shim_inputs(tiny_esmfold2)
+    result = builder.fold(
+        tiny_esmfold2,
+        protein_input(),
+        seed=0,
+        lm_dropout=None,
+        lm_hidden_states=states,
+        **FAST_FOLD,
+    )
+    assert isinstance(result, MolecularComplexResult)
+    assert len(seen) == 1
+    assert torch.equal(seen[0], states)
+
+
+@pytest.mark.parametrize("dtype", [torch.float64, torch.bfloat16, torch.float16])
+def test_fold_casts_supplied_states_to_the_shim_dtype(tiny_esmfold2, builder, dtype):
+    states = synthetic_states_for(tiny_esmfold2, builder, protein_input())
+    seen = record_shim_inputs(tiny_esmfold2)
+    builder.fold(
+        tiny_esmfold2,
+        protein_input(),
+        seed=0,
+        lm_hidden_states=states.to(dtype),
+        **FAST_FOLD,
+    )
+    assert seen[0].dtype == tiny_esmfold2.language_model.base_z_linear[0].weight.dtype
+
+
+def _wider(states: torch.Tensor, axis: int) -> torch.Tensor:
+    shape = list(states.shape)
+    shape[axis] += 1
+    return torch.zeros(shape)
+
+
+@pytest.mark.parametrize(
+    "mutate,extra,match",
+    [
+        (lambda s: s, {"lm_mask_pct": 0.1}, "lm_mask_pct"),
+        (lambda s: s[:, :-1], {}, "does not match the input"),
+        (lambda s: _wider(s, 2), {}, "LM shim"),
+        (lambda s: _wider(s, 3), {}, "LM shim"),
+        (lambda s: s.long(), {}, "floating point"),
+        (lambda s: s.to("meta"), {}, "is on meta"),
+    ],
+    ids=["lm_mask_pct", "tokens", "layers", "width", "dtype", "device"],
+)
+def test_fold_rejects_unusable_lm_hidden_states(
+    tiny_esmfold2, builder, mutate, extra, match
+):
+    states = mutate(synthetic_states_for(tiny_esmfold2, builder, protein_input()))
+    with pytest.raises(ValueError, match=match):
+        builder.fold(
+            tiny_esmfold2,
+            protein_input(),
+            seed=0,
+            lm_hidden_states=states,
+            **extra,
+            **FAST_FOLD,
+        )
+
+
+@pytest.mark.gpu
+@pytest.mark.skipif(not torch.cuda.is_available(), reason="needs a CUDA device")
+def test_standalone_lm_pass_on_cuda_offloads_and_feeds_fold(tiny_esmfold2_lm, builder):
+    """With offloading on, ESMC is back on CPU after the call and its states fold."""
+    model = tiny_esmfold2_lm.cuda()
+    model._offload_esmc = True
+    features, _ = builder.prepare_input(protein_input(), seed=0, device=model.device)
+
+    states = model.compute_lm_hidden_states(**lm_inputs(features))
+
+    assert states.is_cuda
+    assert all(p.device.type == "cpu" for p in model.esmc.parameters())
+
+    result = builder.fold(
+        model,
+        protein_input(),
+        seed=0,
+        lm_dropout=None,
+        lm_hidden_states=states,
+        **FAST_FOLD,
+    )
+    assert isinstance(result, MolecularComplexResult)
+    assert torch.isfinite(torch.as_tensor(result.complex.atom_positions)).all()
+    assert all(p.device.type == "cpu" for p in model.esmc.parameters())
+
+
+def test_forward_without_an_lm_backbone_skips_the_lm_pathway(tiny_esmfold2, builder):
+    """The low-level entry point keeps the no-LM path, for intentional ablations."""
+    features, _ = builder.prepare_input(protein_input(), seed=0)
+    seen = record_shim_inputs(tiny_esmfold2)
+
+    torch.manual_seed(0)
+    with torch.no_grad():
+        output = tiny_esmfold2(**features, **FAST_FOLD)
+
+    assert seen == []
+    assert torch.isfinite(output["sample_atom_coords"]).all()
+
+
+def test_compute_lm_hidden_states_is_what_forward_computes(tiny_esmfold2_lm, builder):
+    """Folding with the public method's states reproduces the ordinary fold."""
+    settings = dict(FAST_FOLD, seed=0, lm_dropout=None)
+    features, _ = builder.prepare_input(protein_input(), seed=0)
+    seen = record_shim_inputs(tiny_esmfold2_lm)
+
+    states = tiny_esmfold2_lm.compute_lm_hidden_states(**lm_inputs(features))
+    config = tiny_esmfold2_lm.config
+    assert states.shape == (
+        *features["token_attention_mask"].shape,
+        config.lm_num_layers + 1,
+        config.lm_d_model,
+    )
+
+    own = builder.fold(tiny_esmfold2_lm, protein_input(), **settings)
+    supplied = builder.fold(
+        tiny_esmfold2_lm, protein_input(), lm_hidden_states=states, **settings
+    )
+
+    assert len(seen) == 2
+    torch.testing.assert_close(seen[0], seen[1], atol=0, rtol=0)
+    torch.testing.assert_close(
+        torch.as_tensor(own.complex.atom_positions),
+        torch.as_tensor(supplied.complex.atom_positions),
+        atol=0,
+        rtol=0,
+    )
+
+
+def test_experimental_compute_lm_hidden_states_is_what_forward_computes(
+    tiny_experimental, tiny_esmc, builder
+):
+    tiny_experimental.esmc = tiny_esmc
+    features, _ = builder.prepare_input(protein_input(), seed=0)
+    seen = record_shim_inputs(tiny_experimental)
+
+    states = tiny_experimental.compute_lm_hidden_states(**lm_inputs(features))
+    torch.manual_seed(0)
+    with torch.no_grad():
+        tiny_experimental(**features, **FAST_FOLD)
+
+    assert len(seen) == 1
+    torch.testing.assert_close(seen[0], states, atol=0, rtol=0)
+
+
+@pytest.mark.parametrize("fixture", ["tiny_esmfold2", "tiny_experimental"])
+def test_compute_lm_hidden_states_needs_a_backbone(fixture, request, builder):
+    model = request.getfixturevalue(fixture)
+    features, _ = builder.prepare_input(protein_input(), seed=0)
+    with pytest.raises(ValueError, match="needs an ESMC backbone"):
+        model.compute_lm_hidden_states(**lm_inputs(features))
+
+
+# ---------------------------------------------------------------------------
+# compute_lm_hidden_states: offload, fp8 and defaults, through a mock LM pass
+# ---------------------------------------------------------------------------
+
+
+class _PlacementRecorder(torch.nn.Module):
+    """Stands in for ESMC; records every ``.to(device)`` instead of moving."""
+
+    def __init__(self):
+        super().__init__()
+        self.moves: list[torch.device] = []
+
+    def to(self, *args, **kwargs):
+        self.moves.append(torch.device(args[0] if args else kwargs["device"]))
+        return self
+
+
+def _dummy_lm_inputs() -> dict:
+    return {key: torch.zeros(1, 3, dtype=torch.long) for key in LM_FEATURE_KEYS}
+
+
+@pytest.fixture
+def recorded_lm_pass(monkeypatch):
+    """Swap ``model.compute_lm_hidden_states`` (the layers helper) for a recorder."""
+    from esm.models.esmfold2 import model as model_module
+
+    calls: list[dict] = []
+
+    def fake(esmc, *args, **kwargs):
+        calls.append(
+            {"moves": list(getattr(esmc, "moves", [])), "args": args, **kwargs}
+        )
+        return torch.zeros(1)
+
+    monkeypatch.setattr(model_module, "compute_lm_hidden_states", fake)
+    return calls
+
+
+@pytest.fixture
+def on_an_accelerator(monkeypatch, tiny_esmfold2):
+    """Make ``model.device`` report a non-CPU device, so offload moves show."""
+    from esm.models.esmfold2 import EsmFold2Model
+
+    accelerator = torch.device("meta")
+    monkeypatch.setattr(EsmFold2Model, "device", property(lambda self: accelerator))
+    return accelerator
+
+
+def test_standalone_lm_pass_offloads_the_backbone_again(
+    tiny_esmfold2, recorded_lm_pass, on_an_accelerator
+):
+    """Resident on the model device for the pass, back on CPU after it."""
+    esmc = _PlacementRecorder()
+    tiny_esmfold2.esmc = esmc
+    tiny_esmfold2._offload_esmc = True
+
+    tiny_esmfold2.compute_lm_hidden_states(**_dummy_lm_inputs())
+
+    (call,) = recorded_lm_pass
+    assert call["moves"] == [on_an_accelerator]
+    assert esmc.moves == [on_an_accelerator, torch.device("cpu")]
+
+
+def test_standalone_lm_pass_offloads_even_when_the_pass_fails(
+    tiny_esmfold2, monkeypatch, on_an_accelerator
+):
+    from esm.models.esmfold2 import model as model_module
+
+    def boom(*args, **kwargs):
+        raise RuntimeError("LM pass blew up")
+
+    monkeypatch.setattr(model_module, "compute_lm_hidden_states", boom)
+    esmc = _PlacementRecorder()
+    tiny_esmfold2.esmc = esmc
+    tiny_esmfold2._offload_esmc = True
+
+    with pytest.raises(RuntimeError, match="blew up"):
+        tiny_esmfold2.compute_lm_hidden_states(**_dummy_lm_inputs())
+    assert esmc.moves == [on_an_accelerator, torch.device("cpu")]
+
+
+def test_standalone_lm_pass_leaves_a_resident_backbone_alone(
+    tiny_esmfold2, recorded_lm_pass, on_an_accelerator
+):
+    esmc = _PlacementRecorder()
+    tiny_esmfold2.esmc = esmc
+    assert tiny_esmfold2._offload_esmc is False
+
+    tiny_esmfold2.compute_lm_hidden_states(**_dummy_lm_inputs())
+
+    assert esmc.moves == []
+
+
+@pytest.mark.parametrize("fp8,pad", [(True, 8), (False, None)], ids=["fp8", "bf16"])
+def test_lm_pass_applies_the_fp8_context_and_padding(
+    tiny_esmfold2, recorded_lm_pass, monkeypatch, fp8, pad
+):
+    from contextlib import contextmanager
+
+    from esm.models.esmfold2 import model as model_module
+
+    entered: list[bool] = []
+    inside = {"now": False}
+
+    @contextmanager
+    def recording_context(fp8_flag):
+        entered.append(fp8_flag)
+        inside["now"] = True
+        try:
+            yield
+        finally:
+            inside["now"] = False
+
+    real_fake = model_module.compute_lm_hidden_states
+
+    def fake(*args, **kwargs):
+        assert inside["now"], "LM pass ran outside the precision context"
+        return real_fake(*args, **kwargs)
+
+    monkeypatch.setattr(model_module, "_lm_precision_context", recording_context)
+    monkeypatch.setattr(model_module, "compute_lm_hidden_states", fake)
+    tiny_esmfold2.esmc = _PlacementRecorder()
+    tiny_esmfold2._esmc_fp8 = fp8
+
+    tiny_esmfold2.compute_lm_hidden_states(**_dummy_lm_inputs())
+
+    assert entered == [fp8]
+    (call,) = recorded_lm_pass
+    assert call["pad_to_multiple"] == pad
+
+
+@pytest.mark.parametrize("requested,expected", [(None, 0.37), (0.0, 0.0), (0.2, 0.2)])
+def test_lm_mask_pct_defaults_to_the_config(
+    tiny_esmfold2, recorded_lm_pass, monkeypatch, requested, expected
+):
+    """``None`` means the checkpoint's value; an explicit 0.0 is kept."""
+    tiny_esmfold2.esmc = _PlacementRecorder()
+    # The tiny config is session-scoped; monkeypatch puts the value back.
+    monkeypatch.setattr(tiny_esmfold2.config, "lm_mask_pct", 0.37)
+
+    tiny_esmfold2.compute_lm_hidden_states(**_dummy_lm_inputs(), lm_mask_pct=requested)
+
+    (call,) = recorded_lm_pass
+    assert call["lm_mask_pct"] == expected
+
+
+def test_experimental_lm_mask_pct_defaults_to_the_config(
+    tiny_experimental, monkeypatch
+):
+    from esm.models.esmfold2 import experimental as experimental_module
+
+    seen: list[float] = []
+    monkeypatch.setattr(
+        experimental_module,
+        "compute_lm_hidden_states",
+        lambda *args, lm_mask_pct, **kwargs: seen.append(lm_mask_pct),
+    )
+    tiny_experimental.esmc = _PlacementRecorder()
+    monkeypatch.setattr(tiny_experimental.config, "lm_mask_pct", 0.37)
+
+    tiny_experimental.compute_lm_hidden_states(**_dummy_lm_inputs())
+
+    assert seen == [0.37]
 
 
 # ---------------------------------------------------------------------------
@@ -373,20 +750,20 @@ def _pair_width(config) -> int:
     return config.pairwise_hidden_size
 
 
-def test_fold_omits_embeddings_by_default(tiny_esmfold2, builder):
+def test_fold_omits_embeddings_by_default(tiny_esmfold2_lm, builder):
     """The pair export is opt-in: it costs an L x L reduction and an L x D tensor."""
-    result = builder.fold(tiny_esmfold2, protein_input(), seed=0, **FAST_FOLD)
+    result = builder.fold(tiny_esmfold2_lm, protein_input(), seed=0, **FAST_FOLD)
 
     assert result.output_embedding_pair_pooled is None
     assert result.output_embedding_sequence is None
 
 
 def test_fold_include_embeddings_returns_the_pooled_pair(
-    tiny_esmfold2, tiny_esmfold2_config, builder
+    tiny_esmfold2_lm, tiny_esmfold2_config, builder
 ):
     """Shape, dtype and device match what the SDK hands back from Forge."""
     result = builder.fold(
-        tiny_esmfold2, protein_input(), seed=0, include_embeddings=True, **FAST_FOLD
+        tiny_esmfold2_lm, protein_input(), seed=0, include_embeddings=True, **FAST_FOLD
     )
 
     pooled = result.output_embedding_pair_pooled
@@ -424,10 +801,10 @@ def test_pooled_pair_is_the_post_coda_pair_averaged_over_the_first_axis(tiny_esm
     assert not torch.allclose(pooled, z.mean(dim=2), atol=1e-4)
 
 
-def test_pooled_pair_is_shared_across_diffusion_samples(tiny_esmfold2, builder):
+def test_pooled_pair_is_shared_across_diffusion_samples(tiny_esmfold2_lm, builder):
     """The trunk runs once, so every sample carries the same embedding."""
     results = builder.fold(
-        tiny_esmfold2,
+        tiny_esmfold2_lm,
         protein_input(),
         seed=0,
         num_loops=1,
