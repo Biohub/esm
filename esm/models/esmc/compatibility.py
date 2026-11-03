@@ -19,7 +19,7 @@ import warnings
 import torch
 import torch.nn as nn
 from attr import dataclass
-from transformers import PreTrainedTokenizerFast
+from transformers.tokenization_utils_fast import PreTrainedTokenizerFast
 
 from esm.models.esmc.config import (
     ESMC_6B_HF_REPO,

@@ -30,7 +30,7 @@ spi = StructurePredictionInput(  # 5xgo
     ]
 )
 
-# torchrun entrypoint:  torchrun --nproc_per_node=4 cuequivariance_cp.py
+# torchrun entrypoint:  torchrun --nproc_per_node=4 large_input_cp.py
 # torchrun sets LOCAL_RANK / WORLD_SIZE / RANK / MASTER_ADDR / MASTER_PORT.
 # world_size must be a perfect square (the CP grid is n×n).
 local_rank = int(os.environ["LOCAL_RANK"])
@@ -65,7 +65,7 @@ wrap_model_with_cp(model, dm, comm="ring")
 # Fused kernels accelerate the modules *outside* the CP region (notably the
 # diffusion sampler / structure head). The CP-wrapped trunk and MSA encoder
 # no-op this call, so it never touches the distributed ring math.
-model.set_kernel_backend("cuequivariance")
+model.set_kernel_backend("fused")
 
 start = time()
 with torch.inference_mode():

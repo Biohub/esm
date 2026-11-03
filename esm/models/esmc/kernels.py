@@ -6,39 +6,14 @@ report only what is importable; the target device decides what is usable.
 
 The kernels, in the order ESMC prefers them:
 
-* ``transformer_engine`` — fused LayerNorm+Linear / LayerNorm+MLP with an
-  fp32 reduction inside the LayerNorm. Recommended on GPU for accurate bf16
-  inference; without it the pure-PyTorch fallback drifts ~O(10) in fp32 and
-  ~O(100) in bf16 on the unnormalized residual stream (perplexity stays
-  within rounding noise).
-* ``xformers`` — preferred fused attention kernel with a deterministic
-  reduction order.
-* ``flash-attn`` — secondary fused attention kernel (fp16 / bf16 only), plus
-  the Triton RoPE kernel and the varlen packing helpers.
+* ``flash-attn`` — fused attention kernel (fp16 / bf16 only), plus the
+  Triton RoPE kernel and the varlen packing helpers.
 """
 
-import logging
+import warnings
 from typing import Any
 
 import torch
-
-logger = logging.getLogger(__name__)
-
-try:
-    import transformer_engine.pytorch as te
-
-    TE_INSTALLED = True
-except ImportError:
-    te: Any = None
-    TE_INSTALLED = False
-
-try:
-    import xformers.ops as xops
-
-    XFORMERS_INSTALLED = True
-except ImportError:
-    xops: Any = None
-    XFORMERS_INSTALLED = False
 
 try:
     from flash_attn import flash_attn_func, flash_attn_varlen_qkvpacked_func
@@ -53,7 +28,10 @@ except ImportError:
     FLASH_ATTN_INSTALLED = False
 
 try:
-    from flash_attn.ops.triton.rotary import apply_rotary as apply_triton_rotary
+    # ``flash_attn.layers.rotary.apply_rotary_emb`` wraps the same Triton kernel in an
+    # ``autograd.Function``; the bare ``flash_attn.ops.triton.rotary.apply_rotary`` driver
+    # returns a tensor with no ``grad_fn``, so a backward through it silently skips RoPE.
+    from flash_attn.layers.rotary import apply_rotary_emb as apply_triton_rotary
 
     FLASH_ATTN_ROTARY_INSTALLED = True
 except ImportError:
@@ -61,31 +39,23 @@ except ImportError:
     FLASH_ATTN_ROTARY_INSTALLED = False
 
 
-if torch.cuda.is_available() and not TE_INSTALLED:
-    logger.warning(
-        "ESMC: Transformer Engine is not installed; falling back to "
-        "pure-PyTorch LayerNorm+Linear / LayerNorm+MLP. Outputs will differ "
-        "numerically - measured on the unnormalized residual stream (before "
-        "the final LayerNorm), ~O(10) max-diff in fp32 and ~O(100) in bf16; "
-        "after the final LayerNorm these shrink to a few ULP and perplexity "
-        "stays within rounding noise. Install with "
-        "`pip install transformer-engine[pytorch]` to enable fused fp32-"
-        "reduction LayerNorm."
-    )
+FLASH_ATTN_WHEEL_URL = (
+    "https://github.com/evolutionaryscale/wheels/releases/download/"
+    "py312-pt211-cu13-sm80-90/flash_attn-2.7.4.post1-cp312-cp312-linux_x86_64.whl"
+)
 
-if torch.cuda.is_available() and not (XFORMERS_INSTALLED or FLASH_ATTN_INSTALLED):
-    logger.warning(
-        "ESMC: neither xformers nor flash-attn is installed; falling back "
-        "to PyTorch ``F.scaled_dot_product_attention``. The attention "
-        "reduction order in bf16 differs from a fused kernel by ~1 bf16 "
-        "ULP per attention block; compounded across the 80-block stack "
-        "this reaches ~O(100) max-diff on the unnormalized residual stream. "
-        "Install an xformers build matching your PyTorch and CUDA versions "
-        "for a fused attention kernel."
-    )
-
-if torch.cuda.is_available() and not FLASH_ATTN_ROTARY_INSTALLED:
-    logger.warning(
-        "ESMC: flash-attn rotary kernel not installed; falling back to "
-        "pure-PyTorch RoPE. For faster GPU inference run `pip install flash-attn`."
-    )
+if torch.cuda.is_available() and not (
+    FLASH_ATTN_INSTALLED and FLASH_ATTN_ROTARY_INSTALLED
+):
+    # warnings, not logging, and forced: the esmfold2 Triton modules ignore
+    # every UserWarning process-wide.
+    with warnings.catch_warnings():
+        warnings.simplefilter("always")
+        warnings.warn(
+            "ESMC: flash-attn is not installed or failed to import; attention and "
+            "RoPE fall back to pure PyTorch. PyPI cannot carry our wheel, so install "
+            f'it by hand:\n\n    pip install "flash_attn @ {FLASH_ATTN_WHEEL_URL}"\n\n'
+            "It needs Linux x86-64, Python 3.12, torch 2.11, CUDA 13, compute "
+            "capability 8.0-9.0 and libstdc++ from GCC 13+ (Ubuntu 24.04, or "
+            "LD_PRELOAD a newer libstdc++ on 22.04)."
+        )

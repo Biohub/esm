@@ -1,8 +1,10 @@
 from __future__ import annotations
 
 import io
+import itertools
 import os
 import re
+from collections.abc import Iterator
 from dataclasses import asdict, dataclass
 from pathlib import Path
 from subprocess import check_output
@@ -48,6 +50,18 @@ class MolecularComplexResult:
     sae_features: np.ndarray | None = None  # [L, n_features]
     # Atom-expanded token count L
     num_tokens: int | None = None
+
+
+def _unused_chain_labels(taken: set[str]) -> Iterator[str]:
+    """Bijective base-26 A..Z, AA, AB, skipping *taken*; ``chr(65 + n)`` emits
+    punctuation past Z, and reusing a taken label would merge two chains."""
+    for index in itertools.count():
+        label, remaining = "", index
+        while remaining >= 0:
+            label = chr(65 + remaining % 26) + label
+            remaining = remaining // 26 - 1
+        if label not in taken:
+            yield label
 
 
 @dataclass
@@ -418,10 +432,8 @@ class MolecularComplex:
         # Convert MolecularComplex metadata to ProteinComplex format
         unique_chain_ids = np.unique(protein_chain_ids)
         entity_lookup = {int(cid): int(cid) for cid in unique_chain_ids}
-        chain_lookup = {
-            int(cid): self.metadata.chain_lookup.get(int(cid), chr(65 + int(cid)))
-            for cid in unique_chain_ids
-        }
+        chain_names = self._resolved_chain_names(name_null_chains=False)
+        chain_lookup = {int(cid): chain_names[int(cid)] for cid in unique_chain_ids}
 
         protein_metadata = ProteinComplexMetadata(
             entity_lookup=entity_lookup,
@@ -476,61 +488,44 @@ class MolecularComplex:
         id: str = "complex_from_string",
     ) -> "MolecularComplex":
         """Read a parsed CIF file using the same semantics as :meth:`from_mmcif`."""
-        # Get structure - handle missing model information gracefully
-        try:
-            structure = pdbx.get_structure(
-                mmcif_file, model=1, extra_fields=["b_factor"]
-            )
-        except (KeyError, ValueError):
-            # Fallback for mmCIF files without model information
-            try:
-                structure = pdbx.get_structure(mmcif_file)
-            except Exception:
-                # Last resort: use the first available model or all atoms
-                structure = pdbx.get_structure(mmcif_file, model=None)
+        block = mmcif_file.block
+        atom_site = block.get("atom_site")
+        # Load every alt-loc and apply biotite's first-alt-loc filter ourselves,
+        # so the identical mask can be applied to label_asym_id below. A
+        # residue may have only alt-loc "B" (or "L", "1", ...); any separate
+        # alt-loc rule would desynchronise the two arrays. altloc="all"
+        # requires the label_alt_id column.
+        has_altlocs = atom_site is not None and "label_alt_id" in atom_site
+        structure = pdbx.get_structure(
+            mmcif_file,
+            model=1,
+            extra_fields=["b_factor"],
+            altloc="all" if has_altlocs else "first",
+        )
         # Type hint for pyright - structure is an AtomArray which is iterable
         if TYPE_CHECKING:
             structure: Any = structure
 
-        # Read label_asym_id from the raw CIF atom_site category.
         # Biotite's atom.chain_id uses auth_asym_id, which collapses ligands
         # onto their parent protein chain. label_asym_id gives each entity a
         # distinct chain identifier.
-        block = mmcif_file.block
-        label_asym_ids: list[str] | None = None
-        if "atom_site" in block:
-            atom_site = block["atom_site"]
-            if "label_asym_id" in atom_site:
-                _col = atom_site["label_asym_id"]
-                _raw = (
-                    _col.as_array(str)
-                    if hasattr(_col, "as_array")
-                    else np.array(list(_col), dtype=str)
+        label_asym_ids: np.ndarray | None = None
+        if atom_site is not None and "label_asym_id" in atom_site:
+            # get_structure(model=1) keeps the first model's rows.
+            models = atom_site["pdbx_PDB_model_num"].as_array(str)
+            label_asym_ids = atom_site["label_asym_id"].as_array(str)[
+                models == models[0]
+            ]
+            if len(label_asym_ids) != len(structure):
+                raise ValueError(
+                    f"{id}: {len(label_asym_ids)} model-1 label_asym_id rows but "
+                    f"biotite loaded {len(structure)} atoms; cannot align chains."
                 )
-                # biotite's get_structure(model=1) filters to model 1 AND
-                # removes alternate conformations. We must apply the same
-                # filters to label_asym_id to keep arrays aligned.
-                keep = np.ones(len(_raw), dtype=bool)
-                if "pdbx_PDB_model_num" in atom_site:
-                    _mc = atom_site["pdbx_PDB_model_num"]
-                    _models = (
-                        _mc.as_array(str)
-                        if hasattr(_mc, "as_array")
-                        else np.array(list(_mc), dtype=str)
-                    )
-                    keep &= _models == "1"
-                if "label_alt_id" in atom_site:
-                    _ac = atom_site["label_alt_id"]
-                    _alts = (
-                        _ac.as_array(str)
-                        if hasattr(_ac, "as_array")
-                        else np.array(list(_ac), dtype=str)
-                    )
-                    keep &= np.isin(_alts, [".", "?", "", "A"])
-                filtered = _raw[keep]
-                if len(filtered) == len(structure):
-                    label_asym_ids = filtered.tolist()
-                # If lengths still don't match, fall back to atom.chain_id
+        if has_altlocs:
+            first_altloc = bs.filter_first_altloc(structure, structure.altloc_id)
+            structure = structure[first_altloc]
+            if label_asym_ids is not None:
+                label_asym_ids = label_asym_ids[first_altloc]
 
         # Get entity information from mmCIF
         entity_info = {}
@@ -553,7 +548,9 @@ class MolecularComplex:
             pass
 
         chain_labels = (
-            label_asym_ids if label_asym_ids is not None else structure.chain_id
+            label_asym_ids.tolist()
+            if label_asym_ids is not None
+            else structure.chain_id
         )
         # Include water-only chains so numeric chain IDs remain unchanged.
         _, chain_first, chain_numbers = np.unique(
@@ -561,16 +558,22 @@ class MolecularComplex:
         )
         chain_lookup = {i: chain_labels[first] for i, first in enumerate(chain_first)}
         names = structure.res_name
-        residues = structure.res_id
+        # Residues are ordered by first appearance in the file rather than by
+        # res_id, so insertion-code residues (52, 52A, 52B, ...) keep file order.
+        residue_keys = np.rec.fromarrays(
+            (chain_numbers, structure.res_id, structure.ins_code)
+        )
+        _, residue_first, residue_inverse = np.unique(
+            residue_keys, return_index=True, return_inverse=True
+        )
+        residue_rank = residue_first[residue_inverse]
         # Stable sorting preserves atom order within each (chain, residue, name).
-        order = np.lexsort((names, residues, chain_numbers))
+        order = np.lexsort((names, residue_rank, chain_numbers))
         order = order[names[order] != "HOH"]
         if len(order):
             boundary = np.ones(len(order), dtype=bool)
-            boundary[1:] = (
-                (chain_numbers[order[1:]] != chain_numbers[order[:-1]])
-                | (residues[order[1:]] != residues[order[:-1]])
-                | (names[order[1:]] != names[order[:-1]])
+            boundary[1:] = (residue_rank[order[1:]] != residue_rank[order[:-1]]) | (
+                names[order[1:]] != names[order[:-1]]
             )
             starts = np.flatnonzero(boundary)
             first_atoms = order[starts]
@@ -628,7 +631,8 @@ class MolecularComplex:
 
         This is the inverse of :meth:`to_mmcif` (which expands the flat
         token/atom arrays into an ``AtomArray``): it groups the AtomArray's atoms
-        into tokens by ``(chain_id, res_id)`` in array order and rebuilds the flat
+        into tokens by ``(chain_id, res_id, ins_code)`` in array order and
+        rebuilds the flat
         ``atom_positions`` / ``atom_elements`` / ``atom_names`` / ``atom_hetero``
         arrays plus the token-level ``token_to_atoms`` / ``chain_id`` /
         ``sequence`` / ``plddt`` arrays. Unlike ``ProteinChain.from_atomarray``
@@ -647,6 +651,7 @@ class MolecularComplex:
         coords = np.asarray(atom_arr.coord, dtype=np.float32)
         chain_labels = np.asarray(atom_arr.chain_id, dtype=object)
         res_ids = np.asarray(atom_arr.res_id)
+        ins_codes = np.asarray(atom_arr.ins_code, dtype=object)
         res_names = np.asarray(atom_arr.res_name, dtype=object)
         atom_names = np.asarray(atom_arr.atom_name, dtype=object)
         elements = np.asarray(atom_arr.element, dtype=object)
@@ -682,9 +687,9 @@ class MolecularComplex:
             token_plddt.append(float(b_factor[start:end].mean()) / PLDDT_B_FACTOR_SCALE)
 
         token_start = 0
-        prev_key: tuple[Any, int] | None = None
+        prev_key: tuple[Any, int, str] | None = None
         for i in range(n_atoms):
-            key = (chain_labels[i], int(res_ids[i]))
+            key = (chain_labels[i], int(res_ids[i]), ins_codes[i])
             if i > 0 and key != prev_key:
                 _close_token(token_start, i)
                 token_start = i
@@ -710,20 +715,34 @@ class MolecularComplex:
             atom_hetero=hetero,
         )
 
-    def _get_entity_mapping(
-        self,
-    ) -> tuple[dict[str, list[str]], dict[str, int], dict[int, tuple[str, ...]]]:
-        """Compute chain→sequence, chain→entity_id, and entity_id→sequence mappings.
+    def _resolved_chain_names(self, *, name_null_chains: bool) -> dict[int, str]:
+        """Chain id → name, naming unnamed chains from the labels no chain already uses.
 
-        Returns:
-            (chain_sequences, chain_to_entity, entity_sequences)
+        Fallback labels are positional, so they are not stable across subsets of the
+        same complex. ``name_null_chains`` counts a blank name as unnamed.
         """
+        lookup = self.metadata.chain_lookup
+
+        def is_named(name: str) -> bool:
+            return not (name_null_chains and not name.strip())
+
+        # Reserve names of chains absent from this file too, so a fallback cannot
+        # collide with one; only present chains consume a label.
+        fallbacks = _unused_chain_labels({n for n in lookup.values() if is_named(n)})
+        return {
+            cid: lookup[cid]
+            if cid in lookup and is_named(lookup[cid])
+            else next(fallbacks)
+            for cid in (int(c) for c in np.unique(self.chain_id))
+        }
+
+    def _get_entity_mapping(
+        self, chain_names: dict[int, str]
+    ) -> tuple[dict[str, int], dict[int, tuple[str, ...]]]:
+        """Compute chain→entity_id and entity_id→sequence mappings."""
         chain_sequences: dict[str, list[str]] = {}
         for token_idx in range(len(self.token_to_atoms)):
-            chain_id_numeric = self.chain_id[token_idx]
-            chain_id_str = self.metadata.chain_lookup.get(
-                int(chain_id_numeric), chr(65 + int(chain_id_numeric))
-            )
+            chain_id_str = chain_names[int(self.chain_id[token_idx])]
             if chain_id_str not in chain_sequences:
                 chain_sequences[chain_id_str] = []
             chain_sequences[chain_id_str].append(self.sequence[token_idx])
@@ -740,10 +759,13 @@ class MolecularComplex:
                 entity_id_counter += 1
             chain_to_entity[chain_id_str] = sequence_to_entity[seq_tuple]
 
-        return chain_sequences, chain_to_entity, entity_sequences
+        return chain_to_entity, entity_sequences
 
     def _add_entity_information(
-        self, cif_file: CIFFile, entity_sequences: dict[int, tuple[str, ...]]
+        self,
+        cif_file: CIFFile,
+        entity_sequences: dict[int, tuple[str, ...]],
+        chain_to_entity: dict[str, int],
     ) -> None:
         """Add _entity category to CIF file so OST can identify ligands vs polymers."""
 
@@ -784,7 +806,6 @@ class MolecularComplex:
             )
 
         # Add _struct_asym to map chain IDs to entity IDs
-        _, chain_to_entity, _ = self._get_entity_mapping()
         if chain_to_entity:
             asym_ids = sorted(chain_to_entity.keys())
             asym_entity_ids = [str(chain_to_entity[c]) for c in asym_ids]
@@ -905,8 +926,11 @@ class MolecularComplex:
                 },
             )
 
-    def to_mmcif(self) -> str:
+    def to_mmcif(self, *, name_null_chains: bool = False) -> str:
         """Write MolecularComplex to mmcif string using biotite.
+
+        ``name_null_chains`` is opt-in because naming blank chains changes which
+        rows join downstream in the OST evals.
 
         Returns:
             String representation of the complex in mmCIF format
@@ -927,7 +951,8 @@ class MolecularComplex:
         atom_names = np.empty(n_atoms, dtype=object)
 
         # Build entity mappings: chains with identical sequences share entity ID
-        _, chain_to_entity, entity_sequences = self._get_entity_mapping()
+        chain_names = self._resolved_chain_names(name_null_chains=name_null_chains)
+        chain_to_entity, entity_sequences = self._get_entity_mapping(chain_names)
 
         atom_entity_ids = np.zeros(n_atoms, dtype=np.int32)
 
@@ -938,9 +963,7 @@ class MolecularComplex:
         for token_idx, (start, end) in enumerate(self.token_to_atoms):
             token = self.sequence[token_idx]
             chain_id_numeric = self.chain_id[token_idx]
-            chain_id_str = self.metadata.chain_lookup.get(
-                int(chain_id_numeric), chr(65 + int(chain_id_numeric))
-            )
+            chain_id_str = chain_names[int(chain_id_numeric)]
 
             # Track residue numbering per chain
             if chain_id_numeric not in chain_res_counters:
@@ -1031,7 +1054,7 @@ class MolecularComplex:
                     )
 
         # Add _entity category for OST compatibility
-        self._add_entity_information(cif_file, entity_sequences)
+        self._add_entity_information(cif_file, entity_sequences, chain_to_entity)
 
         # biotite echoes unmasked float columns at full precision
         # so we round every float column to conventional mmCIF precision

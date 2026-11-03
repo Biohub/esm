@@ -12,29 +12,18 @@ companion ``esm`` package.
 """
 
 import math
-from contextlib import contextmanager
-from typing import Any, cast
+from typing import cast
 
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
 from torch import Tensor
 
-try:
-    import transformer_engine.pytorch as te
-    from transformer_engine.common.recipe import DelayedScaling, Format
-
-    TE_AVAILABLE = True
-except ImportError:
-    te: Any = None
-    DelayedScaling: Any = None
-    Format: Any = None
-    TE_AVAILABLE = False
-
 from esm.models.esmc import EsmcModel
 from esm.models.esmc.checkpoint_layout import published_to_native_subtree
 from esm.models.esmfold2.config import EsmFold2Config, default_module_flags
 from esm.models.esmfold2.constants import MOL_TYPE_NONPOLYMER
+from esm.models.esmfold2.fp8 import convert_esmc_to_fp8_
 from esm.models.esmfold2.hf_checkpoint import hf_state_dict_to_native, is_hf_layout
 from esm.models.esmfold2.layers import (
     CHAR_VOCAB_SIZE,
@@ -52,11 +41,14 @@ from esm.models.esmfold2.layers import (
     TriangleMultiplicativeUpdate,
     _categorical_mean,
     _compute_intra_token_idx,
+    _to_fused_kernel_dtype,
     compute_lm_hidden_states,
+    fast_trimul_refusal_reason,
     gather_rep_atom_coords,
     gather_token_to_atom,
     maybe_apply_msa_column_masking,
     maybe_subsample_msa,
+    warn_fast_trimul_refused,
 )
 from esm.models.hub import HubPreTrainedModel, resolve_model_dir
 
@@ -407,136 +399,6 @@ def _inverse_softplus(value: float) -> float:
     return value + math.log(-math.expm1(-value))
 
 
-def _convert_te_modules_to_fp8_inplace(module: nn.Module) -> None:
-    """Re-init each TE module via quantized_model_init so weights live as fp8.
-
-    Must be called inside torch.no_grad(); covers nn.Linear, te.Linear,
-    te.LayerNormLinear, te.LayerNormMLP — the last two hold 99% of ESMC weight.
-    """
-    if not TE_AVAILABLE:
-        raise RuntimeError("transformer_engine is not available; cannot use fp8.")
-    from transformer_engine.pytorch import quantized_model_init
-
-    def _walk(mod: nn.Module) -> None:
-        for name, child in list(mod.named_children()):
-            replaced = False
-            if isinstance(child, nn.Linear):
-                in_f, out_f = child.in_features, child.out_features
-                has_bias = child.bias is not None
-                device = child.weight.device
-                dtype = child.weight.dtype
-                w = child.weight.data
-                b = child.bias.data if has_bias else None
-                setattr(mod, name, nn.Identity())
-                del child
-                torch.cuda.empty_cache()
-                with quantized_model_init(enabled=True):
-                    new_mod = te.Linear(
-                        in_f, out_f, bias=has_bias, params_dtype=dtype
-                    ).to(device)
-                new_mod.weight.quantize_(w)  # ty:ignore[call-non-callable, unresolved-attribute]
-                if has_bias:
-                    assert b is not None
-                    new_mod.bias.data.copy_(b)  # ty:ignore[call-non-callable]
-                del w, b
-                replaced = True
-            elif isinstance(child, te.Linear):
-                # te.Linear with bf16 weight → re-init inside quantized_model_init for fp8.
-                in_f, out_f = child.in_features, child.out_features
-                has_bias = child.bias is not None
-                device = child.weight.device
-                dtype = (
-                    child.weight.dtype
-                    if not hasattr(child.weight, "_data")
-                    else torch.bfloat16
-                )
-                state = {k: v.detach().clone() for k, v in child.state_dict().items()}
-                setattr(mod, name, nn.Identity())
-                del child
-                torch.cuda.empty_cache()
-                with quantized_model_init(enabled=True):
-                    new_mod = te.Linear(
-                        in_f, out_f, bias=has_bias, params_dtype=dtype
-                    ).to(device)  # ty:ignore[no-matching-overload]
-                new_mod.load_state_dict(state, strict=False)
-                replaced = True
-            elif hasattr(te, "LayerNormLinear") and isinstance(
-                child, te.LayerNormLinear
-            ):
-                state = {k: v.detach().clone() for k, v in child.state_dict().items()}
-                hidden_size = child.in_features
-                out_features = child.out_features
-                has_bias = child.use_bias
-                device = next(child.parameters()).device
-                setattr(mod, name, nn.Identity())
-                del child
-                torch.cuda.empty_cache()
-                with quantized_model_init(enabled=True):
-                    new_mod = te.LayerNormLinear(
-                        hidden_size,
-                        out_features,
-                        bias=has_bias,
-                        params_dtype=torch.bfloat16,
-                    ).to(device)
-                new_mod.load_state_dict(state, strict=False)
-                replaced = True
-            elif hasattr(te, "LayerNormMLP") and isinstance(child, te.LayerNormMLP):
-                state = {k: v.detach().clone() for k, v in child.state_dict().items()}
-                fc1_weight: Tensor = child.fc1_weight
-                hidden_size = int(fc1_weight.shape[1])
-                # fc1 packed as (2*ffn_hidden_size, hidden_size) for swiglu.
-                ffn_hidden_size = int(fc1_weight.shape[0]) // 2
-                has_bias = (
-                    getattr(child, "fc1_bias", None) is not None
-                    and child.fc1_bias is not None
-                )
-                device = fc1_weight.device
-                setattr(mod, name, nn.Identity())
-                del child
-                torch.cuda.empty_cache()
-                with quantized_model_init(enabled=True):
-                    new_mod = te.LayerNormMLP(
-                        hidden_size=hidden_size,
-                        ffn_hidden_size=ffn_hidden_size,
-                        bias=has_bias,
-                        activation="swiglu",
-                        params_dtype=torch.bfloat16,
-                    ).to(device)
-                new_mod.load_state_dict(state, strict=False)
-                replaced = True
-
-            if replaced:
-                # Freeze via .eval()+.requires_grad_(False); per-param ops would unwrap Float8Tensor.
-                new_mod.eval().requires_grad_(False)
-                setattr(mod, name, new_mod)
-                torch.cuda.empty_cache()
-            else:
-                _walk(child)
-
-    _walk(module)
-    torch.cuda.empty_cache()
-
-
-@contextmanager
-def _lm_precision_context(fp8: bool):
-    """bf16 autocast (+ optional TE fp8 autocast) around the LM forward.
-
-    te.autocast keeps te.Linear outputs bf16 instead of the fp32 default
-    (~425 MB at L=1024 in the hidden-state cache).
-    """
-    with torch.autocast(device_type="cuda", dtype=torch.bfloat16):
-        if fp8 and TE_AVAILABLE:
-            fp8_recipe = DelayedScaling(
-                fp8_format=Format.HYBRID,
-                amax_history_len=1,
-                amax_compute_algo="most_recent",
-            )
-            with te.autocast(enabled=True, recipe=fp8_recipe):
-                yield
-        else:
-            yield
-
-
 class EsmFold2Model(HubPreTrainedModel):
     """ESMFold2 — all-atom structure prediction with an ESMC PLM backbone.
 
@@ -566,8 +428,9 @@ class EsmFold2Model(HubPreTrainedModel):
     * ``model.set_chunk_size(int|None)``: caps L² ops (triangle / OPM /
       pair transition) at this token-axis chunk. Default 64 — fits
       L≈2k on an 80 GB GPU. Pass ``None`` for faster inference at L<600.
-    * ``model.set_kernel_backend(None | "fused" | "cuequivariance")``:
-      select kernel backend (None = reference path).
+    * ``model.set_kernel_backend(None | "fused" | "fast")``:
+      select kernel backend (None = reference path, "fused" = bit-exact
+      Triton kernels, "fast" = those plus approximate ones).
     """
 
     config_class = EsmFold2Config
@@ -617,9 +480,8 @@ class EsmFold2Model(HubPreTrainedModel):
         self.esmc: nn.Module | None = (
             EsmcModel(config.esmc_config) if config.esmc_config is not None else None
         )
-        self._esmc_fp8: bool = False  # set by load_esmc(fp8=True)
         # When True, ESM-C is offloaded to CPU after its one-shot hidden-state
-        # computation (restored on the next call), freeing its ~12 GB for the
+        # computation (restored on the next call), freeing its ~6 GB (fp8) for the
         # recycling trunk + diffusion — the freed blocks stay in the caching pool
         # so the trunk reuses them without cudaMalloc, relieving the allocator
         # pressure that drove rank desync / spin-wait. Opt-in (the CP entry point
@@ -679,7 +541,7 @@ class EsmFold2Model(HubPreTrainedModel):
 
         self.post_init()
 
-    def load_esmc(self, esmc_model_path: str, precision: str = "bf16") -> None:
+    def load_esmc(self, esmc_model_path: str, precision: str = "fp8") -> None:
         """Fetch the ESMC LM from a separate repo and attach it.
 
         Only needed when the backbone is *not* bundled into this checkpoint; see
@@ -694,17 +556,17 @@ class EsmFold2Model(HubPreTrainedModel):
         )
         self.set_esmc_precision(precision)
 
-    def set_esmc_precision(self, precision: str = "bf16") -> None:
-        """Cast the attached ESMC LM and freeze it.
+    def set_esmc_precision(self, precision: str = "fp8") -> None:
+        """Cast the attached ESMC LM in place and freeze it.
 
-        ``precision``: ``"bf16"`` (default), ``"fp32"``, or ``"fp8"``.
-        ``"fp8"`` requires H100 + TransformerEngine ≥ 2.x and quantizes
-        every TE module's weights to fp8 storage.
+        ``precision``: ``"fp8"`` (default; ESMFold2 was trained on an fp8 LM),
+        ``"bf16"`` or ``"fp32"``. ``"fp8"`` stores every projection weight in fp8.
+        It runs fp8 GEMMs on compute capability >= 8.9 and upcasts elsewhere.
         """
         dtype_map = {
             "bf16": torch.bfloat16,
             "fp32": torch.float32,
-            "fp8": torch.bfloat16,  # underlying weights stay bf16, TE re-quantizes to fp8
+            "fp8": torch.bfloat16,  # LayerNorms and embeddings stay bf16
         }
         if precision not in dtype_map:
             raise ValueError(
@@ -713,20 +575,13 @@ class EsmFold2Model(HubPreTrainedModel):
         if self.esmc is None:
             raise RuntimeError("no ESMC LM is attached; nothing to cast.")
 
-        esmc = self.esmc.to(device=self.device, dtype=dtype_map[precision]).eval()
+        # No device move: converting before the move keeps the fp32 checkpoint off the GPU.
+        esmc = self.esmc.to(dtype=dtype_map[precision]).eval()
         for p in esmc.parameters():
             p.requires_grad_(False)
 
         if precision == "fp8":
-            if not TE_AVAILABLE:
-                raise RuntimeError(
-                    "transformer_engine is not available; cannot use fp8."
-                )
-            with torch.no_grad():
-                _convert_te_modules_to_fp8_inplace(esmc)
-            self._esmc_fp8 = True
-        else:
-            self._esmc_fp8 = False
+            convert_esmc_to_fp8_(esmc)
 
         self.esmc = esmc
 
@@ -736,7 +591,7 @@ class EsmFold2Model(HubPreTrainedModel):
         pretrained_model_name_or_path,
         *,
         load_esmc: bool = True,
-        esmc_precision: str = "bf16",
+        esmc_precision: str = "fp8",
         config: EsmFold2Config | None = None,
         device: torch.device | str = "cpu",
         dtype: torch.dtype | None = None,
@@ -758,22 +613,26 @@ class EsmFold2Model(HubPreTrainedModel):
                     device=device,
                     dtype=dtype,
                 )
-        model = cls._load_pretrained(local_dir, config, device=device, dtype=dtype)
+        # Built on the CPU and cast there: the bundled ESMC is stored in fp32, and
+        # moving it first put the whole fp32 copy on the GPU.
+        model = cls._load_pretrained(local_dir, config, device="cpu", dtype=dtype)
         # A bundled backbone came in with the trunk; only the separate-repo
         # arrangement needs a second fetch.
         if load_esmc and config.esmc_config is None:
             model.load_esmc(model.config.esmc_id, precision=esmc_precision)
         elif config.esmc_config is not None:
             model.set_esmc_precision(esmc_precision)
-        return model
+        return model.to(device)
 
     def set_kernel_backend(self, backend: str | None) -> None:
         """Select kernel backend.
 
         Args:
             backend: ``None`` (reference path), ``"fused"`` (vendored Triton
-                kernels), or ``"cuequivariance"`` (cuequivariance kernels
-                where applicable; vanilla python fallback otherwise).
+                kernels, bit-exact against the reference path), or ``"fast"``
+                (those plus approximate kernels — currently the MSA encoder's
+                triangle multiplication, which is bf16 where the eager engine
+                upcasts to fp32).
         """
         self.folding_trunk.set_kernel_backend(backend)
         if self.lm_encoder is not None:
@@ -794,12 +653,12 @@ class EsmFold2Model(HubPreTrainedModel):
         """
         import torch._dynamo
 
-        from esm.models.esmfold2.layers import BACKEND_FUSED
+        from esm.models.esmfold2.layers import _KERNEL_BACKENDS
 
         stacked = [
             name
             for name, module in self.named_modules()
-            if getattr(module, "_kernel_backend", None) == BACKEND_FUSED
+            if getattr(module, "_kernel_backend", None) in _KERNEL_BACKENDS
         ]
         if stacked:
             raise RuntimeError(
@@ -861,9 +720,7 @@ class EsmFold2Model(HubPreTrainedModel):
         # previous fold (see self._offload_esmc). No-op when already resident.
         if self._offload_esmc:
             self.esmc.to(self.device)
-        # fp8 TE kernels require prod(shape[:-1]) % 8 == 0.
-        pad_to = 8 if self._esmc_fp8 else None
-        with _lm_precision_context(self._esmc_fp8):
+        with torch.autocast(device_type="cuda", dtype=torch.bfloat16):
             return compute_lm_hidden_states(
                 self.esmc,
                 input_ids,
@@ -871,7 +728,6 @@ class EsmFold2Model(HubPreTrainedModel):
                 residue_index,
                 mol_type,
                 tok_mask,
-                pad_to_multiple=pad_to,
                 lm_mask_pct=lm_mask_pct,
             )
 
@@ -1197,7 +1053,7 @@ class EsmFold2Model(HubPreTrainedModel):
                 else:
                     lm_z = self.language_model(lm_hidden_states.detach())
             del lm_hidden_states
-            # ESM-C is done for this forward — offload to free its ~12 GB for the
+            # ESM-C is done for this forward — offload to free its ~6 GB (fp8) for the
             # trunk/diffusion. Return the freed blocks to the driver (not just the
             # caching pool) so cuSOLVER's out-of-pool cudaMalloc — for its handle in
             # the diffusion rigid-align SVD — can succeed near the OOM boundary.
@@ -1462,6 +1318,34 @@ class MSAEncoderBlock(nn.Module):
             self.msa_transition.set_chunk_size(chunk_size)
         self.pair_transition.set_chunk_size(chunk_size)
 
+    def _triangle_updates(self, pair: Tensor, pair_attention_mask: Tensor) -> Tensor:
+        """Both triangle updates, fused under "fast", eager otherwise.
+
+        The eager engine upcasts the L^2 x c_z contraction to fp32, which makes
+        this the same operation as the trunk's at ~9x the cost. The kernel is
+        bf16, so this is not bitwise and sits behind "fast", not "fused".
+        Cast around the pair of updates the way ``FoldingTrunk`` casts around
+        the whole trunk; the kernel's own residual keeps the intermediate bf16.
+        """
+        if not self.tri_mul_out.fast_residual_available(pair):
+            if self.tri_mul_out.fast_backend_requested():
+                warn_fast_trimul_refused(
+                    "the MSA encoder", fast_trimul_refusal_reason(pair)
+                )
+            pair = pair + self.tri_mul_out(pair, mask=pair_attention_mask)
+            return pair + self.tri_mul_in(pair, mask=pair_attention_mask)
+
+        orig_dtype = pair.dtype
+        fused_pair = _to_fused_kernel_dtype(pair)
+        # Bool runs too, but fp32 matches the trunk's mask, so the kernel keeps
+        # one Triton specialization instead of two.
+        mask = pair_attention_mask.to(torch.float32)
+        for tri in (self.tri_mul_out, self.tri_mul_in):
+            fused_pair = tri.fused_residual_update(
+                fused_pair, residual=fused_pair, drop_mask=None, mask=mask
+            )
+        return fused_pair.to(orig_dtype)
+
     def forward(
         self,
         m: Tensor,
@@ -1473,8 +1357,7 @@ class MSAEncoderBlock(nn.Module):
         if not self.is_final_block:
             m = m + self.msa_pair_weighted_averaging(m, pair, pair_attention_mask)
             m = m + self.msa_transition(m)
-        pair = pair + self.tri_mul_out(pair, mask=pair_attention_mask)
-        pair = pair + self.tri_mul_in(pair, mask=pair_attention_mask)
+        pair = self._triangle_updates(pair, pair_attention_mask)
         pair = pair + self.pair_transition(pair)
         return m, pair
 

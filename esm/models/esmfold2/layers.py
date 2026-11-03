@@ -1,16 +1,9 @@
-# coding=utf-8
-# Copyright 2026 Biohub. All rights reserved.
-#
-# Licensed under the Apache License, Version 2.0 (the "License");
-# you may not use this file except in compliance with the License.
-# You may obtain a copy of the License at
-#
-#     http://www.apache.org/licenses/LICENSE-2.0
 """Shared building blocks for ESMFold2 HuggingFace model variants."""
 
 from __future__ import annotations
 
 import random
+import warnings
 from contextlib import contextmanager
 from functools import partial
 from typing import Any, cast
@@ -33,18 +26,6 @@ except ImportError:
     index_first_axis: Any = None
     pad_input: Any = None
     FLASH_ATTN_AVAILABLE = False
-
-try:
-    from cuequivariance_torch import attention_pair_bias as _cue_attn_pair_bias
-    from cuequivariance_torch.primitives.triangle import (
-        triangle_multiplicative_update as _cue_tri_mul,
-    )
-
-    CUE_AVAILABLE = True
-except ImportError:
-    _cue_attn_pair_bias: Any = None
-    _cue_tri_mul: Any = None
-    CUE_AVAILABLE = False
 
 # Vendored inference-only Triton kernels.
 try:
@@ -73,8 +54,13 @@ except (ImportError, RuntimeError):
 from esm.models.esmfold2.config import EsmFold2Config
 
 BACKEND_FUSED = "fused"
-BACKEND_CUEQ = "cuequivariance"
-_VALID_BACKENDS = (None, BACKEND_FUSED, BACKEND_CUEQ)
+BACKEND_FAST = "fast"
+_VALID_BACKENDS = (None, BACKEND_FUSED, BACKEND_FAST)
+
+# "fast" is a superset of "fused": every bit-exact kernel still runs, plus the
+# approximate ones. So a fused-path gate must accept it, and only the gates
+# named ``_fast_*`` below are exclusive to it.
+_KERNEL_BACKENDS = (BACKEND_FUSED, BACKEND_FAST)
 
 # The vendored fused Triton kernels (LN+SwiGLU, trimul-with-residual) operate in
 # bfloat16 only. Single-source that dtype here so every fused-path buffer and
@@ -86,7 +72,7 @@ def _fused_active(module: nn.Module, tensor: Tensor) -> bool:
     """Common preconditions for the vendored fused Triton inference kernels."""
     return (
         TRITON_KERNELS_AVAILABLE
-        and getattr(module, "_kernel_backend", None) == BACKEND_FUSED
+        and getattr(module, "_kernel_backend", None) in _KERNEL_BACKENDS
         and not torch.is_grad_enabled()
         and tensor.is_cuda
     )
@@ -96,7 +82,23 @@ def _fused_pair_stack_active(module: nn.Module, tensor: Tensor) -> bool:
     """Fused pair-stack kernels that support autograd."""
     return (
         TRITON_KERNELS_AVAILABLE
-        and getattr(module, "_kernel_backend", None) == BACKEND_FUSED
+        and getattr(module, "_kernel_backend", None) in _KERNEL_BACKENDS
+        and tensor.is_cuda
+    )
+
+
+def _fast_pair_stack_active(module: nn.Module, tensor: Tensor) -> bool:
+    """Only under "fast": the approximate pair-stack kernels.
+
+    Inference only, unlike ``_fused_pair_stack_active``. That gate is permissive
+    because its kernel is bit-exact, so letting gradients through costs nothing.
+    This one changes values, and an opt-in inference accelerator must not
+    silently move training gradients.
+    """
+    return (
+        TRITON_KERNELS_AVAILABLE
+        and getattr(module, "_kernel_backend", None) == BACKEND_FAST
+        and not torch.is_grad_enabled()
         and tensor.is_cuda
     )
 
@@ -106,8 +108,36 @@ def _to_fused_kernel_dtype(t: Tensor) -> Tensor:
     return t if t.dtype == _FUSED_KERNEL_DTYPE else t.to(_FUSED_KERNEL_DTYPE)
 
 
-def _cueq_active(module: nn.Module) -> bool:
-    return CUE_AVAILABLE and getattr(module, "_kernel_backend", None) == BACKEND_CUEQ
+_fast_trimul_refusal_warned = False
+
+
+def fast_trimul_refusal_reason(pair: Tensor) -> str:
+    """Why the approximate triangle-multiplication kernel cannot serve a call."""
+    if not TRITON_KERNELS_AVAILABLE:
+        return "the vendored Triton kernels are unavailable"
+    if not pair.is_cuda:
+        return f"the pair tensor is on {pair.device.type}, not cuda"
+    if torch.is_grad_enabled():
+        return "gradients are enabled and this kernel is inference-only"
+    return "the kernel is not installed"
+
+
+def warn_fast_trimul_refused(where: str, reason: str) -> None:
+    """Warn once per process that the fast trimul fell back to the eager engine."""
+    global _fast_trimul_refusal_warned
+    if _fast_trimul_refusal_warned:
+        return
+    _fast_trimul_refusal_warned = True
+    warnings.warn(
+        f"ESMFold2: {where} is running the eager triangle multiplication because "
+        f"{reason}; set_kernel_backend('{BACKEND_FAST}') has no effect there.",
+        stacklevel=3,
+    )
+
+
+def _any_requires_grad(*tensors: Tensor | None) -> bool:
+    """True if any given tensor is not None and requires grad."""
+    return any(t is not None and t.requires_grad for t in tensors)
 
 
 class DropoutResidual(nn.Module):
@@ -696,8 +726,40 @@ class SWAAtomBlock(nn.Module):
             else _gated_residual_raw
         )
 
-    def forward(self, x: Tensor, c_l: Tensor, attention_params: tuple) -> Tensor:
-        mod = self.adaln_modulation(c_l)
+    def _adaln_modulation_cached(
+        self, c_l: Tensor, inference_cache: dict[str, Any] | None
+    ) -> Tensor:
+        """``adaln_modulation(c_l)``, computed once per fold instead of per step.
+
+        ``c_l`` is the diffusion conditioning, which ``inference_cache`` already
+        holds fixed for the whole fold, so every diffusion step recomputes the
+        identical SiLU + Linear. One slot per block instance, in the caller's
+        per-fold cache, so nothing survives ``fold()``.
+
+        Keyed on the *identity* of ``c_l``: a different tensor object recomputes.
+        That makes the cache correct even where the conditioning is not actually
+        step-invariant -- it only stops paying off. In-place mutation of a cached
+        ``c_l`` would go unnoticed; nothing in the diffusion path does that.
+        """
+        if inference_cache is None or torch.is_grad_enabled() or c_l.requires_grad:
+            return self.adaln_modulation(c_l)
+        slot: dict[str, Any] = inference_cache.setdefault("atom_adaln", {}).setdefault(
+            self, {}
+        )
+        if slot.get("c_l") is not c_l:
+            slot.clear()
+            slot["c_l"] = c_l
+            slot["mod"] = self.adaln_modulation(c_l)
+        return slot["mod"]
+
+    def forward(
+        self,
+        x: Tensor,
+        c_l: Tensor,
+        attention_params: tuple,
+        inference_cache: dict[str, Any] | None = None,
+    ) -> Tensor:
+        mod = self._adaln_modulation_cached(c_l, inference_cache)
         if mod.dim() == 2:
             mod = mod.unsqueeze(1)
         shift_a, scale_a, gate_a, shift_f, scale_f, gate_f = mod.chunk(6, dim=-1)
@@ -766,10 +828,11 @@ class SWAAtomTransformer(nn.Module):
         c_l: Tensor,
         attention_params: tuple,
         return_intermediates: bool = False,
+        inference_cache: dict[str, Any] | None = None,
     ) -> Tensor | tuple[Tensor, list[Tensor]]:
         intermediates: list[Tensor] = []
         for block in self.blocks:
-            q_l = block(q_l, c_l, attention_params)
+            q_l = block(q_l, c_l, attention_params, inference_cache=inference_cache)
             if return_intermediates:
                 intermediates.append(q_l)
         if return_intermediates:
@@ -911,13 +974,24 @@ class EsmFold2AtomEncoder(nn.Module):
             r_to_q = self.coords_linear(r_input)
             q = q + r_to_q
 
-        c = c.repeat_interleave(num_diffusion_samples, 0)
+        # repeat_interleave allocates a fresh tensor of identical values on every
+        # diffusion step. Cache the expanded conditioning next to c_base so the
+        # blocks downstream see one object per fold and can key caches on it.
+        if layer_cache is not None:
+            c_exp = layer_cache.get("c_expanded")
+            if c_exp is None:
+                c_exp = c.repeat_interleave(num_diffusion_samples, 0)
+                layer_cache["c_expanded"] = c_exp
+            c = c_exp
+        else:
+            c = c.repeat_interleave(num_diffusion_samples, 0)
 
         result = self.atom_transformer(
             q_l=q,
             c_l=c,
             attention_params=attention_params,
             return_intermediates=return_intermediates,
+            inference_cache=inference_cache,
         )
         if return_intermediates:
             q, intermediates = result
@@ -988,6 +1062,7 @@ class EsmFold2AtomDecoder(nn.Module):
         atom_attention_mask: Tensor,
         num_diffusion_samples: int = 1,
         return_intermediates: bool = False,
+        inference_cache: dict[str, Any] | None = None,
     ) -> tuple[Tensor, list[Tensor]]:
         """Returns (r_update, intermediates)."""
         atom_to_token_exp = atom_to_token.repeat_interleave(num_diffusion_samples, 0)
@@ -1000,6 +1075,7 @@ class EsmFold2AtomDecoder(nn.Module):
             c_l=c_l,
             attention_params=p_lm,
             return_intermediates=return_intermediates,
+            inference_cache=inference_cache,
         )
         if return_intermediates:
             q_l, intermediates = result
@@ -1077,16 +1153,57 @@ class AttentionPairBias(nn.Module):
             and hasattr(self, "pair_norm")
         )
 
-    def _can_use_cueq_pair_bias(
-        self, z: Tensor, n_queries: int, beta: Tensor | float
-    ) -> bool:
-        return (
-            _cueq_active(self)
-            and n_queries > 750
-            and z.dim() == 4
-            and self._is_zero_beta(beta)
-            and hasattr(self, "pair_bias_proj")
+    def _pair_bias_cache_slot(
+        self,
+        inference_cache: dict[str, Any] | None,
+        z: Tensor,
+        attention_mask: Tensor | None,
+        bsz: int,
+        num_diffusion_samples: int,
+    ) -> dict[str, Any] | None:
+        """This block's slot in the per-fold pair-bias cache, or ``None``.
+
+        The pair bias is a projection of ``z``. Within one fold ``z``, the mask
+        and the projection weights are all fixed, so every diffusion step of
+        every block recomputes the identical tensor. The slot lives in the
+        caller's per-fold ``inference_cache``, keyed by this module instance, so
+        two blocks never share and nothing survives ``fold()``.
+
+        The slot is invalidated unless ``z`` and the mask are the *same tensor
+        objects* as last time. In-place mutation of a cached ``z`` would go
+        unnoticed; nothing in the diffusion path does that.
+        """
+        if inference_cache is None:
+            return None
+        if not (hasattr(self, "pair_norm") and hasattr(self, "pair_bias_proj")):
+            return None
+        if torch.is_grad_enabled() or _any_requires_grad(z, attention_mask):
+            warnings.warn(
+                "ESMFold2: per-fold pair-bias cache not engaged because autograd "
+                "is active; the bias is recomputed on every diffusion step.",
+                stacklevel=3,
+            )
+            return None
+        slot: dict[str, Any] = inference_cache.setdefault("pair_bias", {}).setdefault(
+            self, {}
         )
+        key = (tuple(z.shape), z.dtype, bsz, num_diffusion_samples)
+        if (
+            slot.get("z") is not z
+            or slot.get("mask") is not attention_mask
+            or slot.get("key") != key
+        ):
+            slot.clear()
+            slot["z"] = z
+            slot["mask"] = attention_mask
+            slot["key"] = key
+        return slot
+
+    @staticmethod
+    def _expand_for_samples(t: Tensor, bsz: int, num_diffusion_samples: int) -> Tensor:
+        if t.shape[0] != bsz and num_diffusion_samples > 1:
+            return t.repeat_interleave(num_diffusion_samples, dim=0)
+        return t
 
     def forward(
         self,
@@ -1096,6 +1213,7 @@ class AttentionPairBias(nn.Module):
         beta: Tensor | float = 0.0,
         attention_mask: Tensor | None = None,
         num_diffusion_samples: int = 1,
+        inference_cache: dict[str, Any] | None = None,
     ) -> Tensor:
         bsz, n_queries, d_model = a.shape
 
@@ -1111,9 +1229,13 @@ class AttentionPairBias(nn.Module):
         k = k.view(bsz, n_keys, self.num_heads, self.head_dim)
         v = v.view(bsz, n_keys, self.num_heads, self.head_dim)
 
-        # Expand z for num_diffusion_samples
-        if z.dim() == 4 and z.shape[0] != bsz and num_diffusion_samples > 1:
-            z = z.repeat_interleave(num_diffusion_samples, dim=0)
+        # Keyed on the pre-expansion z and mask. z is expanded per diffusion
+        # sample at the two bias sites below rather than here, so a cache hit
+        # skips the [B*S, Q, K, C] copy as well as the projection.
+        bias_slot = self._pair_bias_cache_slot(
+            inference_cache, z, attention_mask, bsz, num_diffusion_samples
+        )
+
         if (
             attention_mask is not None
             and attention_mask.shape[0] != bsz
@@ -1124,31 +1246,44 @@ class AttentionPairBias(nn.Module):
             )
 
         if self._can_use_fused_pair_bias(z, n_queries, beta):
-            kernel_mask = (
-                attention_mask
-                if attention_mask is not None
-                else torch.ones(bsz, n_queries, device=a.device, dtype=torch.bool)
-            )
-            pair_norm_w = self.pair_norm.weight
-            pair_norm_b = (
-                self.pair_norm.bias
-                if self.pair_norm.bias is not None
-                else torch.zeros_like(pair_norm_w)
-            )
-            z_bf = z if z.dtype == torch.bfloat16 else z.to(torch.bfloat16)
-            bias = _fused_pair_bias(
-                z_bf,
-                kernel_mask,
-                self.pair_bias_proj.weight,
-                num_heads=self.num_heads,
-                pair_norm_w=pair_norm_w,
-                pair_norm_b=pair_norm_b,
-            )  # (B, H, Q, K)
             q_bhqd = q.transpose(1, 2)
             k_bhqd = k.transpose(1, 2)
             v_bhqd = v.transpose(1, 2)
+            attn_bias = None
+            if bias_slot is not None and bias_slot.get("fused_dtype") == q_bhqd.dtype:
+                attn_bias = bias_slot.get("fused")
+            if attn_bias is None:
+                z_exp = self._expand_for_samples(z, bsz, num_diffusion_samples)
+                kernel_mask = (
+                    attention_mask
+                    if attention_mask is not None
+                    else torch.ones(bsz, n_queries, device=a.device, dtype=torch.bool)
+                )
+                pair_norm_w = self.pair_norm.weight
+                pair_norm_b = (
+                    self.pair_norm.bias
+                    if self.pair_norm.bias is not None
+                    else torch.zeros_like(pair_norm_w)
+                )
+                z_bf = (
+                    z_exp if z_exp.dtype == torch.bfloat16 else z_exp.to(torch.bfloat16)
+                )
+                bias = _fused_pair_bias(
+                    z_bf,
+                    kernel_mask,
+                    self.pair_bias_proj.weight,
+                    num_heads=self.num_heads,
+                    pair_norm_w=pair_norm_w,
+                    pair_norm_b=pair_norm_b,
+                )  # (B, H, Q, K)
+                # Cache the SDPA-ready tensor: the cast is the same size as the
+                # kernel output, so storing both would double the cost.
+                attn_bias = bias.to(q_bhqd.dtype)
+                if bias_slot is not None:
+                    bias_slot["fused"] = attn_bias
+                    bias_slot["fused_dtype"] = q_bhqd.dtype
             attn_out = F.scaled_dot_product_attention(
-                q_bhqd, k_bhqd, v_bhqd, attn_mask=bias.to(q_bhqd.dtype)
+                q_bhqd, k_bhqd, v_bhqd, attn_mask=attn_bias
             )
             g = torch.sigmoid(self.g_proj(x)).view(
                 bsz, n_queries, self.num_heads, self.head_dim
@@ -1159,55 +1294,36 @@ class AttentionPairBias(nn.Module):
                 out = torch.sigmoid(self.out_gate(s)) * out
             return out
 
-        if self._can_use_cueq_pair_bias(z, n_queries, beta):
-            kernel_mask = (
-                attention_mask
-                if attention_mask is not None
-                else torch.ones(bsz, n_queries, device=a.device, dtype=torch.bool)
-            )
-            out, _ = _cue_attn_pair_bias(
-                s=x,
-                q=q.transpose(1, 2),
-                k=k.transpose(1, 2),
-                v=v.transpose(1, 2),
-                z=z,
-                mask=kernel_mask,
-                num_heads=self.num_heads,
-                w_proj_z=self.pair_bias_proj.weight,
-                w_proj_g=self.g_proj.weight,
-                w_proj_o=self.out_proj.weight,
-                w_ln_z=self.pair_norm.weight,
-                b_ln_z=self.pair_norm.bias,
-                return_z_proj=False,
-                is_cached_z_proj=False,
-            )
+        # Standard attention with pair bias
+        g = torch.sigmoid(self.g_proj(x)).view(
+            bsz, n_queries, self.num_heads, self.head_dim
+        )
+
+        logits = torch.einsum("... i h d, ... j h d -> ... i j h", q, k) * self.scale
+
+        if z.dim() == 4:
+            pair_bias = None if bias_slot is None else bias_slot.get("eager")
+            if pair_bias is None:
+                z_exp = self._expand_for_samples(z, bsz, num_diffusion_samples)
+                pair_bias = self.pair_bias_proj(self.pair_norm(z_exp))
+                if bias_slot is not None:
+                    bias_slot["eager"] = pair_bias
         else:
-            # Standard attention with pair bias
-            g = torch.sigmoid(self.g_proj(x)).view(
-                bsz, n_queries, self.num_heads, self.head_dim
+            # A [B, Q, K] bias passed straight through; the unsqueeze is a view.
+            pair_bias = z.unsqueeze(-1)
+        logits = logits + pair_bias.to(dtype=logits.dtype)
+
+        if attention_mask is not None:
+            min_val = torch.finfo(logits.dtype).min
+            mask_bias = torch.where(
+                attention_mask.bool()[:, None, :, None], 0.0, min_val
             )
+            logits = logits + mask_bias.to(dtype=logits.dtype)
 
-            logits = (
-                torch.einsum("... i h d, ... j h d -> ... i j h", q, k) * self.scale
-            )
-
-            if z.dim() == 4:
-                pair_bias = self.pair_bias_proj(self.pair_norm(z))
-            else:
-                pair_bias = z.unsqueeze(-1)
-            logits = logits + pair_bias.to(dtype=logits.dtype)
-
-            if attention_mask is not None:
-                min_val = torch.finfo(logits.dtype).min
-                mask_bias = torch.where(
-                    attention_mask.bool()[:, None, :, None], 0.0, min_val
-                )
-                logits = logits + mask_bias.to(dtype=logits.dtype)
-
-            attn = torch.softmax(logits, dim=-2).to(dtype=v.dtype)
-            ctx = torch.einsum("... i j h, ... j h d -> ... i h d", attn, v)
-            ctx = g * ctx
-            out = self.out_proj(ctx.reshape(bsz, n_queries, d_model))
+        attn = torch.softmax(logits, dim=-2).to(dtype=v.dtype)
+        ctx = torch.einsum("... i j h, ... j h d -> ... i h d", attn, v)
+        ctx = g * ctx
+        out = self.out_proj(ctx.reshape(bsz, n_queries, d_model))
 
         if s is not None:
             out = torch.sigmoid(self.out_gate(s)) * out
@@ -1317,6 +1433,7 @@ class DiffusionTransformer(nn.Module):
         attention_mask: Tensor | None = None,
         num_diffusion_samples: int = 1,
         return_intermediates: bool = False,
+        inference_cache: dict[str, Any] | None = None,
     ) -> tuple[Tensor, list[Tensor]]:
         intermediates: list[Tensor] = []
         x = a
@@ -1328,6 +1445,7 @@ class DiffusionTransformer(nn.Module):
                 beta,
                 attention_mask=attention_mask,
                 num_diffusion_samples=num_diffusion_samples,
+                inference_cache=inference_cache,
             )
             x = x + transition(x, s)
             if return_intermediates:
@@ -1389,7 +1507,7 @@ class DiffusionConditioning(nn.Module):
         relative_position_encoding: Tensor,
         sigma_data: float | None = None,
         num_diffusion_samples: int = 1,
-        inference_cache: dict[str, Tensor] | None = None,
+        inference_cache: dict[str, Any] | None = None,
     ) -> tuple[Tensor, Tensor]:
         sigma = self.sigma_data if sigma_data is None else float(sigma_data)
         base_batch = z_trunk.shape[0]
@@ -1545,7 +1663,7 @@ class DiffusionModule(nn.Module):
         num_diffusion_samples: int = 1,
         return_token_repr: bool = False,
         return_atom_repr: bool = False,
-        inference_cache: dict[str, Tensor] | None = None,
+        inference_cache: dict[str, Any] | None = None,
     ) -> dict[str, Tensor | None]:
         bsz = x_noisy.shape[0]
         sigma = self.sigma_data if sigma_data is None else float(sigma_data)
@@ -1598,6 +1716,7 @@ class DiffusionModule(nn.Module):
             beta=0.0,
             attention_mask=token_attention_mask,
             num_diffusion_samples=num_diffusion_samples,
+            inference_cache=inference_cache,
         )
 
         # Step 6: token norm
@@ -1613,6 +1732,7 @@ class DiffusionModule(nn.Module):
             atom_attention_mask=ref_mask,
             num_diffusion_samples=num_diffusion_samples,
             return_intermediates=return_atom_repr,
+            inference_cache=inference_cache,
         )
 
         # Step 8: compute denoised output
@@ -1827,7 +1947,7 @@ class DiffusionStructureHead(nn.Module):
         device = s_inputs.device
         target_batch = s_inputs.shape[0] * num_diffusion_samples
 
-        inference_cache: dict[str, Tensor] | None = {} if use_inference_cache else None
+        inference_cache: dict[str, Any] | None = {} if use_inference_cache else None
 
         steps = (
             self.inference_num_steps
@@ -2223,7 +2343,6 @@ def compute_lm_hidden_states(
     residue_index: Tensor,
     mol_type: Tensor,
     token_mask: Tensor,
-    pad_to_multiple: int | None = None,
     lm_mask_pct: float = 0.0,
     mask_token_id: int = 32,
 ) -> Tensor:
@@ -2297,11 +2416,8 @@ def compute_lm_hidden_states(
         expand_map[prot_pos_b] = per_token_lm_pos[inverse_ordered]
         expand_maps.append(expand_map)
 
-    # Pad to longest LM input; round to ``pad_to_multiple`` when fp8 is on
-    # (TE fp8 kernels assert prod(shape[:-1]) % 8 == 0).
+    # Pad to longest LM input.
     max_len = max(lm_lengths)
-    if pad_to_multiple is not None and pad_to_multiple > 1:
-        max_len = ((max_len + pad_to_multiple - 1) // pad_to_multiple) * pad_to_multiple
     lm_input_ids = torch.full(
         (B, max_len),
         1,
@@ -2372,7 +2488,6 @@ class TriangleMultiplicativeBlock(nn.Module):
         )
         self.proj_gate = nn.Linear(self.input_channels, self.input_channels, bias=False)
 
-        self._use_kernels: bool = False
         # Default chunked for memory on long sequences; tests override with
         # ``set_chunk_size(None)`` for the unchunked path under bit-exact bf16
         # parity checks.
@@ -2386,9 +2501,6 @@ class TriangleMultiplicativeBlock(nn.Module):
             self.proj_bundle.weight[: 2 * self.latent_channels, :],
             self.proj_bundle.weight[2 * self.latent_channels :, :],
         )
-
-    def _kernel_flow_direction(self) -> str:
-        return self.flow
 
     def _triangular_contract(self, left_stream: Tensor, right_stream: Tensor) -> Tensor:
         return torch.einsum(self._einsum_equation, left_stream, right_stream)
@@ -2416,37 +2528,6 @@ class TriangleMultiplicativeBlock(nn.Module):
         if visibility is None:
             visibility = pair_grid.new_ones(pair_grid.shape[:-1])
 
-        if self._use_kernels:
-            p_in_weight, g_in_weight = self.split_kernel_weights()
-
-            try:
-                return _cue_tri_mul(
-                    pair_grid,
-                    direction=self._kernel_flow_direction(),
-                    mask=visibility,
-                    norm_in_weight=self.norm_start.weight,
-                    norm_in_bias=self.norm_start.bias,
-                    p_in_weight=p_in_weight,
-                    g_in_weight=g_in_weight,
-                    norm_out_weight=self.norm_mix.weight,
-                    norm_out_bias=self.norm_mix.bias,
-                    p_out_weight=self.proj_emit.weight,
-                    g_out_weight=self.proj_gate.weight,
-                    eps=_EPS,
-                )
-            except Exception as e:
-                import logging as _logging
-
-                _logging.getLogger(__name__).warning(
-                    "cuequivariance triangle_multiplicative_update kernel failed "
-                    "(flow=%s, shape=%s, dtype=%s); falling back to chunked einsum. "
-                    "Error: %s",
-                    self.flow,
-                    tuple(pair_grid.shape),
-                    pair_grid.dtype,
-                    e,
-                )
-
         normalized_grid = self.norm_start(pair_grid)
         bundled = self.proj_bundle(normalized_grid)
         signal, gate_logits = bundled.split(2 * self.latent_channels, dim=-1)
@@ -2471,21 +2552,87 @@ class TriangleMultiplicativeUpdate(nn.Module):
     def __init__(self, dim: int = 128, _outgoing: bool = True) -> None:
         super().__init__()
         flow = "outgoing" if _outgoing else "incoming"
+        self._flow = flow
         self._engine = TriangleMultiplicativeBlock(
             input_channels=dim, latent_channels=dim, flow=flow
         )
+        self._kernel_backend: str | None = None
 
     def set_kernel_backend(self, backend: str | None) -> None:
-        # Engine uses cueq when backend=="cuequivariance"; the "fused" backend
-        # routes through the parent PairUpdateBlock's fused path (bypassing this).
-        self._engine._use_kernels = backend == BACKEND_CUEQ
-        if backend == BACKEND_CUEQ and not CUE_AVAILABLE:
-            raise RuntimeError(
-                "backend='cuequivariance' but cuequivariance_torch is not installed."
+        if backend not in _VALID_BACKENDS:
+            raise ValueError(
+                f"backend must be one of {_VALID_BACKENDS}, got {backend!r}"
             )
+        self._kernel_backend = backend
 
     def set_chunk_size(self, chunk_size: int | None) -> None:
         self._engine.set_chunk_size(chunk_size)
+
+    def fast_backend_requested(self) -> bool:
+        """``set_kernel_backend("fast")`` was called, regardless of runtime fit."""
+        return self._kernel_backend == BACKEND_FAST
+
+    def fused_residual_ready(self, pair: Tensor) -> bool:
+        """Trunk gate: fused preconditions including dtype."""
+        return (
+            _fused_pair_stack_active(self, pair)
+            and _fused_trimul_with_residual is not None
+            and pair.dtype == _FUSED_KERNEL_DTYPE
+        )
+
+    def fast_residual_available(self, pair: Tensor) -> bool:
+        """MSA-encoder gate: "fast" only, dtype excluded so the caller can cast."""
+        return (
+            _fast_pair_stack_active(self, pair)
+            and _fused_trimul_with_residual is not None
+        )
+
+    def fused_residual_update(
+        self,
+        pair: Tensor,
+        *,
+        residual: Tensor,
+        drop_mask: Tensor | None,
+        mask: Tensor | None,
+    ) -> Tensor:
+        """``residual + drop_mask * TriMul(pair)`` through the fused Triton kernel.
+
+        The single call site for the kernel. The trunk's ``PairUpdateBlock`` and
+        the MSA encoder's ``MSAEncoderBlock`` both route here, so the weight
+        marshalling lives in one place. Callers check their own gate first.
+
+        Parameters
+        ----------
+        pair
+            ``(B, L, L, c_z)`` bf16 CUDA pair tensor.
+        residual
+            Added in-kernel at the final GEMM; pass ``pair`` for a plain residual.
+        drop_mask
+            Row-shared dropout mask, or ``None`` for inference.
+        mask
+            ``(B, L, L)`` pair mask, or ``None``. Pass fp32: a bool mask also
+            runs, but a second dtype means a second Triton specialization with
+            its own autotune result, so the two are not guaranteed bit-equal.
+        """
+        assert _fused_trimul_with_residual is not None
+        engine = self._engine
+        p_in_weight, g_in_weight = engine.split_kernel_weights()
+        return _fused_trimul_with_residual(
+            pair,
+            self._flow,
+            residual=residual,
+            drop_mask=drop_mask,
+            norm_in_weight=_to_fused_kernel_dtype(engine.norm_start.weight),
+            norm_in_bias=_to_fused_kernel_dtype(engine.norm_start.bias),
+            p_in_weight=_to_fused_kernel_dtype(p_in_weight),
+            g_in_weight=_to_fused_kernel_dtype(g_in_weight),
+            norm_out_weight=_to_fused_kernel_dtype(engine.norm_mix.weight),
+            norm_out_bias=_to_fused_kernel_dtype(engine.norm_mix.bias),
+            p_out_weight=_to_fused_kernel_dtype(engine.proj_emit.weight),
+            g_out_weight=_to_fused_kernel_dtype(engine.proj_gate.weight),
+            mask=mask,
+            eps=_EPS,
+        )
 
     def forward(self, z: Tensor, mask: Tensor | None = None) -> Tensor:
         return self._engine(z, visibility=mask)
@@ -2512,13 +2659,13 @@ class Transition(nn.Module):
         self._chunk_size = chunk_size
 
     def set_kernel_backend(self, backend: str | None) -> None:
-        """Install / uninstall FusedLNLinearSwiGLU (no cueq equivalent)."""
+        """Install / uninstall FusedLNLinearSwiGLU."""
         if backend not in _VALID_BACKENDS:
             raise ValueError(
                 f"backend must be one of {_VALID_BACKENDS}, got {backend!r}"
             )
         self._kernel_backend = backend
-        if backend == BACKEND_FUSED and TRITON_KERNELS_AVAILABLE:
+        if backend in _KERNEL_BACKENDS and TRITON_KERNELS_AVAILABLE:
             assert _FusedLNLinearSwiGLU is not None
             d_model = self.norm.normalized_shape[0]
             d_inner = self.ffn.hidden_features
@@ -2617,7 +2764,7 @@ class PairUpdateBlock(nn.Module):
         self.pair_transition.set_kernel_backend(backend)
         self._kernel_backend = backend
         self.row_drop = DropoutResidual(
-            0.0, batch_dim=1, use_fused_kernels=(backend == BACKEND_FUSED)
+            0.0, batch_dim=1, use_fused_kernels=(backend in _KERNEL_BACKENDS)
         )
 
     def set_chunk_size(self, chunk_size: int | None) -> None:
@@ -2626,35 +2773,18 @@ class PairUpdateBlock(nn.Module):
         self.pair_transition.set_chunk_size(chunk_size)
 
     def _can_use_fused_trimul_with_residual(self, pair: Tensor) -> bool:
-        return (
-            _fused_pair_stack_active(self, pair)
-            and pair.dtype == _FUSED_KERNEL_DTYPE
-            and _fused_trimul_with_residual is not None
-        )
+        return self.tri_mul_out.fused_residual_ready(pair)
 
     def _fused_trimul_with_residual(
         self, pair: Tensor, direction: str, pair_attention_mask: Tensor | None
     ) -> Tensor:
         """Fused TriMul+residual call; weights from the corresponding engine."""
         tri = self.tri_mul_out if direction == "outgoing" else self.tri_mul_in
-        engine: TriangleMultiplicativeBlock = tri._engine
-        p_in_weight, g_in_weight = engine.split_kernel_weights()
-
-        return _fused_trimul_with_residual(
+        return tri.fused_residual_update(
             pair,
-            direction,
             residual=pair,
             drop_mask=None,  # inference: no dropout, matches internal's eval path
-            norm_in_weight=_to_fused_kernel_dtype(engine.norm_start.weight),
-            norm_in_bias=_to_fused_kernel_dtype(engine.norm_start.bias),
-            p_in_weight=_to_fused_kernel_dtype(p_in_weight),
-            g_in_weight=_to_fused_kernel_dtype(g_in_weight),
-            norm_out_weight=_to_fused_kernel_dtype(engine.norm_mix.weight),
-            norm_out_bias=_to_fused_kernel_dtype(engine.norm_mix.bias),
-            p_out_weight=_to_fused_kernel_dtype(engine.proj_emit.weight),
-            g_out_weight=_to_fused_kernel_dtype(engine.proj_gate.weight),
             mask=pair_attention_mask,
-            eps=_EPS,
         )
 
     def forward(
@@ -2704,7 +2834,7 @@ class FoldingTrunk(nn.Module):
         orig_dtype = pair.dtype
         fused_on = (
             len(self.blocks) > 0
-            and getattr(self.blocks[0], "_kernel_backend", None) == BACKEND_FUSED
+            and getattr(self.blocks[0], "_kernel_backend", None) in _KERNEL_BACKENDS
         )
         if pair.is_cuda and fused_on and orig_dtype != torch.bfloat16:
             pair = pair.to(torch.bfloat16)

@@ -7,11 +7,13 @@ from esm.models.esmfold2.prepare_input import (
     _entity_key,
     build_chains_from_input,
     compute_token_bonds,
+    prepare_esmfold2_input,
 )
 from esm.models.esmfold2.types import (
     CovalentBond,
     LigandInput,
     Modification,
+    PocketConditioning,
     ProteinInput,
     StructurePredictionInput,
 )
@@ -104,6 +106,32 @@ def test_build_chains_numbers_copies_across_both_id_forms():
     assert [c.chain_id for c in chains] == ["A", "B", "C"]
     assert [c.entity_id for c in chains] == [0, 0, 0]
     assert [c.sym_id for c in chains] == [0, 1, 2]
+
+
+def test_pocket_conditioning_raises_not_implemented():
+    """``pocket`` must fail loudly, not fold unconditioned.
+
+    No released checkpoint consumes pocket features, so the featurizer rejects
+    the input rather than emitting the all-zeros ``pocket_feature`` that
+    ``forward`` would then drop.
+    """
+    spi = StructurePredictionInput(
+        sequences=[ProteinInput(id="A", sequence="MKT")],
+        pocket=PocketConditioning(binder_chain_id="A", contacts=[("A", 0)]),
+    )
+
+    with pytest.raises(NotImplementedError, match="pocket conditioning"):
+        prepare_esmfold2_input(spi)
+
+
+def test_pocket_unset_still_emits_zero_pocket_feature(ccd_pickle):
+    """The happy path is untouched: no ``pocket`` means no raise."""
+    spi = StructurePredictionInput(sequences=[ProteinInput(id="A", sequence="MKT")])
+
+    features, _ = prepare_esmfold2_input(spi)
+
+    assert "pocket_feature" in features
+    assert not features["pocket_feature"].any()
 
 
 def _covalent_bond_input(bonds: list[CovalentBond] | None) -> StructurePredictionInput:

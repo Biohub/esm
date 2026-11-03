@@ -323,6 +323,19 @@ class ProteinChain:
     def to_mmcif(self, path: PathOrBuffer):
         f = CIFFile()
         set_structure_pdbx(f, self.atom_array, data_block=self.id)
+        entity_id = str(self.entity_id if self.entity_id is not None else 1)
+        atom_site = f.block["atom_site"]
+        atom_site["label_entity_id"] = CIFColumn(
+            np.full(atom_site.row_count, entity_id)
+        )
+        asym_ids = np.unique(atom_site["label_asym_id"].as_array(str))
+        f.block["struct_asym"] = CIFCategory(
+            {"id": asym_ids, "entity_id": np.full(len(asym_ids), entity_id)}
+        )
+        f.block["entity"] = CIFCategory({"id": [entity_id], "type": ["polymer"]})
+        f.block["entity_poly"] = CIFCategory(
+            {"entity_id": [entity_id], "type": ["polypeptide(L)"]}
+        )
 
         # incantations molstar needs to render pLDDT / confidence onto
         # the structure with "alphafold-view"
@@ -486,9 +499,32 @@ class ProteinChain:
         return sasa_per_atom
 
     def sap_score(self, aggregation: str = "atom") -> np.ndarray:
-        """Computes per-atom SAP score.
-        Can optionally aggregate by residue (by averaging over atoms. NOTE: this returns values only for residues that have coordinates!)
-        or full-protein (sum of SAP score for atoms with SAP > 0, as in Lauer et al. 2011)."""
+        """Compute static spatial aggregation propensity (SAP) with a 5-Angstrom radius.
+
+        Each atom is a neighborhood center. Only side-chain SASA contributes,
+        normalized by the residue's fully exposed side-chain area in Ala-X-Ala
+        and weighted by its Black-Mould hydrophobicity from residue_constants.
+        This evaluates one conformation, without simulation averaging.
+
+        Parameters
+        ----------
+        aggregation : {"atom", "residue", "protein"}, default="atom"
+            Return per-atom scores, residue means (NaN for missing residues),
+            or the sum of positive atom scores over the entire chain. The latter
+            extends Lauer et al.'s CDR-only aggregation to all supplied atoms.
+
+        Notes
+        -----
+        The hydrophobicity table subtracts 0.5, leaving glycine at 0.001 rather
+        than exactly zero. SASA is computed using Biotite's default parameters.
+        Cached scores computed with the former reversed SASA mask must be
+        recomputed; both atom scores and their aggregations change.
+
+        References
+        ----------
+        Chennamsetty et al. (2009), doi:10.1073/pnas.0904191106.
+        Lauer et al. (2012), doi:10.1002/jps.22758.
+        """
         sap_radius = 5.0
         arr = self.atom_array_no_insertions
 
@@ -523,8 +559,9 @@ class ProteinChain:
         assert len(res_hydrophobicity) == len(self)
 
         # compute SAP score
-        is_side_chain = ~bs.filter_peptide_backbone(arr)
-        sasa_per_atom[is_side_chain] = 0
+        # Include backbone oxygens omitted by Biotite's peptide-backbone filter; retain all neighborhood centers.
+        is_backbone = np.isin(arr.atom_name, ["N", "CA", "C", "O", "OXT"])
+        sasa_per_atom[is_backbone] = 0
         kdtree = KDTree(arr.coord)
         neighbors = kdtree.query_ball_tree(kdtree, sap_radius, p=2.0)
         sap_by_atom = np.zeros_like(sasa_per_atom)

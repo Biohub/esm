@@ -32,7 +32,7 @@ model = (
     .cuda()
     .eval()
 )
-model.set_kernel_backend("cuequivariance")
+model.set_kernel_backend("fused")
 
 start = time()
 with torch.inference_mode():

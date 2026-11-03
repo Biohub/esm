@@ -182,8 +182,8 @@ class EsmFold2HFAdapter(torch.nn.Module):
         model = upstream.EsmFold2Model.from_pretrained(
             pretrained_model_name_or_path, dtype=dtype, **kwargs
         )
-        # No "fp8": ours quantizes TransformerEngine modules in place, and the
-        # port's ESMC is plain PyTorch with none for that walk to find.
+        # No "fp8": ours swaps the native ESMC's fused LayerNorm modules, and
+        # the port's ESMC has a different module tree.
         esmc_dtypes = {"bf16": torch.bfloat16, "fp32": torch.float32}
         if esmc_precision not in esmc_dtypes:
             raise ValueError(

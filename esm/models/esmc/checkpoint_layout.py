@@ -5,11 +5,8 @@ Published checkpoints use one projection per tensor — ``q_proj``, ``k_proj``,
 ``v_proj``, ``gate_proj``, ``up_proj`` — which is the layout ``transformers``
 reads and the only one its tensor-parallel plan can shard.
 
-This implementation instead keeps the projections fused, because
-``transformer_engine``'s ``LayerNormLinear`` / ``LayerNormMLP`` fuse each
-LayerNorm into the GEMM that follows it and take a single packed weight. That
-fusion is what the fp8 path runs on, so the module tree keeps Transformer
-Engine's parameter names and the two layouts are reconciled here instead.
+This implementation instead keeps the projections fused: one packed QKV weight
+and one packed ``[gate; up]`` weight. The two layouts are reconciled here.
 
 The conversion is exact in both directions: a fused weight is the row-wise
 concatenation of its parts, so ``cat``/``chunk`` along dim 0 round-trips
@@ -97,7 +94,7 @@ def published_to_native(raw: dict[str, torch.Tensor]) -> dict[str, torch.Tensor]
     """Rewrite a published checkpoint onto this implementation's layout.
 
     Concatenates the separate q/k/v and gate/up projections into the fused
-    weights Transformer Engine expects. Keys already in the in-memory layout,
+    weights this implementation holds. Keys already in the in-memory layout,
     and keys belonging to neither vocabulary, are returned unchanged.
     """
     out: dict[str, torch.Tensor] = {}

@@ -892,13 +892,11 @@ def test_an_unexpected_key_is_refused(tmp_path, tiny_esmfold2_config):
     [EsmFold2Model, EsmFold2ExperimentalModel],
     ids=["release", "experimental"],
 )
-def test_only_transformer_engine_extra_state_is_excused(
-    tmp_path, tiny_esmfold2_config, model_class
-):
+def test_only_extra_state_is_excused(tmp_path, tiny_esmfold2_config, model_class):
     """The ignore list must stay exactly one entry wide.
 
-    ``_extra_state`` is Transformer Engine's non-tensor bookkeeping, which no
-    module tree has a home for. Every other unexpected key has to raise, so the
+    ``_extra_state`` is Transformer Engine bookkeeping that published
+    checkpoints still carry, and no module tree has a home for it. Every other unexpected key has to raise, so the
     list is pinned as a literal *and* exercised: an added ``_extra_state`` entry
     loads, and the near-miss spelling next to it does not.
     """
@@ -1059,7 +1057,19 @@ def test_bundled_backbone_is_frozen_and_cast(
         metadata={"format": "pt"},
     )
 
+    # fp8 is the default: projections become fp8 buffers, the rest is bf16.
     loaded = EsmFold2Model.from_pretrained(tmp_path, load_esmc=False)
+    assert {p.dtype for p in loaded.esmc.parameters()} == {torch.bfloat16}
+    assert not [
+        n
+        for n, p in loaded.esmc.named_parameters()
+        if p.dim() == 2 and n != "embed.weight"
+    ]
+    assert not any(p.requires_grad for p in loaded.esmc.parameters())
+
+    loaded = EsmFold2Model.from_pretrained(
+        tmp_path, load_esmc=False, esmc_precision="bf16"
+    )
     assert {t.dtype for t in loaded.esmc.state_dict().values()} == {torch.bfloat16}
     assert not any(p.requires_grad for p in loaded.esmc.parameters())
 
@@ -1176,8 +1186,7 @@ def test_loads_from_hub_with_full_key_coverage(repo, expected):
 
 
 @pytest.mark.gpu
-@pytest.mark.parametrize("backend", ["fused", "cuequivariance"])
-def test_kernel_backends_agree(kernel_esmfold2_config, backend):
+def test_kernel_backends_agree(kernel_esmfold2_config):
     """Whatever accelerators a user has installed, the answer must match.
 
     Compared on the final coordinates and pLDDT rather than intermediate
@@ -1188,12 +1197,10 @@ def test_kernel_backends_agree(kernel_esmfold2_config, backend):
     compared two runs of one configuration and measured CUDA's own
     nondeterminism rather than any kernel.
     """
-    from esm.models.esmfold2.layers import CUE_AVAILABLE, TRITON_KERNELS_AVAILABLE
+    from esm.models.esmfold2.layers import TRITON_KERNELS_AVAILABLE
 
-    if backend == "fused" and not TRITON_KERNELS_AVAILABLE:
+    if not TRITON_KERNELS_AVAILABLE:
         pytest.skip("triton kernels unavailable")  # ty:ignore[too-many-positional-arguments]
-    if backend == "cuequivariance" and not CUE_AVAILABLE:
-        pytest.skip("cuequivariance unavailable")  # ty:ignore[too-many-positional-arguments]
 
     torch.manual_seed(0)
     model = EsmFold2Model(kernel_esmfold2_config).eval().cuda()
@@ -1217,13 +1224,13 @@ def test_kernel_backends_agree(kernel_esmfold2_config, backend):
 
     model.set_kernel_backend(None)
     reference = run()
-    model.set_kernel_backend(backend)
+    model.set_kernel_backend("fused")
     candidate = run()
 
     # Tolerances follow the measured noise, not a round number. On H100 the
     # coordinates differ by 2e-4 between two runs of the *same* backend - CUDA
-    # matmul selection is not deterministic - so that is the floor; the fused and
-    # cuequivariance deltas were 3.4e-4 and 4.3e-4. pLDDT was bit-identical.
+    # matmul selection is not deterministic - so that is the floor; the fused
+    # delta was 3.4e-4. pLDDT was bit-identical.
     # rtol is 0 for coordinates: they are Angstroms with |x| ~ 21, so a relative
     # term would swamp the absolute bound.
     #

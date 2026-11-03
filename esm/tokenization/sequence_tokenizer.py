@@ -1,7 +1,7 @@
 from tokenizers import Tokenizer
 from tokenizers.models import BPE
 from tokenizers.processors import TemplateProcessing
-from transformers import PreTrainedTokenizerFast
+from transformers.tokenization_utils_fast import PreTrainedTokenizerFast
 
 from esm.tokenization.tokenizer_base import EsmTokenizerBase
 from esm.utils.constants import esm3 as C

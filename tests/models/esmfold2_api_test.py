@@ -15,7 +15,7 @@ import torch
 
 from esm.models.esmfold2 import layers as _layers
 from esm.models.esmfold2.prepare_input import prepare_esmfold2_input
-from esm.models.esmfold2.processor import ESMFold2InputBuilder
+from esm.models.esmfold2.processor import ESMFold2InputBuilder, _lm_dropout_context
 from esm.models.esmfold2.protein_utils import (
     OUTPUT_TO_PDB_FEATURE_KEYS,
     prepare_protein_features,
@@ -459,3 +459,21 @@ def test_experimental_forward_supports_include_embeddings(
     pooled = output["output_embedding_pair_pooled"]
     assert pooled.shape == (1, len(TINY_SEQUENCE), _pair_width(tiny_esmfold2_config))
     assert pooled.dtype == torch.float32
+
+
+def test_lm_dropout_zero_disables_and_restores(tiny_esmfold2):
+    lm_encoder = tiny_esmfold2.config.lm_encoder
+    before = (lm_encoder.lm_dropout, lm_encoder.per_loop_lm_dropout)
+
+    with _lm_dropout_context(tiny_esmfold2, 0):
+        assert lm_encoder.lm_dropout == 0
+
+    assert (lm_encoder.lm_dropout, lm_encoder.per_loop_lm_dropout) == before
+
+
+def test_lm_dropout_none_keeps_the_checkpoint_rate(tiny_esmfold2):
+    lm_encoder = tiny_esmfold2.config.lm_encoder
+    before = lm_encoder.lm_dropout
+
+    with _lm_dropout_context(tiny_esmfold2, None):
+        assert lm_encoder.lm_dropout == before

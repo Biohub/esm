@@ -42,6 +42,7 @@ For information on using ESM3, see the [ESM3 README](https://github.com/Biohub/e
 - [ESMC](#esmc)
 - [ESMC Sparse Autoencoders](#esmc-sparse-autoencoders)
 - [ESMFold2](#esmfold2)
+- [Batch API](#batch-api)
 - [Parallel Job Execution](#parallel-job-execution)
 - [Frontier-Safety](#frontier-safety)
 - [Licenses](#licenses)
@@ -50,7 +51,31 @@ For information on using ESM3, see the [ESM3 README](https://github.com/Biohub/e
 ## ESM on PyPI
 <a name="esm-on-pypi"></a>
 
-[`esm v3.4.post1`](https://github.com/Biohub/esm/releases/tag/v3.4.1.post1) is now available on PyPI with full support for ESMC and ESMFold2.
+[`esm v3.4.1.post1`](https://github.com/Biohub/esm/releases/tag/v3.4.1.post1) is now available on PyPI with full support for ESMC and ESMFold2.
+
+### Installation of ESM Package
+
+```
+pip install esm
+```
+
+This installs the models, the reference PyTorch path, and Triton on Linux x86-64, so the ESMFold2 `"fused"` backend works without extra packages.
+
+#### Install size
+
+`pip install esm` is about 5.6 GB, of which about 4.6 GB is the CUDA build of torch that PyPI always serves.
+
+Installing torch from its CPU-only index replaces that 4.6 GB CUDA build with
+an 0.8 GB CPU build:
+
+```
+pip install esm --index-url https://download.pytorch.org/whl/cpu --extra-index-url https://pypi.org/simple
+```
+
+Worth doing if you have no NVIDIA GPU, are on Apple Silicon, or want smaller CI
+images and containers.
+
+`flash-attn` and `transformer-engine` are not installable from PyPI against our torch pin. Prebuilt wheels for both are published in the [EvolutionaryScale wheels release](https://github.com/evolutionaryscale/wheels/releases).
 
 ## ESM Package vs. Hugging Face Transformers Usage
 <a name="esm-package-vs-hugging-face-transformers-usage"></a>
@@ -150,7 +175,7 @@ For tutorials on how to use ESMC, see our [tutorials](https://github.com/Biohub/
 
 Sparse autoencoders (SAE) are an unsupervised method for decomposing representations of large transformer language models into interpretable units. We released SAEs trained on ESMC to reveal the interpretable units of functional organization that ESMC's world model has learned.
 
-The sparse autoencoder used in the Atlas and analyzed in the paper, `ESMC-6B-sae-layer60-k64-codebook16384`, is built on the ESMC 6B model. We also provide human-interpretable, agent-generated feature descriptions for this SAE's codebook.
+The sparse autoencoder used in the example below, `ESMC-6B-sae-k64-codebook16384`, is built on the ESMC 6B model and covers all layers. The SAE used in the Atlas and analyzed in the paper is `ESMC-6B-sae-layer60-k64-codebook16384`; the human-interpretable, agent-generated feature descriptions apply to its codebook.
 
 Codebase, model weights, and model variants for ESMC SAEs are available through [Hugging Face](https://huggingface.co/collections/biohub/esmc-saes-for-hidden-states-all-layers).
 
@@ -266,7 +291,7 @@ with open("1mht_pred.cif", "w") as f:
     f.write(result.complex.to_mmcif())
 ```
 
-> **AMD ROCm users:** use ROCm 6.4 with PyTorch 2.9 or newer.
+> **AMD ROCm users:** use ROCm 6.4 or newer. `esm` requires PyTorch 2.11.
 
 ### Running ESMFold2 Through the Biohub Platform
 
@@ -312,9 +337,15 @@ with open("result.cif", "w") as f:
 
 For tutorials on how to use ESMFold2, see our [tutorials](https://github.com/Biohub/esm/tree/main/cookbook/tutorials).
 
+For high quality structure prediction, see the [maximum-accuracy folding SDK guide](cookbook/snippets/fold_max_accuracy.md).
+
+## Batch API
+
+The Biohub Batch API processes larger or longer-running workloads in the background and offers higher limits, including folding inputs up to 4096 tokens rather than the Sync API's 768. See `ForgeBatchClient` and the [Batch API guide](cookbook/snippets/batch.md) for examples of submission, progress checks, result retrieval, cache control, and cancellation. Queued tasks expire after 24 hours; results are retained for 31 days after submission.
+
 ## Parallel Job Execution
 <a name="parallel-job-execution"></a>
-For jobs that require processing multiple inputs, the Parallel Executor sends parallel requests, executing them concurrently and efficiently while respecting rate limits and adapting to request latency. The following example provides an example of using the parallel_executor context manager when embedding sequences.
+Use `parallel_executor` to send multiple Sync API requests concurrently while respecting rate limits and adapting to request latency. For queued background work, use `ForgeBatchClient`. The following example uses `parallel_executor` to embed sequences through the Sync API.
 
 ```py
 from esm.sdk.forge import ESMCForgeInferenceClient
@@ -334,7 +365,7 @@ sequences = ["A", "AA", "AAA"]
 client = ESMCForgeInferenceClient(model="esmc-6b-2024-12", url="https://biohub.ai", token="<your API token>")
 
 # Usage Example:
-# To execute a batch job, wrap your function inside the batch executor context manager.
+# To process multiple inputs through the Sync API, wrap your function in parallel_executor.
 # Syntax:
 # with parallel_executor() as executor:
 # outputs = executor.execute_batch(user_func=<your_function>, **kwargs)

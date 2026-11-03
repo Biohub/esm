@@ -1,14 +1,16 @@
 """Shared fixtures for the ESMC and ESMFold2 test suites.
 
 Tiny randomly-initialised models cover the structural contracts on CPU in
-milliseconds. The published-weight fixtures download once per session and skip
-when the Hub is unreachable, so an offline runner degrades to the structural
-tests instead of failing.
+milliseconds. Anything fetching from the Hub is marked ``merge_only`` and runs
+in the lane that has network; it warns when unreachable, and fails outright
+under ``ESM_TESTS_STRICT_ARTIFACTS``.
 """
 
 import os
 import random
+import warnings
 from pathlib import Path
+from typing import NoReturn
 
 import pytest
 import torch
@@ -27,10 +29,12 @@ TINY_ESMC = dict(
 )
 TINY_SEQUENCES = ["MQIFVKTLTGKT", "MKV"]
 
-
 ESMC_300M_REPO = "biohub/ESMC-300M"
 ESMFOLD2_REPO = "biohub/ESMFold2"
 ESMFOLD2_EXPERIMENTAL_REPO = "biohub/ESMFold2-Experimental"
+#: ``PROTEIN_REF_POS`` is a frozen copy of this snapshot. Move both or neither,
+#: and never track ``main``: the release changes per-residue atom ordering.
+ESMFOLD2_CCD_REVISION = "69869f737beffec5294845ede23db5fc0b4f509e"
 # The ESMFold2 weights in the upstream transformers layout. A staging repo:
 # biohub/ESMFold2 has not been republished through their converter yet.
 ESMFOLD2_HF_PORT_REPO = "Rocketknight1/ESMFold2-merged-temp"
@@ -117,6 +121,50 @@ def staged_model_dir(subdirectory: str) -> str | None:
     return str(directory) if (directory / "config.json").exists() else None
 
 
+# Skip reasons carry their own classification: xdist ships reports back as text,
+# so a module-level registry would only ever fill up inside the worker.
+# A missing GPU or optional package stays a plain `pytest.skip`.
+ARTIFACT_UNAVAILABLE = "ARTIFACT UNAVAILABLE"
+KNOWN_GAP = "KNOWN GAP"
+
+#: Set by CI, where every artifact is reachable by construction.
+STRICT_ARTIFACTS = os.environ.get("ESM_TESTS_STRICT_ARTIFACTS") == "1"
+
+
+def artifact_unavailable(reason: str) -> NoReturn:
+    """An input could not be fetched. Warns always, fails under CI."""
+    message = f"{ARTIFACT_UNAVAILABLE}: {reason}"
+    if STRICT_ARTIFACTS:
+        pytest.fail(message, pytrace=False)  # ty:ignore[invalid-argument-type,parameter-already-assigned]
+    warnings.warn(message, stacklevel=2)
+    pytest.skip(message)  # ty:ignore[too-many-positional-arguments]
+
+
+def known_gap(reason: str) -> NoReturn:
+    """A gap we have accepted. Listed in the summary, never fatal."""
+    pytest.skip(f"{KNOWN_GAP}: {reason}")  # ty:ignore[too-many-positional-arguments]
+
+
+def pytest_terminal_summary(terminalreporter, exitstatus, config):
+    """Name and count these skips at the end; a status-line tally is easy to miss."""
+    buckets: dict[str, list[str]] = {ARTIFACT_UNAVAILABLE: [], KNOWN_GAP: []}
+    for report in terminalreporter.stats.get("skipped", []):
+        longrepr = getattr(report, "longrepr", None)
+        reason = longrepr[2] if isinstance(longrepr, tuple) else ""
+        for label in buckets:
+            if label in reason:
+                buckets[label].append(f"{report.nodeid}\n    {reason}")
+
+    for label, entries in buckets.items():
+        if not entries:
+            continue
+        terminalreporter.section(
+            f"{label} ({len(entries)} skipped)", sep="!", red=True, bold=True
+        )
+        for entry in entries:
+            terminalreporter.line(entry)
+
+
 def _skip_if_unreachable(repo: str) -> str:
     """Resolve a Hub snapshot, or skip when the runner genuinely has no access.
 
@@ -138,18 +186,47 @@ def _skip_if_unreachable(repo: str) -> str:
         RequestsConnectionError,
         Timeout,
     ) as exc:
-        pytest.skip(f"{repo} unreachable ({type(exc).__name__}); skipping")  # ty:ignore[too-many-positional-arguments]
+        artifact_unavailable(f"{repo} ({type(exc).__name__})")
 
 
-#: Fixtures that resolve a real published checkpoint. Anything depending on one
-#: needs network (or staged weights) and takes seconds rather than milliseconds.
+#: Fixtures that fetch from the Hub. Anything using one needs network, so it is
+#: marked ``merge_only`` below and runs in the lane that has it.
 WEIGHTS_FIXTURES = frozenset(
-    {"esmc_300m_dir", "esmfold2_dir", "esmfold2_experimental_dir"}
+    {"ccd_pickle", "esmc_300m_dir", "esmfold2_dir", "esmfold2_experimental_dir"}
 )
 
 
+def resolve_ccd_path() -> str | None:
+    """The pinned CCD snapshot, or ``None`` when the runner cannot reach it.
+
+    Beats an ambient ``ESMCFOLD_CCD_PATH``, which named three different releases
+    across ``.bashrc``, ``.env`` and the old default - so how you launched pytest
+    decided the numbers. Ambient is the fallback only when the Hub is down.
+    """
+    from huggingface_hub import hf_hub_download
+    from huggingface_hub.errors import LocalEntryNotFoundError, OfflineModeIsEnabled
+    from requests.exceptions import ConnectionError as RequestsConnectionError
+    from requests.exceptions import Timeout
+
+    try:
+        return hf_hub_download(ESMFOLD2_REPO, "ccd.pkl", revision=ESMFOLD2_CCD_REVISION)
+    except (
+        LocalEntryNotFoundError,
+        OfflineModeIsEnabled,
+        RequestsConnectionError,
+        Timeout,
+    ):
+        return os.environ.get("ESMCFOLD_CCD_PATH") or None
+
+
 def pytest_configure(config):
-    """Point ``conformers.py`` at the mounted CCD before it is imported."""
+    """Point ``conformers.py`` at the pinned CCD before it is imported.
+
+    Not a fixture: ``conformers.py`` reads the variable at import time.
+    """
+    path = resolve_ccd_path()
+    if path:
+        os.environ["ESMCFOLD_CCD_PATH"] = path
 
 
 def pytest_collection_modifyitems(items):
@@ -387,19 +464,13 @@ def esmfold2_complex_features(model, chains, seed: int = 0):
 def ccd_pickle() -> str:
     """The CCD pickle every non-protein featurization path needs.
 
-    ``load_ccd`` reaches for this on its own, so a test that looks offline is
-    not; depending on this fixture makes that reach explicit and skips the test
-    when the pickle is not mounted, which is the case on a CI runner.
-
-    Deliberately no Hub fallback. ``biohub/ESMFold2:ccd.pkl`` is a *different*
-    CCD release from the mounted one, and the release changes per-residue atom
-    ordering - enough to move the reversed-atom controls in
-    ``esmfold2_sampler_test.py`` by several Angstrom. Silently substituting it
-    would make those numbers depend on which copy the runner happened to find.
+    ``load_ccd`` reaches for this on its own, so depending on the fixture makes
+    that reach explicit. Was a cluster mount no CI runner has, which skipped 46
+    items silently.
     """
-    path = os.environ.get("ESMCFOLD_CCD_PATH", "")
+    path = resolve_ccd_path()
     if not path or not Path(path).exists():
-        pytest.skip(f"CCD pickle not mounted at {path}")  # ty:ignore[too-many-positional-arguments]
+        artifact_unavailable(f"{ESMFOLD2_REPO}:ccd.pkl at {ESMFOLD2_CCD_REVISION[:12]}")
     return path
 
 

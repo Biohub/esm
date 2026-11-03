@@ -1496,6 +1496,14 @@ def prepare_esmfold2_input(
         all tensors for the model forward pass, and chain_infos contains
         metadata for output processing.
     """
+    # Rejected here rather than dropped in ``build_feature_tensors``: no
+    # released checkpoint consumes pocket features, so a fold with ``pocket``
+    # set would otherwise run unconditioned with no signal to the caller.
+    if input.pocket is not None:
+        raise NotImplementedError(
+            "pocket conditioning is not implemented for ESMFold2; fold without it."
+        )
+
     chains, tokens, atoms = build_chains_from_input(input, seed)
     features = build_feature_tensors(chains, tokens, atoms, input)
     return features, chains

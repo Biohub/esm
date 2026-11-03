@@ -452,31 +452,3 @@ def test_without_the_port_installed_the_error_says_why(call):
     """The module still imports; only the two entry points needing their classes fail."""
     with pytest.raises(ImportError, match="transformers 5.16"):
         call()
-
-
-@pytest.mark.skipif(
-    not upstream_available(),
-    reason="needs transformers >= 5.16 (the ESMFold2 port); this repo pins 4.x",
-)
-def test_against_the_real_port(tiny_esmfold2_config):
-    """The one thing the stub cannot cover: their classes construct and their
-    ``fold`` accepts what the adapter sends. Weights are out of scope."""
-    from transformers.models.esmfold2.modeling_esmfold2 import (
-        EsmFold2Model as UpstreamEsmFold2Model,
-    )
-
-    adapter = EsmFold2HFAdapter(UpstreamEsmFold2Model(tiny_esmfold2_config).eval())
-    features = prepare_protein_features(TINY_SEQUENCE)
-    lm_hidden_states = torch.zeros(
-        1,
-        features["res_type"].shape[-1],
-        adapter.config.esmc_config.num_hidden_layers + 1,
-        adapter.config.esmc_config.hidden_size,
-    )
-
-    with torch.no_grad():
-        output = adapter(**features, lm_hidden_states=lm_hidden_states, **FAST_FOLD)
-
-    assert "sample_atom_coords" in output
-    for key in UPSTREAM_ABSENT_OUTPUT_KEYS:
-        assert key in output

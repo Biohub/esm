@@ -265,11 +265,11 @@ def wrap_model_with_cp(
     ``bf16`` (default True): run the distributed trunk in bf16 — quality-neutral,
     ~1.3-1.6x faster, lower peak VRAM (see ``wrap_model_with_cp_trunks``).
 
-    ``offload_esmc`` (default True): offload the ESM-C LM (~12 GB) to CPU after
+    ``offload_esmc`` (default True): offload the ESM-C LM (~6 GB in fp8, ~12 GB in bf16) to CPU after
     its one-shot use, freeing it for the trunk/diffusion. Sets
     ``model._offload_esmc``. Validated with bf16: 2.14x end-to-end + 18.5 GB lower
     peak vs fp32, pLDDT unchanged. Set False for high-throughput tiny-fold or
-    concurrent-fold use (the per-fold ~12 GB CPU<->GPU transfer isn't worth it).
+    concurrent-fold use (the per-fold ~6-12 GB CPU<->GPU transfer isn't worth it).
     """
     from esm.models.esmfold2.distributed.utils import wrap_model_with_cp_trunks
 
@@ -343,7 +343,7 @@ def wrap_model_with_cp(
         replaced += wrap_model_with_cp_structure_head(model, dist_manager)
 
     # Tensor-parallel ESM-C (the dominant replicated floor). Phase 1: shard the
-    # SwiGLU MLP (~67% of ESM-C weights) over the CP ranks via TE-native TP.
+    # SwiGLU MLP (~67% of ESM-C weights) over the CP ranks.
     if tp_esmc:
         from esm.models.esmfold2.distributed.esmc_tp import tp_shard_esmc_mlp
 

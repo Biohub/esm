@@ -26,9 +26,8 @@ def build_molecular_complex_from_features(
 ) -> MolecularComplex:
     """Construct a MolecularComplex from feature-dict tensors and chain metadata.
 
-    Non-polymer chains (ligands) collapse all per-atom tokens into a single
-    residue token whose pLDDT is the per-token average and whose hetero flag
-    is True.
+    Tokens are grouped into residues by ``residue_index`` (one per CCD component
+    for ligands), with per-residue pLDDT averaged over tokens.
     """
     mask_np = atom_mask.bool().cpu().numpy()
     coords_np = coords.float().cpu().numpy()
@@ -54,34 +53,7 @@ def build_molecular_complex_from_features(
         is_nonpolymer = ci.mol_type == MOL_TYPE_NONPOLYMER
         entity_info[ci.entity_id] = "non-polymer" if is_nonpolymer else "polymer"
 
-        if is_nonpolymer:
-            residue_name = ci.tokens[0].residue_name if ci.tokens else "LIG"
-            sequence_tokens.append(residue_name)
-            chain_ids_per_token.append(ci.asym_id)
-            avg_plddt = (
-                float(np.mean([plddt_np[ti.token_index] for ti in ci.tokens]))
-                if ci.tokens
-                else 0.0
-            )
-            confidence.append(avg_plddt)
-            token_atom_start = out_atom_cursor
-            for ti in ci.tokens:
-                for atom_idx in range(ti.atom_start, ti.atom_start + ti.atom_count):
-                    if not mask_np[atom_idx]:
-                        continue
-                    flat_positions.append(coords_np[atom_idx].tolist())
-                    flat_elements.append(get_element_symbol(int(elements_np[atom_idx])))
-                    chars = name_chars_np[atom_idx]
-                    name = "".join(
-                        chr(int(c) + 32) for c in chars if int(c) != 0
-                    ).strip()
-                    flat_names.append(name)
-                    flat_hetero.append(True)
-                    out_atom_cursor += 1
-            token_to_atoms.append([token_atom_start, out_atom_cursor])
-            continue
-
-        # Atom-tokenized modified residues (HYP, MSE, ...) span multiple
+        # Atom-tokenized residues (HYP, MSE, ligands, ...) span multiple
         # tokens per residue; collapse them back to one mmCIF residue.
         for _residue_index, ti_iter in groupby(
             ci.tokens, key=lambda t: t.residue_index
@@ -104,7 +76,7 @@ def build_molecular_complex_from_features(
                         chr(int(c) + 32) for c in chars if int(c) != 0
                     ).strip()
                     flat_names.append(name)
-                    flat_hetero.append(False)
+                    flat_hetero.append(is_nonpolymer)
                     out_atom_cursor += 1
             token_to_atoms.append([token_atom_start, out_atom_cursor])
 

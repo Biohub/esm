@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import asyncio
 import base64
-import pickle
 import warnings
 from concurrent.futures import ThreadPoolExecutor
 from typing import Any, Sequence, TypeAlias, Union, cast
@@ -11,21 +10,28 @@ import attr
 import torch
 
 from esm.sdk.api import (
+    ChainInput,
     ESM3InferenceClient,
     ESMCInferenceClient,
     ESMProtein,
     ESMProteinError,
     ESMProteinTensor,
+    FoldAllAtomRequest,
     FoldingConfig,
     FoldMaxAccuracyConfig,
+    FoldMaxAccuracyRequest,
+    FoldRequest,
     ForwardAndSampleOutput,
     ForwardTrackData,
     GenerationConfig,
     InverseFoldingConfig,
     LogitsConfig,
     LogitsOutput,
-    ProteinComplex,
     ProteinType,
+    ResidueGeometry,
+    ResidueMetrics,
+    ResidueRef,
+    ResolvedResidue,
     SamplingConfig,
     SamplingTrackConfig,
 )
@@ -34,10 +40,11 @@ from esm.sdk.base_forge_client import (
     _BaseForgeBatchClient,
     _BaseForgeInferenceClient,
 )
+from esm.sdk.batch import BatchSubmission
 from esm.sdk.retry import retry_decorator
 from esm.sdk.validation import validate_fold_max_accuracy_input
 from esm.utils.compression import compress_state_dict
-from esm.utils.constants.api import MIMETYPE_ES_PICKLE
+from esm.utils.constants.api import ACCEPT_ES_PICKLE
 from esm.utils.constants.models import (
     DEFAULT_ESMFOLD2_FAST_LM_MASK_PCT,
     ESMFOLD2,
@@ -96,6 +103,70 @@ def _maybe_b64_decode(obj, return_bytes: bool):
     )
 
 
+def _attrs_from_dict(cls, data: dict | None):
+    """Build an attrs response type from the API's dict.
+
+    Unknown keys are dropped, so a field the API adds does not break an older SDK.
+    A required key that the API stops sending raises rather than reads as a
+    plausible value.
+    """
+    if data is None:
+        return None
+    names = {field.name for field in attr.fields(cls)}
+    return cls(**{key: value for key, value in data.items() if key in names})
+
+
+def _fold_target(
+    sequence: str | None, chains: list[ChainInput] | None
+) -> tuple[dict[str, Any], str]:
+    """The request fields naming what to fold, and the '|'-joined sequence.
+
+    The joined form is what an MSA lookup takes, so a chain-addressed request
+    still needs it.
+    """
+    if (sequence is None) == (chains is None):
+        raise ValueError("Supply exactly one of sequence or chains.")
+    if chains is not None:
+        if not chains:
+            raise ValueError("chains is empty. Please provide a valid input.")
+        return (
+            {"chains": [attr.asdict(chain) for chain in chains]},
+            "|".join(chain.sequence for chain in chains),
+        )
+    assert sequence is not None
+    if len(sequence) == 0:
+        raise ValueError("Input sequence length is 0. Please provide a valid input.")
+    return {"sequence": sequence}, sequence
+
+
+def _chain_plddt(data: dict[str, Any]) -> list[torch.Tensor] | None:
+    """Per-chain pLDDT as tensors, with NaN where the model gave no confidence."""
+    chain_plddt = data.get("chain_plddt", None)
+    if chain_plddt is None:
+        return None
+    return [
+        torch.tensor([float("nan") if value is None else value for value in chain])
+        for chain in chain_plddt
+    ]
+
+
+def _residue_metrics(data: dict[str, Any]) -> ResidueMetrics | None:
+    """The per-residue block of a fold reply, or None when none was asked for."""
+    resolved = data.get("resolved_residues", None)
+    if resolved is None:
+        return None
+    geometry = data.get("residue_geometry", None)
+    return ResidueMetrics(
+        resolved=[_attrs_from_dict(ResolvedResidue, residue) for residue in resolved],
+        plddt=data.get("residue_plddt", None) or [],
+        geometry=_attrs_from_dict(ResidueGeometry, geometry),
+        min_distances_to_interface_angstrom=(
+            data.get("min_distances_to_interface_angstrom", None) or []
+        ),
+        relative_sasa=data.get("residue_relative_sasa", None),
+    )
+
+
 def _validate_protein_tensor_input(input):
     if isinstance(input, ESMProteinError):
         raise ValueError(
@@ -114,10 +185,10 @@ class SequenceStructureForgeInferenceClient(_BaseForgeInferenceClient):
         url: str = "https://biohub.ai",
         model: str | None = None,
         token: str = "",
-        request_timeout: int | None = 120,
+        request_timeout: int | None = 125,
         min_retry_wait: int = 1,
         max_retry_wait: int = 10,
-        max_retry_attempts: int = 5,
+        max_retry_attempts: int = 3,
     ):
         """
         Forge/Biohub Platform client for folding and inverse folding between sequence and structure spaces.
@@ -126,7 +197,8 @@ class SequenceStructureForgeInferenceClient(_BaseForgeInferenceClient):
             url: URL of the Forge/Biohub Platform server.
             model: Name of the model to be used for folding / inv folding.
             token: API token.
-            request_timeout: Override the system default request timeout (120s), in seconds.
+            request_timeout: Override the system default request timeout (125s), in seconds.
+                Note the API has a 120s timeout
         """
         super().__init__(
             model=model or "",
@@ -140,23 +212,35 @@ class SequenceStructureForgeInferenceClient(_BaseForgeInferenceClient):
 
     @staticmethod
     def _process_fold_request(
-        sequence: str,
+        sequence: str | None,
         msa: MSAInput,
         config: FoldingConfig,
-        target_structure: ProteinComplex | None,
         model_name: str | None,
+        chains: list[ChainInput] | None = None,
+        residues_of_interest: list[ResidueRef] | None = None,
+        interface_chain_id: str | None = None,
     ):
         if config.include_distogram:
             raise ValueError(
                 "include_distogram is not supported for Forge/Biohub Platform right now"
             )
 
-        if len(sequence) == 0:
-            raise ValueError(
-                "Input sequence length is 0. Please provide a valid input."
-            )
+        target, _ = _fold_target(sequence, chains)
+        request: dict[str, Any] = dict(target)
 
-        request: dict[str, Any] = {"sequence": sequence}
+        if residues_of_interest is not None:
+            # Omitting the field and sending an empty list are different requests to
+            # the server: one wants no metrics, the other asks for metrics on nothing.
+            if not residues_of_interest:
+                raise ValueError(
+                    "residues_of_interest is empty. Omit it to ask for no residue "
+                    "metrics."
+                )
+            request["residues_of_interest"] = [
+                attr.asdict(residue) for residue in residues_of_interest
+            ]
+        if interface_chain_id is not None:
+            request["interface_chain_id"] = interface_chain_id
 
         if msa is None:
             request["msa"] = None
@@ -195,9 +279,11 @@ class SequenceStructureForgeInferenceClient(_BaseForgeInferenceClient):
         return request
 
     @staticmethod
-    def _process_fold_response(data: dict[str, Any], sequence: str) -> ESMProtein:
+    def _process_fold_response(data: dict[str, Any]) -> ESMProtein:
         return ESMProtein(
-            sequence=sequence,
+            # The server echoes the request's raw separators, and ':' is also one, but
+            # ESMProtein splits chains only on '|'.
+            sequence=data["sequence"].replace(":", "|"),
             coordinates=maybe_tensor(data["coordinates"], convert_none_to_nan=True),
             ptm=maybe_tensor(data.get("ptm", None)),
             plddt=maybe_tensor(data.get("plddt", None), convert_none_to_nan=True),
@@ -216,6 +302,9 @@ class SequenceStructureForgeInferenceClient(_BaseForgeInferenceClient):
             entity_id=maybe_tensor(
                 data.get("entity_id", None), convert_none_to_nan=True
             ),
+            chains=data.get("chains", None),
+            chain_plddt=_chain_plddt(data),
+            residue_metrics=_residue_metrics(data),
         )
 
     @staticmethod
@@ -242,21 +331,30 @@ class SequenceStructureForgeInferenceClient(_BaseForgeInferenceClient):
     @retry_decorator
     async def async_fold(
         self,
-        sequence: str,
+        sequence: str | None = None,
         potential_sequence_of_concern: bool = False,
         model_name: str | None = None,
         msa: MSAInput = None,
         config: FoldingConfig = FoldingConfig(),
-        target_structure: ProteinComplex | None = None,
+        chains: list[ChainInput] | None = None,
+        residues_of_interest: list[ResidueRef] | None = None,
+        interface_chain_id: str | None = None,
+        disable_cache: bool = False,
     ) -> ESMProtein | ESMProteinError:
         """Predict coordinates for a protein sequence.
 
         Args:
-            sequence: Protein sequence to be folded.
+            sequence: Protein sequence to be folded; '|' separates chains.
             model_name: Override the client level model name if needed.
             msa: Optional multi-sequence alignment data that may help some models fold the sequence.
             config: Optional configuration for folding parameters.
-            target_structure: Optional target structure to use for distogram conditioning.
+            chains: The complex as named chains, the addressable form of `sequence`.
+                Supply this or `sequence`, not both.
+            residues_of_interest: Residues to measure, each addressed as
+                {chain, position}. The result then carries `residue_metrics`.
+            interface_chain_id: Chain to measure interface distances against. Every
+                other chain is the far side. Defaults to the last chain.
+            disable_cache: Optional flag to disable caching
 
         Deprecated:
             potential_sequence_of_concern: this parameter is largely deprecated
@@ -268,35 +366,51 @@ class SequenceStructureForgeInferenceClient(_BaseForgeInferenceClient):
             sequence,
             msa,
             config,
-            target_structure,
             model_name if model_name is not None else self.model,
+            chains,
+            residues_of_interest,
+            interface_chain_id,
         )
 
         try:
-            data = await self._async_post("fold", request)
+            data = await self._async_post(
+                "fold",
+                request,
+                headers={"Accept": ACCEPT_ES_PICKLE},
+                disable_cache=disable_cache,
+            )
         except ESMProteinError as e:
             return e
 
-        return self._process_fold_response(data, sequence)
+        return self._process_fold_response(data)
 
     @retry_decorator
     def fold(
         self,
-        sequence: str,
+        sequence: str | None = None,
         potential_sequence_of_concern: bool = False,
         model_name: str | None = None,
         msa: MSAInput = None,
         config: FoldingConfig = FoldingConfig(),
-        target_structure: ProteinComplex | None = None,
+        chains: list[ChainInput] | None = None,
+        residues_of_interest: list[ResidueRef] | None = None,
+        interface_chain_id: str | None = None,
+        disable_cache: bool = False,
     ) -> ESMProtein | ESMProteinError:
         """Predict coordinates for a protein sequence.
 
         Args:
-            sequence: Protein sequence to be folded.
+            sequence: Protein sequence to be folded; '|' separates chains.
             model_name: Override the client level model name if needed.
             msa: Optional multi-sequence alignment data that may help some models fold the sequence.
             config: Optional configuration for folding parameters.
-            target_structure: Optional target structure to use for distogram conditioning.
+            chains: The complex as named chains, the addressable form of `sequence`.
+                Supply this or `sequence`, not both.
+            residues_of_interest: Residues to measure, each addressed as
+                {chain, position}. The result then carries `residue_metrics`.
+            interface_chain_id: Chain to measure interface distances against. Every
+                other chain is the far side. Defaults to the last chain.
+            disable_cache: Optional flag to disable caching
 
         Deprecated:
             potential_sequence_of_concern: this parameter is largely deprecated
@@ -309,16 +423,23 @@ class SequenceStructureForgeInferenceClient(_BaseForgeInferenceClient):
             sequence,
             msa,
             config,
-            target_structure,
             model_name if model_name is not None else self.model,
+            chains,
+            residues_of_interest,
+            interface_chain_id,
         )
 
         try:
-            data = self._post("fold", request)
+            data = self._post(
+                "fold",
+                request,
+                headers={"Accept": ACCEPT_ES_PICKLE},
+                disable_cache=disable_cache,
+            )
         except ESMProteinError as e:
             return e
 
-        return self._process_fold_response(data, sequence)
+        return self._process_fold_response(data)
 
     @retry_decorator
     async def async_fold_all_atom(
@@ -326,6 +447,7 @@ class SequenceStructureForgeInferenceClient(_BaseForgeInferenceClient):
         all_atom_input: StructurePredictionInput,
         config: FoldingConfig = FoldingConfig(),
         model_name: str | None = None,
+        disable_cache: bool = False,
     ) -> MolecularComplexResult | list[MolecularComplexResult] | ESMProteinError:
         """Fold a molecular complex containing proteins, nucleic acids, and/or ligands.
 
@@ -333,13 +455,16 @@ class SequenceStructureForgeInferenceClient(_BaseForgeInferenceClient):
             all_atom_input: StructurePredictionInput containing sequences for different molecule types
             config: Optional configuration for folding parameters.
             model_name: Override the client level model name if needed
+            disable_cache: Optional flag to disable caching
         """
         request = self._process_fold_all_atom_request(
             all_atom_input, config, model_name if model_name is not None else self.model
         )
 
         try:
-            data = await self._async_post("fold_all_atom", request)
+            data = await self._async_post(
+                "fold_all_atom", request, disable_cache=disable_cache
+            )
         except ESMProteinError as e:
             return e
 
@@ -351,6 +476,7 @@ class SequenceStructureForgeInferenceClient(_BaseForgeInferenceClient):
         all_atom_input: StructurePredictionInput,
         model_name: str | None = None,
         config: FoldingConfig = FoldingConfig(),
+        disable_cache: bool = False,
     ) -> MolecularComplexResult | list[MolecularComplexResult] | ESMProteinError:
         """Predict coordinates for a molecular complex containing proteins, dna, rna, and/or ligands.
 
@@ -358,13 +484,14 @@ class SequenceStructureForgeInferenceClient(_BaseForgeInferenceClient):
             all_atom_input: StructurePredictionInput containing sequences for different molecule types
             model_name: Override the client level model name if needed
             config: Optional configuration for folding parameters.
+            disable_cache: Optional flag to disable caching
         """
         request = self._process_fold_all_atom_request(
             all_atom_input, config, model_name if model_name is not None else self.model
         )
 
         try:
-            data = self._post("fold_all_atom", request)
+            data = self._post("fold_all_atom", request, disable_cache=disable_cache)
         except ESMProteinError as e:
             return e
 
@@ -477,7 +604,10 @@ class SequenceStructureForgeInferenceClient(_BaseForgeInferenceClient):
 
         try:
             data = await self._async_post(
-                "inverse_fold", request, potential_sequence_of_concern
+                "inverse_fold",
+                request,
+                potential_sequence_of_concern,
+                headers={"Accept": ACCEPT_ES_PICKLE},
             )
         except ESMProteinError as e:
             return e
@@ -512,7 +642,12 @@ class SequenceStructureForgeInferenceClient(_BaseForgeInferenceClient):
         )
 
         try:
-            data = self._post("inverse_fold", request, potential_sequence_of_concern)
+            data = self._post(
+                "inverse_fold",
+                request,
+                potential_sequence_of_concern,
+                headers={"Accept": ACCEPT_ES_PICKLE},
+            )
         except ESMProteinError as e:
             return e
 
@@ -525,10 +660,10 @@ class ESM3ForgeInferenceClient(ESM3InferenceClient, _BaseForgeInferenceClient):
         model: str,
         url: str = "https://biohub.ai",
         token: str = "",
-        request_timeout: int | None = 120,
+        request_timeout: int | None = 125,
         min_retry_wait: int = 1,
         max_retry_wait: int = 10,
-        max_retry_attempts: int = 5,
+        max_retry_attempts: int = 3,
     ):
         ESM3InferenceClient.__init__(self)
         _BaseForgeInferenceClient.__init__(
@@ -567,6 +702,7 @@ class ESM3ForgeInferenceClient(ESM3InferenceClient, _BaseForgeInferenceClient):
             "strategy": config.strategy,
             "temperature_annealing": config.temperature_annealing,
             "only_compute_backbone_rmsd": config.only_compute_backbone_rmsd,
+            "include_pae": config.include_pae,
         }
         return request
 
@@ -971,7 +1107,10 @@ class ESM3ForgeInferenceClient(ESM3InferenceClient, _BaseForgeInferenceClient):
         request = self._process_generate_protein_request(input, config, self.model)
         try:
             data = await self._async_post(
-                "generate", request, input.potential_sequence_of_concern
+                "generate",
+                request,
+                input.potential_sequence_of_concern,
+                headers={"Accept": ACCEPT_ES_PICKLE},
             )
         except ESMProteinError as e:
             return e
@@ -987,7 +1126,10 @@ class ESM3ForgeInferenceClient(ESM3InferenceClient, _BaseForgeInferenceClient):
 
         try:
             data = await self._async_post(
-                "generate_tensor", request, input.potential_sequence_of_concern
+                "generate_tensor",
+                request,
+                input.potential_sequence_of_concern,
+                headers={"Accept": ACCEPT_ES_PICKLE},
             )
         except ESMProteinError as e:
             return e
@@ -999,7 +1141,12 @@ class ESM3ForgeInferenceClient(ESM3InferenceClient, _BaseForgeInferenceClient):
     ) -> ESMProtein | ESMProteinError:
         request = self._process_generate_protein_request(input, config, self.model)
         try:
-            data = self._post("generate", request, input.potential_sequence_of_concern)
+            data = self._post(
+                "generate",
+                request,
+                input.potential_sequence_of_concern,
+                headers={"Accept": ACCEPT_ES_PICKLE},
+            )
         except ESMProteinError as e:
             return e
 
@@ -1014,7 +1161,10 @@ class ESM3ForgeInferenceClient(ESM3InferenceClient, _BaseForgeInferenceClient):
 
         try:
             data = self._post(
-                "generate_tensor", request, input.potential_sequence_of_concern
+                "generate_tensor",
+                request,
+                input.potential_sequence_of_concern,
+                headers={"Accept": ACCEPT_ES_PICKLE},
             )
         except ESMProteinError as e:
             return e
@@ -1033,9 +1183,7 @@ class ESM3ForgeInferenceClient(ESM3InferenceClient, _BaseForgeInferenceClient):
                 "forward_and_sample",
                 request,
                 input.potential_sequence_of_concern,
-                headers={
-                    "Accept": f"{MIMETYPE_ES_PICKLE};protocol={pickle.HIGHEST_PROTOCOL}, application/json"
-                },
+                headers={"Accept": ACCEPT_ES_PICKLE},
             )
         except ESMProteinError as e:
             return e
@@ -1054,9 +1202,7 @@ class ESM3ForgeInferenceClient(ESM3InferenceClient, _BaseForgeInferenceClient):
                 "forward_and_sample",
                 request,
                 input.potential_sequence_of_concern,
-                headers={
-                    "Accept": f"{MIMETYPE_ES_PICKLE};protocol={pickle.HIGHEST_PROTOCOL}, application/json"
-                },
+                headers={"Accept": ACCEPT_ES_PICKLE},
             )
         except ESMProteinError as e:
             return e
@@ -1071,7 +1217,10 @@ class ESM3ForgeInferenceClient(ESM3InferenceClient, _BaseForgeInferenceClient):
 
         try:
             data = await self._async_post(
-                "encode", request, input.potential_sequence_of_concern
+                "encode",
+                request,
+                input.potential_sequence_of_concern,
+                headers={"Accept": ACCEPT_ES_PICKLE},
             )
         except ESMProteinError as e:
             return e
@@ -1083,7 +1232,12 @@ class ESM3ForgeInferenceClient(ESM3InferenceClient, _BaseForgeInferenceClient):
         request = self._process_encode_request(input, self.model)
 
         try:
-            data = self._post("encode", request, input.potential_sequence_of_concern)
+            data = self._post(
+                "encode",
+                request,
+                input.potential_sequence_of_concern,
+                headers={"Accept": ACCEPT_ES_PICKLE},
+            )
         except ESMProteinError as e:
             return e
 
@@ -1097,7 +1251,10 @@ class ESM3ForgeInferenceClient(ESM3InferenceClient, _BaseForgeInferenceClient):
 
         try:
             data = await self._async_post(
-                "decode", request, input.potential_sequence_of_concern
+                "decode",
+                request,
+                input.potential_sequence_of_concern,
+                headers={"Accept": ACCEPT_ES_PICKLE},
             )
         except ESMProteinError as e:
             return e
@@ -1109,7 +1266,12 @@ class ESM3ForgeInferenceClient(ESM3InferenceClient, _BaseForgeInferenceClient):
         request = self._process_decode_request(input, self.model)
 
         try:
-            data = self._post("decode", request, input.potential_sequence_of_concern)
+            data = self._post(
+                "decode",
+                request,
+                input.potential_sequence_of_concern,
+                headers={"Accept": ACCEPT_ES_PICKLE},
+            )
         except ESMProteinError as e:
             return e
 
@@ -1130,9 +1292,7 @@ class ESM3ForgeInferenceClient(ESM3InferenceClient, _BaseForgeInferenceClient):
                 request,
                 input.potential_sequence_of_concern,
                 return_bytes=return_bytes,
-                headers={
-                    "Accept": f"{MIMETYPE_ES_PICKLE};protocol={pickle.HIGHEST_PROTOCOL}, application/json"
-                },
+                headers={"Accept": ACCEPT_ES_PICKLE},
             )
         except ESMProteinError as e:
             return e
@@ -1154,9 +1314,7 @@ class ESM3ForgeInferenceClient(ESM3InferenceClient, _BaseForgeInferenceClient):
                 request,
                 input.potential_sequence_of_concern,
                 return_bytes=return_bytes,
-                headers={
-                    "Accept": f"{MIMETYPE_ES_PICKLE};protocol={pickle.HIGHEST_PROTOCOL}, application/json"
-                },
+                headers={"Accept": ACCEPT_ES_PICKLE},
             )
         except ESMProteinError as e:
             return e
@@ -1176,10 +1334,10 @@ class ESMCForgeInferenceClient(ESMCInferenceClient, _BaseForgeInferenceClient):
         model: str,
         url: str = "https://biohub.ai",
         token: str = "",
-        request_timeout: int | None = 60,
+        request_timeout: int | None = 125,
         min_retry_wait: int = 1,
         max_retry_wait: int = 10,
-        max_retry_attempts: int = 5,
+        max_retry_attempts: int = 3,
     ):
         ESMCInferenceClient.__init__(self)
         _BaseForgeInferenceClient.__init__(
@@ -1269,7 +1427,10 @@ class ESMCForgeInferenceClient(ESMCInferenceClient, _BaseForgeInferenceClient):
 
         try:
             data = await self._async_post(
-                "encode", request, input.potential_sequence_of_concern
+                "encode",
+                request,
+                input.potential_sequence_of_concern,
+                headers={"Accept": ACCEPT_ES_PICKLE},
             )
         except ESMProteinError as e:
             return e
@@ -1287,7 +1448,12 @@ class ESMCForgeInferenceClient(ESMCInferenceClient, _BaseForgeInferenceClient):
         request = {"inputs": tracks, "model": self.model}
 
         try:
-            data = self._post("encode", request, input.potential_sequence_of_concern)
+            data = self._post(
+                "encode",
+                request,
+                input.potential_sequence_of_concern,
+                headers={"Accept": ACCEPT_ES_PICKLE},
+            )
         except ESMProteinError as e:
             return e
 
@@ -1309,7 +1475,10 @@ class ESMCForgeInferenceClient(ESMCInferenceClient, _BaseForgeInferenceClient):
 
         try:
             data = await self._async_post(
-                "decode", request, input.potential_sequence_of_concern
+                "decode",
+                request,
+                input.potential_sequence_of_concern,
+                headers={"Accept": ACCEPT_ES_PICKLE},
             )
         except ESMProteinError as e:
             return e
@@ -1326,7 +1495,12 @@ class ESMCForgeInferenceClient(ESMCInferenceClient, _BaseForgeInferenceClient):
         request = {"model": self.model, "inputs": tokens}
 
         try:
-            data = self._post("decode", request, input.potential_sequence_of_concern)
+            data = self._post(
+                "decode",
+                request,
+                input.potential_sequence_of_concern,
+                headers={"Accept": ACCEPT_ES_PICKLE},
+            )
         except ESMProteinError as e:
             return e
 
@@ -1346,9 +1520,7 @@ class ESMCForgeInferenceClient(ESMCInferenceClient, _BaseForgeInferenceClient):
                 request,
                 input.potential_sequence_of_concern,
                 return_bytes=return_bytes,
-                headers={
-                    "Accept": f"{MIMETYPE_ES_PICKLE};protocol={pickle.HIGHEST_PROTOCOL}, application/json"
-                },
+                headers={"Accept": ACCEPT_ES_PICKLE},
             )
         except ESMProteinError as e:
             return e
@@ -1369,9 +1541,7 @@ class ESMCForgeInferenceClient(ESMCInferenceClient, _BaseForgeInferenceClient):
                 request,
                 input.potential_sequence_of_concern,
                 return_bytes=return_bytes,
-                headers={
-                    "Accept": f"{MIMETYPE_ES_PICKLE};protocol={pickle.HIGHEST_PROTOCOL}, application/json"
-                },
+                headers={"Accept": ACCEPT_ES_PICKLE},
             )
         except ESMProteinError as e:
             return e
@@ -1385,9 +1555,12 @@ class ESMCForgeInferenceClient(ESMCInferenceClient, _BaseForgeInferenceClient):
         )
 
 
-class FoldMaxAccuracyHandler(EndpointHandler[MolecularComplexResult]):
+class FoldMaxAccuracyHandler(
+    EndpointHandler[FoldMaxAccuracyRequest, MolecularComplexResult]
+):
     """Fold a molecular complex at the highest-accuracy settings."""
 
+    request_type = FoldMaxAccuracyRequest
     poll_interval = 10
     poll_max_interval = 60
     default_timeout = 2 * 60 * 60  # 2 hours
@@ -1400,37 +1573,125 @@ class FoldMaxAccuracyHandler(EndpointHandler[MolecularComplexResult]):
         return "fold_max_accuracy"
 
     def _prepare_request(
-        self,
-        all_atom_input: StructurePredictionInput,
-        config: FoldMaxAccuracyConfig = FoldMaxAccuracyConfig(),
-    ) -> list[dict[str, Any]]:
-        validate_fold_max_accuracy_input(all_atom_input)
-        return [
-            {
-                "all_atom_input": serialize_structure_prediction_input(all_atom_input),
-                "model": ESMFOLD2_CUTOFF_2025,
-                **attr.asdict(config),
-            }
-        ]
+        self, request: FoldMaxAccuracyRequest, *, model_name: str | None = None
+    ) -> dict[str, Any]:
+        if model_name is not None:
+            raise TypeError(
+                "fold_max_accuracy selects its own model; model_name= is not supported"
+            )
+        config = (
+            request.config if request.config is not None else FoldMaxAccuracyConfig()
+        )
+        validate_fold_max_accuracy_input(request.all_atom_input)
+        return {
+            "all_atom_input": serialize_structure_prediction_input(
+                request.all_atom_input
+            ),
+            "model": ESMFOLD2_CUTOFF_2025,
+            **attr.asdict(config),
+        }
 
-    def _process_response(self, response: dict, **kwargs) -> MolecularComplexResult:
-        s3_url = response["response"]
-        result = self._batch_client.get_result_from_s3(s3_url)
+    def _process_response(self, response: dict) -> MolecularComplexResult:
+        result = self._batch_client._read_response(response)
         return SequenceStructureForgeInferenceClient._process_fold_all_atom_response(
             result
         )
 
-    async def _async_process_response(
-        self, response: dict, **kwargs
-    ) -> MolecularComplexResult:
-        s3_url = response["response"]
-        result = await self._batch_client.async_get_result_from_s3(s3_url)
+    async def _async_process_response(self, response: dict) -> MolecularComplexResult:
+        result = await self._batch_client._async_read_response(response)
+        return SequenceStructureForgeInferenceClient._process_fold_all_atom_response(
+            result
+        )
+
+
+def _require_model(endpoint: str, model: str | None) -> str:
+    # A null model fails the submit route's body parse with an unhelpful message.
+    if model is None or not model.strip():
+        raise ValueError(
+            f"{endpoint} requires a non-empty model. Pass model= when constructing "
+            "ForgeBatchClient, or model_name= to submit()/run()."
+        )
+    return model
+
+
+class FoldHandler(EndpointHandler[FoldRequest, ESMProtein]):
+    request_type = FoldRequest
+
+    def __init__(self, batch_client: _BaseForgeBatchClient, model: str | None = None):
+        super().__init__(batch_client)
+        self.model = model
+
+    @property
+    def endpoint_name(self) -> str:
+        return "fold"
+
+    def _prepare_request(
+        self, request: FoldRequest, *, model_name: str | None = None
+    ) -> dict[str, Any]:
+        model = model_name if model_name is not None else self.model
+        return SequenceStructureForgeInferenceClient._process_fold_request(
+            request.sequence,
+            request.msa,
+            request.config if request.config is not None else FoldingConfig(),
+            _require_model(self.endpoint_name, model),
+            request.chains,
+            request.residues_of_interest,
+            request.interface_chain_id,
+        )
+
+    def _process_response(self, response: dict) -> ESMProtein:
+        result = self._batch_client._read_response(response)
+        return SequenceStructureForgeInferenceClient._process_fold_response(result)
+
+    async def _async_process_response(self, response: dict) -> ESMProtein:
+        result = await self._batch_client._async_read_response(response)
+        return SequenceStructureForgeInferenceClient._process_fold_response(result)
+
+
+class FoldAllAtomHandler(EndpointHandler[FoldAllAtomRequest, MolecularComplexResult]):
+    request_type = FoldAllAtomRequest
+
+    def __init__(self, batch_client: _BaseForgeBatchClient, model: str | None = None):
+        super().__init__(batch_client)
+        self.model = model
+
+    @property
+    def endpoint_name(self) -> str:
+        return "fold_all_atom"
+
+    def _prepare_request(
+        self, request: FoldAllAtomRequest, *, model_name: str | None = None
+    ) -> dict[str, Any]:
+        model = model_name if model_name is not None else self.model
+        return SequenceStructureForgeInferenceClient._process_fold_all_atom_request(
+            request.all_atom_input,
+            request.config if request.config is not None else FoldingConfig(),
+            _require_model(self.endpoint_name, model),
+        )
+
+    def _process_response(self, response: dict) -> MolecularComplexResult:
+        result = self._batch_client._read_response(response)
+        # Use the same logic as _process_fold_all_atom_response
+        return SequenceStructureForgeInferenceClient._process_fold_all_atom_response(
+            result
+        )
+
+    async def _async_process_response(self, response: dict) -> MolecularComplexResult:
+        result = await self._batch_client._async_read_response(response)
+        # Use the same logic as _process_fold_all_atom_response
         return SequenceStructureForgeInferenceClient._process_fold_all_atom_response(
             result
         )
 
 
 class ForgeBatchClient:
+    """Submit one or many tasks and recover them through saved job identifiers.
+
+    Endpoint handlers accept SDK inputs and return decoded Python objects.
+    This client provides shared status, waiting, listing, and cancellation
+    operations. Each method has an ``async_`` equivalent.
+    """
+
     def __init__(
         self,
         url: str = "https://biohub.ai",
@@ -1441,7 +1702,7 @@ class ForgeBatchClient:
         poll_max_interval: int | None = None,
         min_retry_wait: int = 2,
         max_retry_wait: int = 2,
-        max_retry_attempts: int = 5,
+        max_retry_attempts: int = 3,
         transfer_timeout: int | None = 60,
     ):
         self._batch_client = _BaseForgeBatchClient(
@@ -1458,9 +1719,154 @@ class ForgeBatchClient:
         self.model = model
 
         self._fold_max_accuracy: FoldMaxAccuracyHandler | None = None
+        self._fold: FoldHandler | None = None
+        self._fold_all_atom: FoldAllAtomHandler | None = None
+
+    def close(self) -> None:
+        self._batch_client.close()
+
+    async def aclose(self) -> None:
+        await self._batch_client.aclose()
+        self._batch_client.close()
+
+    def __enter__(self) -> ForgeBatchClient:
+        return self
+
+    def __exit__(self, exc_type, exc_value, traceback) -> None:
+        self.close()
+
+    async def __aenter__(self) -> ForgeBatchClient:
+        return self
+
+    async def __aexit__(self, exc_type, exc_value, traceback) -> None:
+        await self.aclose()
+
+    def get_status(self, task_id: str) -> dict[str, Any]:
+        """Read task state, result location, errors, billing, and available artifacts."""
+        return self._batch_client.get_status(task_id)
+
+    async def async_get_status(self, task_id: str) -> dict[str, Any]:
+        return await self._batch_client.async_get_status(task_id)
+
+    def wait(
+        self,
+        submission: BatchSubmission,
+        timeout: int = 1800,
+        *,
+        poll_interval: int | None = None,
+        poll_max_interval: int | None = None,
+    ) -> dict[str, Any] | list[dict[str, Any]]:
+        """Wait for a batch, returning its aggregate summary.
+
+        A polling timeout raises ``BatchTimeoutError`` with the submission and leaves
+        work running. The budget excludes submission and result downloads.
+        """
+        return self._batch_client.wait(
+            submission, timeout, poll_interval, poll_max_interval
+        )
+
+    async def async_wait(
+        self,
+        submission: BatchSubmission,
+        timeout: int = 1800,
+        *,
+        poll_interval: int | None = None,
+        poll_max_interval: int | None = None,
+    ) -> dict[str, Any] | list[dict[str, Any]]:
+        return await self._batch_client.async_wait(
+            submission, timeout, poll_interval, poll_max_interval
+        )
+
+    def cancel(
+        self, task_id: str | None = None, *, batch_id: str | None = None
+    ) -> dict[str, Any]:
+        """Cancel one task or queued work in a batch; running tasks may still finish."""
+        return self._batch_client.cancel(task_id, batch_id=batch_id)
+
+    async def async_cancel(
+        self, task_id: str | None = None, *, batch_id: str | None = None
+    ) -> dict[str, Any]:
+        return await self._batch_client.async_cancel(task_id, batch_id=batch_id)
+
+    def list_batch(
+        self,
+        batch_id: str,
+        *,
+        status: list[str] | None = None,
+        include_responses: bool = False,
+        limit: int | None = None,
+        cursor: str | None = None,
+    ) -> dict[str, Any]:
+        """Read one batch's progress and, optionally, a page of its tasks.
+
+        Parameters
+        ----------
+        batch_id
+            Saved batch ID returned by submission.
+        status
+            Task states to include, such as ``["done", "failed"]``. Only filters
+            the item page; aggregate counts always describe the whole batch.
+        include_responses
+            Include task entries and pagination information. S3 results are
+            marked ``response_available``; this call does not download them.
+        limit
+            Page size. Omit to use the server default.
+        cursor
+            Opaque cursor from the previous page. Use the same filters when
+            requesting subsequent pages.
+
+        Returns
+        -------
+        dict[str, Any]
+            ``batch_id``, ``endpoint``, ``status``, ``counts``, and ``total``.
+            With ``include_responses=True``, also ``items`` and ``cursor``;
+            a null cursor marks the last page. Item entries contain task IDs,
+            states, and available inline responses or errors.
+
+        Notes
+        -----
+        HTTP errors are raised as ``ESMProteinError``.
+        """
+        return self._batch_client.list_batch(
+            batch_id,
+            status=status,
+            include_responses=include_responses,
+            limit=limit,
+            cursor=cursor,
+        )
+
+    async def async_list_batch(
+        self,
+        batch_id: str,
+        *,
+        status: list[str] | None = None,
+        include_responses: bool = False,
+        limit: int | None = None,
+        cursor: str | None = None,
+    ) -> dict[str, Any]:
+        """Asynchronous equivalent of :meth:`list_batch`, with the same options."""
+        return await self._batch_client.async_list_batch(
+            batch_id,
+            status=status,
+            include_responses=include_responses,
+            limit=limit,
+            cursor=cursor,
+        )
 
     @property
     def fold_max_accuracy(self) -> FoldMaxAccuracyHandler:
         if self._fold_max_accuracy is None:
             self._fold_max_accuracy = FoldMaxAccuracyHandler(self._batch_client)
         return self._fold_max_accuracy
+
+    @property
+    def fold(self) -> FoldHandler:
+        if self._fold is None:
+            self._fold = FoldHandler(self._batch_client, self.model)
+        return self._fold
+
+    @property
+    def fold_all_atom(self) -> FoldAllAtomHandler:
+        if self._fold_all_atom is None:
+            self._fold_all_atom = FoldAllAtomHandler(self._batch_client, self.model)
+        return self._fold_all_atom

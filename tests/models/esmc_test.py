@@ -7,6 +7,7 @@ tests are marked ``gpu``.
 
 import functools
 import gzip
+import itertools
 import json
 import math
 import pickle
@@ -20,6 +21,7 @@ import torch
 import torch.nn as nn
 from safetensors.torch import save_file
 
+from esm.layers.rotary import TritonRotaryEmbedding, apply_rotary_emb_torch
 from esm.models.esmc import (
     ESMC,
     EsmcConfig,
@@ -28,16 +30,22 @@ from esm.models.esmc import (
     EsmcMaskedLMOutput,
     EsmcModel,
     EsmcOutput,
-    EsmcTokenizer,
 )
 from esm.models.esmc import model as model_module
 from esm.models.esmc.checkpoint_layout import native_to_published, published_to_native
-from esm.models.esmc.kernels import FLASH_ATTN_INSTALLED, TE_INSTALLED
+from esm.models.esmc.kernels import FLASH_ATTN_INSTALLED, FLASH_ATTN_ROTARY_INSTALLED
 from esm.models.esmc.layers import (
     EsmcFlashMultiHeadAttention,
     EsmcLayerNormLinear,
     EsmcLayerNormMLP,
     EsmcRotaryEmbedding,
+    EsmcTritonRotaryEmbedding,
+)
+from esm.models.esmfold2.fp8 import (
+    Fp8LayerNormLinear,
+    Fp8LayerNormMLP,
+    Fp8Linear,
+    convert_esmc_to_fp8_,
 )
 from esm.models.hub import CONFIG_NAME, read_safetensors_dir
 from tests.conftest import (
@@ -56,10 +64,6 @@ REFERENCE_FILE = REFERENCE_DIR / "esmc_300m_cpu_fp32.pkl.gz"
 # Each masked position costs one forward, so an uncapped pseudo-perplexity is
 # O(L^2) tokens. 16 evenly spaced positions hold every length to a few seconds.
 PPL_MAX_POSITIONS = 16
-
-# Which layers ``build_esmc`` puts in the model.
-FUSED_LAYERS = "fused"
-REFERENCE_LAYERS = "reference"
 
 
 def _tokens(tokenizer, sequences):
@@ -140,21 +144,12 @@ def build_esmc(
     device: str,
     dtype: torch.dtype | None = None,
     attn: str = "sdpa",
-    layers: str = FUSED_LAYERS,
     model_class=EsmcModel,
 ):
-    """Load ESMC with an explicit choice of fused vs pure-PyTorch layers.
-
-    ``EsmcModel.__init__`` reads ``torch.get_default_device()`` to pick its
-    kernels, so building for the CPU and then moving is the only way to get the
-    reference layers onto CUDA. That also disables the flash-attention block, so
-    ``layers="reference"`` is only meaningful with ``attn="sdpa"`` / ``"eager"``.
-    """
-    build_device = "cpu" if layers == REFERENCE_LAYERS else device
+    """Load ESMC on ``device`` with the given attention backend."""
     model = model_class.from_pretrained(
-        directory, device=build_device, attn_implementation=attn
+        directory, device=device, attn_implementation=attn
     )
-    model = model.to(device)
     if dtype is not None:
         model = model.to(dtype)
     return model.eval()
@@ -339,6 +334,147 @@ def test_gradients_reach_every_parameter(tiny_esmc_config, esmc_tokenizer):
         for name, grad in gradients.items()
         if grad is not None and (not torch.isfinite(grad).all() or grad.eq(0).all())
     ]
+
+
+@pytest.mark.gpu
+def test_rotary_is_differentiable_on_cuda():
+    """The CUDA RoPE branch must be autograd-aware.
+
+    The raw Triton driver (``flash_attn.ops.triton.rotary.apply_rotary``) returns a
+    tensor with no ``grad_fn``, so a backward through ESMC silently drops the
+    attention-score path. Only the CUDA branch can regress; CPU is plain torch.
+    """
+    # Without flash-attn the module falls back to torch and the test passes without
+    # ever running the branch it exists to cover.
+    assert FLASH_ATTN_ROTARY_INSTALLED
+
+    torch.manual_seed(0)
+    rotary = EsmcRotaryEmbedding(64).cuda()
+    q = torch.randn(2, 16, 4, 64, device="cuda", requires_grad=True)
+    k = torch.randn(2, 16, 4, 64, device="cuda", requires_grad=True)
+
+    q_rot, k_rot = rotary(q, k)
+
+    assert q_rot.grad_fn is not None and k_rot.grad_fn is not None
+    q_grad, k_grad = torch.autograd.grad((q_rot.sum() + k_rot.sum()), (q, k))
+    assert q_grad.abs().sum() > 0 and k_grad.abs().sum() > 0
+
+    # The rotation must be in the backward too, not just an identity pass-through.
+    rotary._update_cos_sin_cache(16, device=q.device, dtype=q.dtype)
+    q_ref = q.detach().clone().requires_grad_(True)
+    expected = torch.autograd.grad(
+        apply_rotary_emb_torch(
+            q_ref, rotary._cos_cached, rotary._sin_cached, rotary.interleaved
+        )
+        .square()
+        .sum(),
+        q_ref,
+    )[0]
+    q_sq = q.detach().clone().requires_grad_(True)
+    actual = torch.autograd.grad(rotary(q_sq, q_sq)[0].square().sum(), q_sq)[0]
+    torch.testing.assert_close(actual, expected, atol=1e-4, rtol=1e-4)
+
+
+@pytest.mark.gpu
+@pytest.mark.parametrize(
+    "rotary_cls",
+    [EsmcTritonRotaryEmbedding, TritonRotaryEmbedding],
+    ids=["esmc", "legacy"],
+)
+def test_varlen_triton_rotary_gradients_match_per_sequence_torch(
+    rotary_cls: type[EsmcTritonRotaryEmbedding] | type[TritonRotaryEmbedding],
+):
+    """The varlen RoPE backward must carry the rotation, not just the forward.
+
+    The old raw-driver path produced a correct forward and an identity backward, so
+    only a gradient oracle separates the two: this test's error is ~6 before the fix
+    and ~1e-7 after. :func:`apply_rotary_emb_torch` is applied per sequence because
+    ``cu_seqlens`` restarts positions at every boundary.
+
+    Parameters
+    ----------
+    rotary_cls : type
+        Varlen Triton RoPE module under test. Both classes wrap the same kernel
+        behind the same signature, so they share one oracle.
+    """
+    assert FLASH_ATTN_ROTARY_INSTALLED
+
+    torch.manual_seed(0)
+    seqlens = [7, 13, 5]
+    n_heads, head_dim = 4, 64
+    bounds = list(itertools.pairwise(itertools.accumulate(seqlens, initial=0)))
+    total = sum(seqlens)
+    cu_seqlens = torch.tensor(
+        [0, *itertools.accumulate(seqlens)], dtype=torch.int32, device="cuda"
+    )
+
+    q = torch.randn(total, n_heads, head_dim, device="cuda", requires_grad=True)
+    k = torch.randn(total, n_heads, head_dim, device="cuda", requires_grad=True)
+    # Weighting by a fixed random covector makes the loss rotation-dependent. A
+    # rotation-invariant loss such as sum-of-squares cannot see an identity backward.
+    w_q = torch.randn_like(q.detach())
+    w_k = torch.randn_like(k.detach())
+
+    rotary = rotary_cls(head_dim).cuda()
+    q_rot, k_rot = rotary(q, k, cu_seqlens, max(seqlens))
+    q_grad, k_grad = torch.autograd.grad(
+        (q_rot * w_q).sum() + (k_rot * w_k).sum(), (q, k)
+    )
+
+    assert rotary._cos_cached is not None and rotary._sin_cached is not None
+    q_ref = q.detach().clone().requires_grad_(True)
+    k_ref = k.detach().clone().requires_grad_(True)
+    expected = [
+        torch.cat(
+            [
+                apply_rotary_emb_torch(
+                    x[start:end].unsqueeze(0),
+                    rotary._cos_cached,
+                    rotary._sin_cached,
+                    rotary.interleaved,
+                ).squeeze(0)
+                for start, end in bounds
+            ]
+        )
+        for x in (q_ref, k_ref)
+    ]
+    torch.testing.assert_close(q_rot, expected[0], atol=1e-5, rtol=1e-5)
+    torch.testing.assert_close(k_rot, expected[1], atol=1e-5, rtol=1e-5)
+
+    q_grad_ref, k_grad_ref = torch.autograd.grad(
+        (expected[0] * w_q).sum() + (expected[1] * w_k).sum(), (q_ref, k_ref)
+    )
+    torch.testing.assert_close(q_grad, q_grad_ref, atol=1e-5, rtol=1e-5)
+    torch.testing.assert_close(k_grad, k_grad_ref, atol=1e-5, rtol=1e-5)
+
+
+@pytest.mark.gpu
+@pytest.mark.parametrize("attn_implementation", ["sdpa", "flash_attention_2"])
+def test_gradients_reach_every_parameter_on_cuda(
+    tiny_esmc_config, esmc_tokenizer, attn_implementation
+):
+    """CPU-only grad coverage cannot see the CUDA RoPE branch, so repeat it here."""
+    if attn_implementation == "flash_attention_2" and not FLASH_ATTN_INSTALLED:
+        pytest.skip("flash-attn is not installed")  # ty:ignore[too-many-positional-arguments]
+
+    torch.manual_seed(0)
+    with torch.device("cuda"):
+        model = EsmcForMaskedLM(
+            replace(tiny_esmc_config, attn_implementation=attn_implementation)
+        ).train()
+    if attn_implementation == "flash_attention_2":
+        # The fused attention kernel rejects fp32.
+        model = model.to(torch.bfloat16)
+    batch = {k: v.cuda() for k, v in _tokens(esmc_tokenizer, TINY_SEQUENCES).items()}
+
+    model(**batch).logits.square().mean().backward()
+
+    dead = [
+        name
+        for name, p in model.named_parameters()
+        if p.grad is None or not torch.isfinite(p.grad).all() or p.grad.eq(0).all()
+    ]
+    assert not dead
 
 
 def test_sequence_classification_head(tiny_esmc_config, esmc_tokenizer):
@@ -1133,7 +1269,6 @@ def test_attention_mask_folds_into_a_multi_chain_sequence_id(tiny_esmc, esmc_tok
 
 def _pretend_installed(monkeypatch) -> None:
     """Patch where the flags are read, not where they are defined."""
-    monkeypatch.setattr(model_module, "TE_INSTALLED", True)
     monkeypatch.setattr(model_module, "FLASH_ATTN_INSTALLED", True)
 
 
@@ -1193,19 +1328,6 @@ def test_eager_and_sdpa_build_the_same_attention(tiny_esmc_config):
 
 
 @pytest.mark.gpu
-def test_state_dict_round_trips_under_transformer_engine(tiny_esmc_config):
-    """TE adds ``_extra_state`` to ``state_dict`` and a hook strips it, so the
-    loader has to be told not to expect it back."""
-    if not TE_INSTALLED:
-        pytest.skip("TransformerEngine unavailable")  # ty:ignore[too-many-positional-arguments]
-    with torch.device("cuda"):
-        model = EsmcForMaskedLM(tiny_esmc_config).eval()
-
-    assert not [k for k in model.state_dict() if k.endswith("_extra_state")]
-    model.load_state_dict(model.state_dict())
-
-
-@pytest.mark.gpu
 @pytest.mark.parametrize("dtype", [torch.float32, torch.float16, torch.bfloat16])
 @pytest.mark.parametrize("name", LENGTH_NAMES)
 def test_gpu_dtypes(tiny_esmc_config, esmc_tokenizer, dtype, name):
@@ -1222,28 +1344,50 @@ def test_gpu_dtypes(tiny_esmc_config, esmc_tokenizer, dtype, name):
     assert torch.isfinite(out.float()).all()
 
 
+def _tensor_bytes(model: nn.Module) -> int:
+    tensors = list(model.parameters()) + list(model.buffers())
+    return sum(t.numel() * t.element_size() for t in tensors)
+
+
 @pytest.mark.gpu
-def test_fp8_backbone(esmc_300m_dir):
-    """ESMC is commonly run fp8 as a folding backbone."""
-    if not TE_INSTALLED:
-        pytest.skip("TransformerEngine unavailable")  # ty:ignore[too-many-positional-arguments]
-    if torch.cuda.get_device_capability()[0] < 9:
-        pytest.skip("fp8 needs compute capability >= 9.0 (Hopper)")  # ty:ignore[too-many-positional-arguments]
+def test_fp8_backbone(esmc_300m_dir, esmc_tokenizer):
+    """ESMC is commonly run fp8 as a folding backbone. Every projection must end
+    up in fp8, and the output must stay close to bf16."""
+    if torch.cuda.get_device_capability() < (8, 9):
+        pytest.skip("fp8 needs compute capability >= 8.9")  # ty:ignore[too-many-positional-arguments]
 
-    from esm.models.esmfold2.model import _convert_te_modules_to_fp8_inplace
-
+    reference = EsmcModel.from_pretrained(
+        esmc_300m_dir, device="cuda", dtype=torch.bfloat16
+    ).eval()
     model = EsmcModel.from_pretrained(
         esmc_300m_dir, device="cuda", dtype=torch.bfloat16
-    )
-    with torch.no_grad():
-        _convert_te_modules_to_fp8_inplace(model)
-    tokenizer = EsmcTokenizer()
+    ).eval()
+    bf16_bytes = _tensor_bytes(model)
+    n_blocks = len(model.transformer.blocks)
+    # qkv, out_proj and the MLP per block.
+    assert convert_esmc_to_fp8_(model) == 3 * n_blocks
+    for block in model.transformer.blocks:
+        assert isinstance(block.attn.layernorm_qkv, Fp8LayerNormLinear)  # ty:ignore[unresolved-attribute]
+        assert isinstance(block.attn.out_proj, Fp8Linear)  # ty:ignore[unresolved-attribute]
+        assert isinstance(block.ffn, Fp8LayerNormMLP)
+    assert not [
+        name
+        for name, p in model.named_parameters()
+        if p.dim() == 2 and name != "embed.weight"
+    ], "a 2D weight was left in bf16"
+    assert _tensor_bytes(model) < 0.6 * bf16_bytes
+
     enc = {
-        k: v.cuda() for k, v in tokenizer(SHORT_SEQUENCE, return_tensors="pt").items()
+        k: v.cuda()
+        for k, v in esmc_tokenizer(MEDIUM_SEQUENCE, return_tensors="pt").items()
     }
-    with torch.no_grad():
-        out = model(**enc).last_hidden_state
-    assert torch.isfinite(out.float()).all()
+    with torch.no_grad(), torch.autocast("cuda", dtype=torch.bfloat16):
+        expected = reference(**enc).last_hidden_state.float()
+        actual = model(**enc).last_hidden_state.float()
+    assert actual.dtype == torch.float32 and torch.isfinite(actual).all()
+    # Measured 0.13 on this input; TE's fp8 recipe had more error than this path.
+    rel = (actual - expected).norm() / expected.norm()
+    assert rel < 0.15, rel
 
 
 @pytest.mark.gpu
@@ -1283,9 +1427,10 @@ def test_flash_attention_2_dispatches_and_agrees_with_sdpa(
         with torch.no_grad():
             expected = reference(**enc).last_hidden_state.float()
             actual = candidate(**enc).last_hidden_state.float()
-        # The flash path packs the batch and runs flash_attn_varlen where sdpa
-        # runs xformers, so the reduction orders differ and the gap compounds
-        # over 30 blocks. Held to a few bf16 ULP at activation scale.
+        # The flash path packs the batch and runs flash_attn_varlen where the
+        # "sdpa" build runs attention unpacked, so the reduction orders differ
+        # and the gap compounds over 30 blocks. Held to a few bf16 ULP at
+        # activation scale.
         torch.testing.assert_close(
             actual, expected, atol=5 * torch.finfo(torch.bfloat16).eps, rtol=1e-2
         )
@@ -1293,9 +1438,8 @@ def test_flash_attention_2_dispatches_and_agrees_with_sdpa(
 
 @pytest.mark.gpu
 def test_cpu_inference_works_on_a_cuda_machine(esmc_300m_dir, esmc_tokenizer):
-    """Transformer Engine is selected whenever it imports and CUDA exists, but its
-    modules reject CPU inputs, so a CPU-targeted load has to opt out of them.
-    """
+    """Fused kernels are CUDA-only, so a CPU-targeted load on a CUDA machine
+    has to opt out of them."""
     model = EsmcModel.from_pretrained(esmc_300m_dir, device="cpu")
     enc = esmc_tokenizer(SHORT_SEQUENCE, return_tensors="pt")
     with torch.no_grad():
@@ -1305,13 +1449,35 @@ def test_cpu_inference_works_on_a_cuda_machine(esmc_300m_dir, esmc_tokenizer):
 
 
 @pytest.mark.gpu
-def test_cpu_and_gpu_agree(esmc_300m_dir, esmc_tokenizer):
-    """Same weights, same input, both devices, fp32 on each side.
-
-    Also a cross-implementation check: the CPU model uses the reference layers
-    while the CUDA model uses the fused Transformer Engine ones, which is where
-    almost all of the difference below comes from.
+def test_flash_build_moved_to_cpu_matches_a_cpu_build(tiny_esmc_config, esmc_tokenizer):
+    """The 3.x README loads on CUDA then calls ``.to("cpu")``; the CUDA-built
+    flash blocks must then fall back instead of handing CPU tensors to Triton.
     """
+    if not FLASH_ATTN_INSTALLED:
+        pytest.skip("flash-attn is not installed")  # ty:ignore[too-many-positional-arguments]
+
+    with torch.device("cuda"):
+        moved = EsmcModel(
+            replace(tiny_esmc_config, attn_implementation="flash_attention_2")
+        ).eval()
+    assert moved._use_flash_attn, "flash attention did not actually dispatch"
+    moved = moved.to("cpu")
+    assert not moved._use_flash_attn
+
+    reference = EsmcModel(replace(tiny_esmc_config, attn_implementation="sdpa"))
+    reference.load_state_dict(moved.state_dict())
+    reference.eval()
+
+    batch = _tokens(esmc_tokenizer, TINY_SEQUENCES)
+    with torch.no_grad():
+        actual = moved(**batch).last_hidden_state
+        expected = reference(**batch).last_hidden_state
+    torch.testing.assert_close(actual, expected, atol=0.0, rtol=0.0)
+
+
+@pytest.mark.gpu
+def test_cpu_and_gpu_agree(esmc_300m_dir, esmc_tokenizer):
+    """Same weights, same input, both devices, fp32 on each side."""
     on_cpu = EsmcModel.from_pretrained(esmc_300m_dir, device="cpu")
     on_gpu = EsmcModel.from_pretrained(esmc_300m_dir, device="cuda")
 
@@ -1328,19 +1494,15 @@ def test_cpu_and_gpu_agree(esmc_300m_dir, esmc_tokenizer):
         torch.testing.assert_close(actual, expected, atol=3e-3, rtol=1e-4)
 
 
-# Every build reachable on a GPU: dtype x attention backend x fused/reference
-# layers. flash_attention_2 is only paired with fp16 / bf16 because the kernel
-# rejects fp32, and only with the fused layers because a CPU-built model never
-# gets the flash block at all (see ``build_esmc``).
+# Every build reachable on a GPU: dtype x attention backend. flash_attention_2
+# is only paired with fp16 / bf16 because the kernel rejects fp32.
 GPU_BUILDS = [
-    (torch.float32, "sdpa", FUSED_LAYERS),
-    (torch.float32, "sdpa", REFERENCE_LAYERS),
-    (torch.float32, "eager", FUSED_LAYERS),
-    (torch.bfloat16, "sdpa", FUSED_LAYERS),
-    (torch.bfloat16, "sdpa", REFERENCE_LAYERS),
-    (torch.bfloat16, "flash_attention_2", FUSED_LAYERS),
-    (torch.float16, "sdpa", FUSED_LAYERS),
-    (torch.float16, "flash_attention_2", FUSED_LAYERS),
+    (torch.float32, "sdpa"),
+    (torch.float32, "eager"),
+    (torch.bfloat16, "sdpa"),
+    (torch.bfloat16, "flash_attention_2"),
+    (torch.float16, "sdpa"),
+    (torch.float16, "flash_attention_2"),
 ]
 
 # What each dtype can be held to against the CPU / fp32 reference: max|Δ| on the
@@ -1350,8 +1512,6 @@ GPU_BUILDS = [
 #   fp32       4.5e-4         0 / 0 / 0
 #   bf16       1.46e-2        1 / 3 / 3
 #   fp16       1.62e-3        0 / 1 / 0
-# fp32 with the reference layers reproduces the CPU reference to 1.7e-6; the fp32
-# bound has to accommodate Transformer Engine.
 REFERENCE_NORM_TOLERANCE = {
     torch.float32: 1e-3,
     torch.bfloat16: 0.03,
@@ -1361,17 +1521,17 @@ REFERENCE_ARGMAX_MISMATCHES = {torch.float32: 0, torch.bfloat16: 5, torch.float1
 
 
 @pytest.mark.gpu
-@pytest.mark.parametrize("dtype,attn,layers", GPU_BUILDS)
+@pytest.mark.parametrize("dtype,attn", GPU_BUILDS)
 def test_every_gpu_build_reaches_the_reference(
-    esmc_300m_dir, esmc_tokenizer, dtype, attn, layers
+    esmc_300m_dir, esmc_tokenizer, dtype, attn
 ):
     """Correct, not merely self-consistent: every GPU build vs the CPU reference.
 
     No GPU build can reach it bit-for-bit, so what is asserted is the decision
     path (argmax over the vocabulary) plus a bound on the hidden-state norms.
-    Without Transformer Engine or flash-attn installed the builds that would use
-    them degenerate to the reference ones rather than failing, so this stays a
-    superset of whatever a given runner can reach.
+    Without flash-attn installed the builds that would use it degenerate to
+    sdpa rather than failing, so this stays a superset of whatever a given
+    runner can reach.
     """
     try:
         model = build_esmc(
@@ -1379,14 +1539,13 @@ def test_every_gpu_build_reaches_the_reference(
             device="cuda",
             dtype=dtype,
             attn=attn,
-            layers=layers,
             model_class=EsmcForMaskedLM,
         )
     # Only a genuinely absent package is a reason to skip. `from_pretrained`
     # signals a strict-key failure with RuntimeError, so catching that here would
     # turn a checkpoint regression into a green skip across every build.
     except ImportError as exc:
-        pytest.skip(f"build {dtype}/{attn}/{layers} unavailable: {exc}")  # ty:ignore[too-many-positional-arguments]
+        pytest.skip(f"build {dtype}/{attn} unavailable: {exc}")  # ty:ignore[too-many-positional-arguments]
 
     for name, sequence in SEQUENCES.items():
         case = reference_values()["cases"][name]

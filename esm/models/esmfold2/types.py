@@ -14,6 +14,7 @@ from esm.utils.structure.input_builder import (
     DNAInput,
     LigandInput,
     Modification,
+    PocketConditioning,
     ProteinInput,
     RNAInput,
     StructurePredictionInput,
@@ -28,6 +29,7 @@ __all__ = [
     "DNAInput",
     "LigandInput",
     "DistogramConditioning",
+    "PocketConditioning",
     "CovalentBond",
     "StructurePredictionInput",
 ]

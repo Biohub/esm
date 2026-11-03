@@ -125,7 +125,9 @@ CCD_DEPENDENT_KEYS = frozenset({"ref_pos"})
 #: Why the ``ref_pos`` comparison below is the one thing in this file that can
 #: skip: the CCD pickle is an environment-provided data artifact, like a
 #: published checkpoint, and the fast path's table is pinned to one release of it.
-MISMATCHED_CCD = "the loaded CCD is not the snapshot PROTEIN_REF_POS was frozen from"
+MISMATCHED_CCD = (
+    "KNOWN GAP: the loaded CCD is not the snapshot PROTEIN_REF_POS was frozen from"
+)
 
 C1_SEQUENCES = {
     "single_residue": "M",
@@ -215,11 +217,12 @@ def test_fast_path_ref_pos_reproduces_the_ccd_conformers(name, ccd_pickle):
 
     Split out from the shared-key test because it is the one feature that
     depends on an external data artifact rather than on code: the table is a
-    frozen copy of one CCD release, so pointing ``ESMCFOLD_CCD_PATH`` at a
-    later one makes the two paths hand the model different geometry. Measured
-    against ``biohub/ESMFold2:ccd.pkl``: bit-identical. Against the internal
-    ``ccd_20251126`` snapshot: 6.5 A max, and 1.1 A on intra-residue distances,
-    i.e. a re-generated conformer rather than a re-oriented one.
+    frozen copy of ``ESMFOLD2_CCD_REVISION``, so overriding
+    ``ESMCFOLD_CCD_PATH`` with a different release makes the two paths hand the
+    model different geometry. Regenerate with
+    ``python -m tests.regenerate_reference protein_ref_pos`` when the pin moves;
+    the guard below turns a stale table into a skip rather than a confusing
+    coordinate mismatch.
     """
     if not ccd_matches_the_hardcoded_table():
         pytest.skip(MISMATCHED_CCD)  # ty:ignore[too-many-positional-arguments]
@@ -562,36 +565,6 @@ def test_lm_shim_wraps_each_chain_in_bos_and_eos(recording_esmc, ccd_pickle):
     assert torch.isfinite(hidden).all()
 
 
-def test_lm_shim_marks_padding_with_sequence_id_minus_one(recording_esmc, ccd_pickle):
-    """``pad_to_multiple`` is the fp8 path, and it is the one that pads at B=1.
-
-    TE's fp8 kernels assert ``prod(shape[:-1]) % 8 == 0``, so ``_esmc_fp8``
-    rounds the LM input up. Those extra columns must be PAD *and* carry
-    ``sequence_id == -1``, or the last chain would grow a tail of phantom
-    residues it attends to.
-    """
-    features = batched(prepare_esmfold2_input(protein_complex_input(C4_CHAINS))[0])
-    unpadded = lm_hidden_states_for(recording_esmc, features)
-    recording_esmc.calls.clear()
-    padded = lm_hidden_states_for(recording_esmc, features, pad_to_multiple=8)
-
-    seen_ids, seen_sequence_id = recording_esmc.calls[0]
-    length = seen_ids.shape[1]
-    assert length % 8 == 0
-    # 6 + 4 + 5 residues + 6 special tokens = 21, rounded up to 24.
-    assert length == 24
-
-    is_pad = seen_ids[0] == PAD
-    assert is_pad.sum() == 3
-    assert torch.equal(seen_sequence_id[0] == -1, is_pad)
-    assert (seen_sequence_id[0][~is_pad] >= 0).all()
-
-    # Measured max|Δ| 2.4e-7 on the tiny backbone: the padded batch takes SDPA's
-    # masked path and the unpadded one its unmasked path, so the reductions
-    # differ in order but not in what they sum over.
-    torch.testing.assert_close(unpadded, padded, atol=1e-6, rtol=0)
-
-
 def test_lm_shim_gives_each_chain_its_own_sequence_id(recording_esmc, ccd_pickle):
     """``sequence_id`` increments once per chain and covers every chain.
 
@@ -814,6 +787,48 @@ def test_decode_returns_one_result_for_one_sample_and_a_list_for_more(
     assert not np.allclose(
         many[0].complex.atom_positions, many[1].complex.atom_positions
     )
+
+
+def test_decode_copies_sample_invariant_outputs_once(tiny_esmfold2, input_builder):
+    """Sample-invariant fields must be one host copy shared by every result.
+
+    The distogram is L*L*64 fp32, so a per-sample ``.cpu()`` cost 5x130 ms at
+    L=1000. Identity, not equality, is what pins the copy count.
+    """
+    features, lm_hidden_states, chain_infos = esmfold2_complex_features(
+        tiny_esmfold2, DECODE_CHAINS
+    )
+
+    with torch.no_grad():
+        output = tiny_esmfold2(
+            **features,
+            lm_hidden_states=lm_hidden_states,
+            num_loops=1,
+            num_sampling_steps=2,
+            num_diffusion_samples=3,
+            include_embeddings=True,  # otherwise the two embedding fields are None
+        )
+
+    results = input_builder.decode(
+        output, features, chain_infos, num_diffusion_samples=3
+    )
+    assert len(results) == 3
+    # All five fields the hoist covers. Four carry a tensor and are pinned by
+    # identity; output_embedding_sequence is never produced (see decode's
+    # docstring: it "stays None, as it does over the API"), so it is pinned as
+    # absent instead -- if it ever starts being emitted, this fails and the
+    # identity check above must grow to cover it.
+    shared = ("distogram", "residue_index", "entity_id", "output_embedding_pair_pooled")
+    for field in shared:
+        first = getattr(results[0], field)
+        assert first is not None, f"{field} is absent, so the test cannot pin it"
+        for other in results[1:]:
+            assert getattr(other, field) is first, f"{field} was copied per sample"
+    assert all(r.output_embedding_sequence is None for r in results)
+
+    # Per-sample fields must still be distinct objects.
+    assert results[0].plddt is not results[1].plddt
+    assert results[0].pae is not results[1].pae
 
 
 def test_decode_keeps_every_chain_and_round_trips_through_mmcif(

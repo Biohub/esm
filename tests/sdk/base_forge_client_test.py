@@ -3,6 +3,7 @@
 import itertools
 
 import pytest
+from attr import define
 
 from esm.sdk import base_forge_client
 from esm.sdk.api import ESMProteinError
@@ -11,23 +12,34 @@ from esm.sdk.base_forge_client import (
     EndpointHandler,
     _poll_intervals,
 )
+from esm.sdk.batch import BatchSubmission
 from esm.sdk.forge import ForgeBatchClient
+from esm.utils.structure.input_builder import ProteinInput, StructurePredictionInput
 
 
-class _QuietHandler(EndpointHandler[dict]):
+@define
+class _QuietRequest:
+    pass
+
+
+class _QuietHandler(EndpointHandler[_QuietRequest, dict]):
     """An endpoint that states no pacing of its own, so the layers above it decide."""
+
+    request_type = _QuietRequest
 
     @property
     def endpoint_name(self) -> str:
         return "quiet"
 
-    def _prepare_request(self, **kwargs) -> list[dict]:
-        return []
+    def _prepare_request(
+        self, request: _QuietRequest, *, model_name: str | None = None
+    ) -> dict:
+        return {}
 
-    def _process_response(self, response: dict, **kwargs) -> dict:
+    def _process_response(self, response: dict) -> dict:
         return response
 
-    async def _async_process_response(self, response: dict, **kwargs) -> dict:
+    async def _async_process_response(self, response: dict) -> dict:
         return response
 
 
@@ -182,8 +194,9 @@ def test_a_failed_job_raises_with_the_server_reason(clock):
 def _stub_submission(
     monkeypatch: pytest.MonkeyPatch, handler: EndpointHandler, task_id: str
 ) -> None:
-    monkeypatch.setattr(handler, "_prepare_request", lambda **kwargs: [])
-    monkeypatch.setattr(handler._batch_client, "submit", lambda *a, **kw: task_id)
+    monkeypatch.setattr(handler, "_prepare_request", lambda request, **kwargs: {})
+    submission = BatchSubmission(endpoint=handler.endpoint_name, task_ids=(task_id,))
+    monkeypatch.setattr(handler._batch_client, "submit", lambda *a, **kw: submission)
 
 
 def test_the_users_interval_reaches_the_wait_loop(clock, monkeypatch):
@@ -192,7 +205,13 @@ def test_the_users_interval_reaches_the_wait_loop(clock, monkeypatch):
     handler = client.fold_max_accuracy
     _stub_submission(monkeypatch, handler, "task-7")
 
-    result = handler.run(timeout=90, cancel_on_timeout=False)
+    result = handler.run(
+        all_atom_input=StructurePredictionInput(
+            sequences=[ProteinInput(id="A", sequence="ACDEF")]
+        ),
+        timeout=90,
+        cancel_on_timeout=False,
+    )
 
     assert isinstance(result, ESMProteinError)
     assert clock.sleeps == [45, 45]
@@ -204,7 +223,14 @@ def test_a_per_call_interval_reaches_the_wait_loop(clock, monkeypatch):
     handler = client.fold_max_accuracy
     _stub_submission(monkeypatch, handler, "task-8")
 
-    result = handler.run(timeout=60, cancel_on_timeout=False, poll_interval=20)
+    result = handler.run(
+        all_atom_input=StructurePredictionInput(
+            sequences=[ProteinInput(id="A", sequence="ACDEF")]
+        ),
+        timeout=60,
+        cancel_on_timeout=False,
+        poll_interval=20,
+    )
 
     assert isinstance(result, ESMProteinError)
     assert clock.sleeps == [20, 20, 20]

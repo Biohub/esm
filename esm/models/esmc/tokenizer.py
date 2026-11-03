@@ -3,7 +3,7 @@
 from tokenizers import AddedToken, Tokenizer
 from tokenizers.models import BPE
 from tokenizers.processors import TemplateProcessing
-from transformers import PreTrainedTokenizerFast
+from transformers.tokenization_utils_fast import PreTrainedTokenizerFast
 
 VOCAB_FILES_NAMES = {"vocab_file": "vocab.txt", "tokenizer_file": "tokenizer.json"}
 
