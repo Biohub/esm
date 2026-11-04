@@ -220,6 +220,8 @@ replace-imports-with-any = [
     "scipy.spatial",
     "flash_attn",
     "flash_attn.**",
+    "mlx",
+    "mlx.**",
     "zstd",
 ]
 

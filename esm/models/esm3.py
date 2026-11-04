@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import contextlib
+import os
 from functools import partial
 from typing import Callable
 
@@ -31,6 +32,7 @@ from esm.utils import encoding
 from esm.utils.constants import esm3 as C
 from esm.utils.constants.models import ESM3_OPEN_SMALL, normalize_model_name
 from esm.utils.decoding import decode_protein_tensor
+from esm.utils.device import DeviceLike, get_default_model_dtype, resolve_device
 from esm.utils.generation import (
     _batch_forward,
     _sample_per_prompt,
@@ -106,9 +108,13 @@ class EncodeInputs(nn.Module):
         rbf_16_fn = partial(rbf, v_min=0.0, v_max=1.0, n_bins=16)
         # the `masked_fill(padding_mask.unsqueeze(2), 0)` for the two below is unnecessary
         # as pad tokens never even interact with the "real" tokens (due to sequence_id)
-        plddt_embed = self.plddt_projection(rbf_16_fn(average_plddt))
+        plddt_embed = self.plddt_projection(
+            rbf_16_fn(average_plddt).to(self.plddt_projection.weight.dtype)
+        )
         structure_per_res_plddt = self.structure_per_res_plddt_projection(
-            rbf_16_fn(per_res_plddt)
+            rbf_16_fn(per_res_plddt).to(
+                self.structure_per_res_plddt_projection.weight.dtype
+            )
         )
 
         # Structure + "structural features" embeds
@@ -226,20 +232,60 @@ class ESM3(nn.Module, ESM3InferenceClient):
 
     @classmethod
     def from_pretrained(
-        cls, model_name: str = ESM3_OPEN_SMALL, device: torch.device | None = None
+        cls, model_name: str = ESM3_OPEN_SMALL, device: DeviceLike = None
     ) -> ESM3:
         from esm.pretrained import load_local_model
 
         model_name = normalize_model_name(model_name)
         if not model_name:
             raise ValueError(f"Model name {model_name} is not a valid ESM3 model name.")
-        if device is None:
-            device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+        device = resolve_device(device if device is not None else "auto")
         model = load_local_model(model_name, device=device)
-        if device.type != "cpu":
-            model = model.to(torch.bfloat16)
+        model_dtype = get_default_model_dtype(device)
+        model = model.to(model_dtype)
         assert isinstance(model, ESM3)
         return model
+
+    def to(self, *args, **kwargs):
+        device = None
+        dtype = None
+        new_args = list(args)
+
+        if new_args:
+            first_arg = new_args[0]
+            if isinstance(first_arg, (str, torch.device)):
+                resolved = resolve_device(first_arg)
+                new_args[0] = resolved
+                device = resolved
+            elif isinstance(first_arg, torch.dtype):
+                dtype = first_arg
+
+        if len(new_args) > 1 and isinstance(new_args[1], torch.dtype):
+            dtype = new_args[1]
+
+        if "device" in kwargs and kwargs["device"] is not None:
+            resolved = resolve_device(kwargs["device"])
+            kwargs["device"] = resolved
+            device = resolved
+
+        if "dtype" in kwargs:
+            dtype = kwargs["dtype"]
+
+        res = super().to(*new_args, **kwargs)
+
+        if device is not None:
+            if self._structure_encoder is not None:
+                self._structure_encoder.to(device)
+            if self._structure_decoder is not None:
+                self._structure_decoder.to(device)
+            if self._function_decoder is not None:
+                self._function_decoder.to(device)
+
+            if dtype is None:
+                target_dtype = get_default_model_dtype(device)
+                res = res.to(target_dtype)
+
+        return res
 
     @property
     def device(self):
@@ -533,10 +579,26 @@ class ESM3(nn.Module, ESM3InferenceClient):
             # 1.0 if all coordinates at specific indices have valid non-nan values.
             per_res_plddt = input.coordinates.isfinite().all(dim=-1).any(dim=-1).float()
 
+        autocast_enabled = False
+        autocast_dtype = torch.bfloat16
+        if device.type == "cuda":
+            autocast_enabled = True
+            autocast_dtype = torch.bfloat16
+        elif device.type == "mps":
+            mps_dtype_str = os.environ.get("ESM3_MPS_DTYPE", "").strip().lower()
+            if mps_dtype_str in ("bfloat16", "bf16"):
+                autocast_enabled = True
+                autocast_dtype = torch.bfloat16
+            elif mps_dtype_str in ("float16", "fp16", "half"):
+                autocast_enabled = True
+                autocast_dtype = torch.float16
+
         with (
             torch.no_grad(),  # Assume no gradients for now...
-            torch.autocast(enabled=True, device_type=device.type, dtype=torch.bfloat16)
-            if device.type == "cuda"
+            torch.autocast(
+                enabled=autocast_enabled, device_type=device.type, dtype=autocast_dtype
+            )
+            if autocast_enabled
             else contextlib.nullcontext(),
         ):
             output = self(
