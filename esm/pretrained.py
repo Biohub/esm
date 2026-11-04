@@ -23,11 +23,13 @@ from esm.utils.constants.models import (
     ESMC_300M,
     ESMC_600M,
 )
+from esm.utils.device import resolve_device
 
 ModelBuilder = Callable[[torch.device | str], nn.Module]
 
 
-def ESM3_structure_encoder_v0(device: torch.device | str = "cpu"):
+def ESM3_structure_encoder_v0(device: torch.device | str = "auto"):
+    device = resolve_device(device)
     with init_empty_weights():
         model = StructureTokenEncoder(
             d_model=1024, n_heads=1, v_heads=128, n_layers=2, d_out=128, n_codes=4096
@@ -41,7 +43,8 @@ def ESM3_structure_encoder_v0(device: torch.device | str = "cpu"):
     return model
 
 
-def ESM3_structure_decoder_v0(device: torch.device | str = "cpu"):
+def ESM3_structure_decoder_v0(device: torch.device | str = "auto"):
+    device = resolve_device(device)
     with init_empty_weights():
         model = StructureTokenDecoder(d_model=1280, n_heads=20, n_layers=30).eval()
     state_dict = torch.load(
@@ -53,7 +56,8 @@ def ESM3_structure_decoder_v0(device: torch.device | str = "cpu"):
     return model
 
 
-def ESM3_function_decoder_v0(device: torch.device | str = "cpu"):
+def ESM3_function_decoder_v0(device: torch.device | str = "auto"):
+    device = resolve_device(device)
     with init_empty_weights():
         model = FunctionTokenDecoder().eval()
     state_dict = torch.load(
@@ -65,7 +69,8 @@ def ESM3_function_decoder_v0(device: torch.device | str = "cpu"):
     return model
 
 
-def ESM3_sm_open_v0(device: torch.device | str = "cpu"):
+def ESM3_sm_open_v0(device: torch.device | str = "auto"):
+    device = resolve_device(device)
     with init_empty_weights():
         model = ESM3(
             d_model=1536,
@@ -149,12 +154,11 @@ LOCAL_MODEL_REGISTRY: dict[str, ModelBuilder] = {
 
 
 def load_local_model(
-    model_name: str,
-    device: torch.device = torch.device("cpu"),
-    use_flash_attn: bool = True,
+    model_name: str, device: torch.device | str = "auto", use_flash_attn: bool = True
 ) -> nn.Module:
     if model_name not in LOCAL_MODEL_REGISTRY:
         raise ValueError(f"Model {model_name} not found in local model registry.")
+    device = resolve_device(device)
     builder = LOCAL_MODEL_REGISTRY[model_name]
     kwargs = {}
     if "use_flash_attn" in inspect.signature(builder).parameters:

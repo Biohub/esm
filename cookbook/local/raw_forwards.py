@@ -14,24 +14,24 @@ from esm.tokenization.function_tokenizer import (
     InterProQuantizedTokenizer as EsmFunctionTokenizer,
 )
 from esm.tokenization.sequence_tokenizer import EsmSequenceTokenizer
+from esm.utils.device import empty_cache, resolve_device
 from esm.utils.structure.protein_chain import ProteinChain
 from esm.utils.types import FunctionAnnotation
 
+device = resolve_device("auto")
 
-# The open weights are bf16, so calling `forward` directly needs autocast; the SDK
-# generate/logits paths set it up for you.
+
 @torch.no_grad()
-@torch.autocast("cuda", dtype=torch.bfloat16)
 def inverse_folding_example():
     tokenizer = EsmSequenceTokenizer()
-    encoder = ESM3_structure_encoder_v0("cuda")
-    model = ESM3_sm_open_v0("cuda")
+    encoder = ESM3_structure_encoder_v0(device)
+    model = ESM3_sm_open_v0(device)
 
     chain = ProteinChain.from_rcsb("1utn", "A")
     coords, plddt, residue_index = chain.to_structure_encoder_inputs()
-    coords = coords.cuda()
-    plddt = plddt.cuda()
-    residue_index = residue_index.cuda()
+    coords = coords.to(device)
+    plddt = plddt.to(device)
+    residue_index = residue_index.to(device)
     _, structure_tokens = encoder.encode(coords, residue_index=residue_index)
 
     # Add BOS/EOS padding
@@ -50,11 +50,10 @@ def inverse_folding_example():
 
 
 @torch.no_grad()
-@torch.autocast("cuda", dtype=torch.bfloat16)
 def conditioned_prediction_example():
     tokenizers = get_esm3_model_tokenizers()
 
-    model = ESM3_sm_open_v0("cuda")
+    model = ESM3_sm_open_v0(device)
 
     # PDB 1UTN
     sequence = "MKTFIFLALLGAAVAFPVDDDDKIVGGYTCGANTVPYQVSLNSGYHFCGGSLINSQWVVSAAHCYKSGIQVRLGEDNINVVEGNEQFISASKSIVHPSYNSNTLNNDIMLIKLKSAASLNSRVASISLPTSCASAGTQCLISGWGNTKSSGTSYPDVLKCLKAPILSDSSCKSAYPGQITSNMFCAGYLEGGKDSCQGDSGGPVVCSGKLQGIVSWGSGCAQKNKPGVYTKVCNYVSWIKQTIASN"
@@ -80,8 +79,8 @@ def conditioned_prediction_example():
     function_tokens = tokenizers.function.tokenize(function_annotations, len(sequence))
     function_tokens = tokenizers.function.encode(function_tokens)
 
-    function_tokens = function_tokens.cuda().unsqueeze(0)
-    sequence_tokens = sequence_tokens.cuda().unsqueeze(0)
+    function_tokens = function_tokens.to(device).unsqueeze(0)
+    sequence_tokens = sequence_tokens.to(device).unsqueeze(0)
 
     output = model.forward(
         sequence_tokens=sequence_tokens, function_tokens=function_tokens
@@ -92,8 +91,8 @@ def conditioned_prediction_example():
 @torch.no_grad()
 def decode(sequence, output, sequence_tokens):
     # To save on VRAM, we load these in separate functions
-    decoder = ESM3_structure_decoder_v0("cuda")
-    function_decoder = ESM3_function_decoder_v0("cuda")
+    decoder = ESM3_structure_decoder_v0(device)
+    function_decoder = ESM3_function_decoder_v0(device)
     function_tokenizer = EsmFunctionTokenizer()
 
     # Generally not recommended to just argmax the logits, decode iteratively!
@@ -150,6 +149,6 @@ if __name__ == "__main__":
     inverse_folding_example()
 
     sequence, output, sequence_tokens = conditioned_prediction_example()
-    torch.cuda.empty_cache()
+    empty_cache()
     # And then decode from tokenized representation to outputs:
     decode(sequence, output, sequence_tokens)
