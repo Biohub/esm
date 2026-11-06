@@ -127,6 +127,8 @@ def decode_sequence(
 ) -> str:
     _bos_eos_warn("Sequence", sequence_tokens, sequence_tokenizer)
     sequence = sequence_tokenizer.decode(sequence_tokens, **kwargs)
+    # transformers 5 types decode() as str | list[str]; 1-D tokens give str.
+    assert isinstance(sequence, str)
     sequence = sequence.replace(" ", "")
     sequence = sequence.replace(sequence_tokenizer.mask_token, C.MASK_STR_SHORT)
     sequence = sequence.replace(sequence_tokenizer.cls_token, "")
