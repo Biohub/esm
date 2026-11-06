@@ -738,9 +738,12 @@ class EsmFold2Model(HubPreTrainedModel):
         return a, b
 
     def _init_pair_state(self, ref: Tensor) -> Tensor:
+        # trunc_normal_ by hand: torch after 2.11 switched it to rejection sampling,
+        # which changes the draw for a given seed and so every seeded fold.
         std = math.sqrt(2.0 / (5.0 * ref.shape[-1]))
-        state = torch.empty_like(ref, dtype=torch.float32)
-        nn.init.trunc_normal_(state, mean=0.0, std=std, a=-3 * std, b=3 * std)
+        bound = math.erf(3.0 / math.sqrt(2.0))
+        state = torch.empty_like(ref, dtype=torch.float32).uniform_(-bound, bound)
+        state.erfinv_().mul_(std * math.sqrt(2.0)).clamp_(-3 * std, 3 * std)
         return state.to(dtype=ref.dtype)
 
     def _run_one_loop(

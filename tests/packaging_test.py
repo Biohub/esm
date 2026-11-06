@@ -91,6 +91,18 @@ def test_no_direct_references(project):
         assert Requirement(spec).url is None, f"direct reference: {spec}"
 
 
+def test_transformers_has_the_esmc_port(base_requirements):
+    """The model cards load biohub/ESMC-* through transformers' own port, added in 5.16.
+
+    With 4.x, ``pip install esm`` broke ``AutoTokenizer`` on those checkpoints.
+    """
+    (transformers,) = [
+        r for r in base_requirements if canonicalize_name(r.name) == "transformers"
+    ]
+    assert not transformers.specifier.contains("5.15.0")
+    assert transformers.specifier.contains("5.16.0")
+
+
 def test_triton_is_the_only_accelerator_and_linux_x86_only(base_requirements):
     found = [r for r in base_requirements if canonicalize_name(r.name) in ACCELERATORS]
     assert [canonicalize_name(r.name) for r in found] == ["triton"]

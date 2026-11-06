@@ -42,6 +42,7 @@ class MolecularComplexResult:
     pae: torch.Tensor | None = None
     pde: torch.Tensor | None = None
     distogram: torch.Tensor | None = None
+    # [C, C]: entry (i, j) is the ipTM between chains i and j of `complex.chain_id`.
     pair_chains_iptm: torch.Tensor | None = None
     output_embedding_sequence: torch.Tensor | None = None
     output_embedding_pair_pooled: torch.Tensor | None = None

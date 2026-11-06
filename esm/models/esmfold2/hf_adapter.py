@@ -9,9 +9,9 @@ while ours has CCD ligands, MSA and multi-chain, so wrapping ours around theirs
 keeps the richer half. Their trunk/head split is re-exposed as
 :meth:`EsmFold2HFAdapter.trunk`.
 
-The port landed in ``transformers`` 5.16.0.dev0 and this repo pins 4.x, so nothing
-upstream is imported at module scope; :func:`upstream_available` gates the two
-entry points that need it.
+The port landed in ``transformers`` 5.16.0.dev0. Nothing upstream is imported at
+module scope, so this module still imports on older versions;
+:func:`upstream_available` gates the two entry points that need it.
 """
 
 import contextlib

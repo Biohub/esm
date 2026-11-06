@@ -691,7 +691,8 @@ class LogitsConfig:
         returned. Returns a tensor of shape [B, n_layers + 1, D].
     ith_hidden_layer (int): (ESM3, ESMC) Valid values are 0 to max_ith_hidden_layer
         (inclusive), where index 0 is the embedding layer. -1 returns all layers,
-        but is not supported for ESMC 6B or any ESM3 model.
+        but is not supported for ESMC 6B or any ESM3 model, and needs a binary
+        response (like the Python SDK) rather than plain JSON.
         | Model Name                    | max_ith_hidden_layer           |
         |-------------------------------|--------------------------------|
         | esmc-300-2024-12              | 30                             |

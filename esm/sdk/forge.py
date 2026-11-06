@@ -85,6 +85,25 @@ def _resolve_lm_mask_pct(lm_mask_pct: float | None, model_name: str | None) -> f
     return DEFAULT_ESMFOLD2_FAST_LM_MASK_PCT if is_fast_or_default else 0.0
 
 
+def _folding_config_fields(
+    config: FoldingConfig, model_name: str | None
+) -> dict[str, Any]:
+    """FoldingConfig fields /fold and /fold_all_atom share, so neither can drop one."""
+    fields: dict[str, Any] = {
+        "include_distogram": config.include_distogram,
+        "include_pae": config.include_pae,
+        "include_pair_chains_iptm": config.include_pair_chains_iptm,
+        "num_sampling_steps": config.num_sampling_steps,
+        "num_loops": config.num_loops,
+        "lm_dropout": config.lm_dropout,
+        "lm_mask_pct": _resolve_lm_mask_pct(config.lm_mask_pct, model_name),
+        "msa_max_depth": config.msa_max_depth,
+        "msa_column_mask_rate": config.msa_column_mask_rate,
+        "include_embeddings": config.include_embeddings,
+    }
+    return fields
+
+
 def _list_to_function_annotations(l) -> list[FunctionAnnotation] | None:
     if l is None or len(l) <= 0:
         return None
@@ -263,16 +282,7 @@ class SequenceStructureForgeInferenceClient(_BaseForgeInferenceClient):
             error_msg = f"MSA must be None or MSA. Got {msa} instead."
             raise AttributeError(error_msg)
 
-        request["include_distogram"] = config.include_distogram
-        request["include_pae"] = config.include_pae
-        request["include_pair_chains_iptm"] = config.include_pair_chains_iptm
-        request["num_sampling_steps"] = config.num_sampling_steps
-        request["num_loops"] = config.num_loops
-        request["lm_dropout"] = config.lm_dropout
-        request["lm_mask_pct"] = _resolve_lm_mask_pct(config.lm_mask_pct, model_name)
-        request["msa_max_depth"] = config.msa_max_depth
-        request["msa_column_mask_rate"] = config.msa_column_mask_rate
-        request["include_embeddings"] = config.include_embeddings
+        request.update(_folding_config_fields(config, model_name))
 
         request["model"] = model_name
 
@@ -535,22 +545,11 @@ class SequenceStructureForgeInferenceClient(_BaseForgeInferenceClient):
                     "alignment using `select_sequences` before submitting."
                 )
 
-        request: dict[str, Any] = {
+        return {
             "all_atom_input": serialize_structure_prediction_input(all_atom_input),
             "model": model_name,
+            **_folding_config_fields(config, model_name),
         }
-
-        request["include_distogram"] = config.include_distogram
-        request["include_pae"] = config.include_pae
-        request["num_sampling_steps"] = config.num_sampling_steps
-        request["num_loops"] = config.num_loops
-        request["lm_dropout"] = config.lm_dropout
-        request["lm_mask_pct"] = _resolve_lm_mask_pct(config.lm_mask_pct, model_name)
-        request["msa_max_depth"] = config.msa_max_depth
-        request["msa_column_mask_rate"] = config.msa_column_mask_rate
-        request["include_embeddings"] = config.include_embeddings
-
-        return request
 
     @staticmethod
     def _process_fold_all_atom_response(data: dict[str, Any]) -> MolecularComplexResult:
@@ -562,6 +561,7 @@ class SequenceStructureForgeInferenceClient(_BaseForgeInferenceClient):
             ptm=data.get("ptm", None),
             pae=maybe_tensor(data.get("pae"), convert_none_to_nan=True),
             iptm=data.get("interface_ptm", None),
+            pair_chains_iptm=maybe_tensor(data.get("pair_chains_iptm")),
             output_embedding_sequence=maybe_tensor(
                 data.get("output_embedding_sequence"), convert_none_to_nan=True
             ),

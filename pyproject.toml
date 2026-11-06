@@ -23,8 +23,8 @@ classifiers = [
 ]
 
 dependencies = [
-  "torch>=2.11.0,<2.12.0",
-  "transformers>=4.57.6,<5.0.0",
+  "torch>=2.11.0",
+  "transformers>=5.16.0",
   "ipython",
   "einops",
   # biotite 2 renamed RigidTransformation fields and annotate_sse output, breaking from_rcsb.
@@ -52,8 +52,8 @@ dependencies = [
   "pygtrie",
   "dna_features_viewer",
   "accelerate",
-  # Pinned to what torch 2.11 requires, so CPU-index torch gets the same one.
-  "triton==3.6.*; sys_platform == 'linux' and platform_machine == 'x86_64'",
+  # CPU-index torch doesn't pull triton in, but the ESMFold2 kernels import it.
+  "triton>=3.6; sys_platform == 'linux' and platform_machine == 'x86_64'",
 ]
 
 # Pytest
@@ -62,7 +62,7 @@ addopts = """
   --cov=esm
 	--cov-report term-missing:skip-covered
 	-n auto
-	-m 'not gpu and not manual and not merge_only'
+	-m 'not gpu and not manual'
 	--ignore=tests/oss_pytests/test_oss_client.py
 """
 markers = [

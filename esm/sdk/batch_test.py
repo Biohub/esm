@@ -3,6 +3,7 @@
 import asyncio
 import json
 from collections.abc import AsyncIterator
+from dataclasses import replace
 from typing import Any
 
 import httpx
@@ -169,6 +170,7 @@ async def test_submit_retains_only_explicit_ids(
         "endpoint": "fold_max_accuracy",
         "batch_id": "batch-A",
         "task_ids": list(submission.task_ids),
+        "replayed": False,
     }
     assert BatchSubmission.from_dict(saved) == submission
     assert submission.task_ids == (("task-1",) if count == 1 else ())
@@ -191,6 +193,57 @@ async def test_submit_retains_only_explicit_ids(
     else:
         with pytest.raises(ValueError, match="exactly one known task ID"):
             _ = submission.task_id
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("asynchronous", [False, True], ids=["sync", "async"])
+async def test_submission_id_is_an_envelope_field_and_replay_is_flagged(
+    api: _BatchAPI, asynchronous: bool
+) -> None:
+    client = api.client()
+    submission_id = "123e4567-e89b-42d3-a456-426614174000"
+    accepted: dict[str, Any] = {
+        "batch_id": submission_id,
+        "total_items": 1,
+        "task_id": f"{submission_id}-00000",
+    }
+    api.data(accepted)
+    api.data({**accepted, "replayed": True})
+
+    original, replay = [
+        await _call(
+            client.fold_max_accuracy,
+            asynchronous,
+            "submit",
+            submission_id=submission_id,
+            all_atom_input=_input("ACDEF"),
+        )
+        for _ in range(2)
+    ]
+
+    assert original.replayed is False
+    assert replay.replayed is True
+    assert original == replace(replay, replayed=False)
+    for request in api.requests:
+        envelope = json.loads(request.content)
+        assert set(envelope) == {"endpoint", "payload", "submission_id"}
+        assert envelope["submission_id"] == submission_id
+
+
+def test_batch_only_submission_response_preserves_replayed() -> None:
+    submission = base_forge_client._BaseForgeBatchClient._submission_response(
+        "fold_max_accuracy",
+        2,
+        {"batch_id": "batch-A", "total_items": 2, "replayed": True},
+    )
+
+    assert submission.replayed is True
+    assert submission.batch_id == "batch-A"
+    assert submission.task_ids == ()
+    saved = submission.to_dict()
+    assert BatchSubmission.from_dict(saved) == submission
+    del saved["replayed"]
+    assert BatchSubmission.from_dict(saved) == replace(submission, replayed=False)
 
 
 @pytest.mark.asyncio

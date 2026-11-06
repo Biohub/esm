@@ -1159,7 +1159,8 @@ def test_cpu_fp32(tiny_esmfold2):
 
 # Resolves the repo itself rather than taking a weights fixture, so the
 # conftest auto-marking does not reach it.
-@pytest.mark.merge_only
+# TODO(fmilletari): contacts the HF Hub, so manual only; restore CI coverage offline or delete.
+@pytest.mark.manual
 @pytest.mark.parametrize(
     "repo,expected",
     [
