@@ -19,7 +19,7 @@ def test_auto_tokenizer_matches_ours(esmc_300m_dir, esmc_tokenizer):
     theirs = AutoTokenizer.from_pretrained(esmc_300m_dir)
     assert type(theirs).__module__.startswith("transformers.models.esmc")
     ours = esmc_tokenizer(MEDIUM_SEQUENCE)["input_ids"]
-    assert theirs(MEDIUM_SEQUENCE)["input_ids"] == ours
+    assert theirs(MEDIUM_SEQUENCE)["input_ids"] == ours  # ty: ignore[call-non-callable]
 
 
 def test_auto_model_matches_ours(esmc_300m_dir, esmc_300m, esmc_tokenizer):
