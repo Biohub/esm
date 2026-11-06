@@ -335,7 +335,7 @@ def test_full_depth_is_used_when_subsampling_is_off(
 # ---------------------------------------------------------------------------
 
 
-def test_gap_token_fills_chains_without_an_alignment(ccd_pickle):
+def test_gap_token_fills_chains_without_an_alignment(ccd_subset):
     """A chain with no MSA gets gaps everywhere except its own query row.
 
     ``MSA_GAP_TOKEN_ID`` has to be a real ``res_type`` index, because the model

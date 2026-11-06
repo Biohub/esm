@@ -146,8 +146,8 @@ def adapter(tiny_esmfold2) -> EsmFold2HFAdapter:
     return EsmFold2HFAdapter(UpstreamStub(tiny_esmfold2)).eval()
 
 
-@pytest.fixture(scope="session")
-def builder(ccd_pickle) -> ESMFold2InputBuilder:
+@pytest.fixture
+def builder(ccd_subset) -> ESMFold2InputBuilder:
     """The real input builder; constructing it loads the CCD dictionary."""
     return ESMFold2InputBuilder()
 

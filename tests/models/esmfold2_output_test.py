@@ -30,7 +30,7 @@ def _complex(*sequences):
     )
 
 
-def test_multi_component_ligand_returns_one_residue_per_component(ccd_pickle):
+def test_multi_component_ligand_returns_one_residue_per_component(ccd_subset):
     complex_ = _complex(
         ProteinInput(id="A", sequence="AG"), LigandInput(id="B", ccd=["NAG", "BMA"])
     )
@@ -41,7 +41,7 @@ def test_multi_component_ligand_returns_one_residue_per_component(ccd_pickle):
     assert complex_.atom_hetero[start:].all()
 
 
-def test_single_component_ligands_are_unchanged(ccd_pickle):
+def test_single_component_ligands_are_unchanged(ccd_subset):
     complex_ = _complex(
         ProteinInput(id="A", sequence="AG"),
         LigandInput(id="B", ccd=["HEM"]),
@@ -52,7 +52,7 @@ def test_single_component_ligands_are_unchanged(ccd_pickle):
     assert sizes[0] == 5 and sizes[1] == 4 and sizes[3] == 3
 
 
-def test_ligands_differing_after_first_component_are_distinct_entities(ccd_pickle):
+def test_ligands_differing_after_first_component_are_distinct_entities(ccd_subset):
     complex_ = _complex(
         LigandInput(id="A", ccd=["NAG", "NAG"]), LigandInput(id="B", ccd=["NAG", "BMA"])
     )

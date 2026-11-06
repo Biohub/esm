@@ -7,7 +7,7 @@ this runs in the fast tier and is what catches architecture drift.
 **Nothing in an ESMFold2 forward is deterministic given inputs.** Two sources,
 both live under ``eval()``:
 
-1. ``_init_pair_state`` draws a fresh ``trunc_normal_`` on every forward - the
+1. ``_init_pair_state`` draws a fresh truncated normal on every forward - the
    release architecture starts its parcae recurrence from noise by construction.
 2. ``_run_one_loop`` applies the per-loop LM dropout as
    ``F.dropout(..., training=True)`` with ``training`` hardcoded, and

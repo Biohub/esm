@@ -2,9 +2,8 @@
 
 Everything here runs on CPU against a tiny randomly-initialised model with
 synthetic LM states, so no PLM backbone and no published weights are needed.
-The one external artifact is the CCD pickle: ``prepare_esmfold2_input`` reads
-idealized conformers out of it for every residue, so a runner without
-``ESMCFOLD_CCD_PATH`` downloads ``biohub/ESMFold2:ccd.pkl`` once.
+``prepare_esmfold2_input`` reads idealized conformers out of the CCD for every
+residue; the ``ccd_subset`` fixture supplies the committed subset of it.
 
 Non-protein entities (C6) are covered by the featurizer's own
 ``prepare_input_test.py`` and the MSA path (C7) by the MSA suite; neither is
@@ -18,7 +17,6 @@ import torch.nn as nn
 
 from esm.models.esmc import EsmcModel
 from esm.models.esmfold2 import layers as _layers
-from esm.models.esmfold2.conformers import get_idealized_atom_pos
 from esm.models.esmfold2.layers import (
     ResIdxAsymIdSymIdEntityIdEncoding,
     compute_lm_hidden_states,
@@ -27,8 +25,6 @@ from esm.models.esmfold2.prepare_input import prepare_esmfold2_input
 from esm.models.esmfold2.processor import ESMFold2InputBuilder
 from esm.models.esmfold2.protein_utils import (
     OUTPUT_TO_PDB_FEATURE_KEYS,
-    PROTEIN_REF_POS,
-    PROTEIN_RESIDUE_TO_RES_TYPE,
     prepare_protein_features,
 )
 from esm.utils.structure.molecular_complex import (
@@ -122,13 +118,6 @@ FAST_PATH_OMITS = frozenset(
 MISMATCHED_KEYS = frozenset({"entity_id"})
 CCD_DEPENDENT_KEYS = frozenset({"ref_pos"})
 
-#: Why the ``ref_pos`` comparison below is the one thing in this file that can
-#: skip: the CCD pickle is an environment-provided data artifact, like a
-#: published checkpoint, and the fast path's table is pinned to one release of it.
-MISMATCHED_CCD = (
-    "KNOWN GAP: the loaded CCD is not the snapshot PROTEIN_REF_POS was frozen from"
-)
-
 C1_SEQUENCES = {
     "single_residue": "M",
     "all_canonical": "ACDEFGHIKLMNPQRSTVWY",
@@ -145,20 +134,8 @@ def full_pipeline_features(sequence: str) -> dict[str, torch.Tensor]:
     return batched(features)
 
 
-def ccd_matches_the_hardcoded_table() -> bool:
-    """Whether the loaded CCD is the snapshot ``PROTEIN_REF_POS`` was frozen from.
-
-    ``ESMCFOLD_CCD_PATH`` can point at any CCD release; the fast path's table
-    cannot follow it, because it is a literal.
-    """
-    probe = get_idealized_atom_pos(PROTEIN_RESIDUE_TO_RES_TYPE["ALA"], "CB")
-    return probe is not None and bool(
-        np.allclose(probe, PROTEIN_REF_POS["ALA"]["CB"], atol=0)
-    )
-
-
 @pytest.mark.parametrize("name", sorted(C1_SEQUENCES))
-def test_fast_path_matches_the_full_pipeline_on_every_shared_key(name, ccd_pickle):
+def test_fast_path_matches_the_full_pipeline_on_every_shared_key(name, ccd_subset):
     """The docstring claim ``prepare_protein_features`` makes, asserted.
 
     The whole tiny-model suite feeds the model through the fast path while
@@ -180,7 +157,7 @@ def test_fast_path_matches_the_full_pipeline_on_every_shared_key(name, ccd_pickl
         assert torch.equal(fast[key], full[key]), key
 
 
-def test_fast_path_omits_only_the_structure_supervision_keys(ccd_pickle):
+def test_fast_path_omits_only_the_structure_supervision_keys(ccd_subset):
     """Pin the gap between the two paths as a set, in both directions."""
     fast = prepare_protein_features(C1_SEQUENCES["tiny"])
     full = full_pipeline_features(C1_SEQUENCES["tiny"])
@@ -190,7 +167,7 @@ def test_fast_path_omits_only_the_structure_supervision_keys(ccd_pickle):
     assert len(fast) == 23
 
 
-def test_fast_path_entity_id_matches_the_pipeline(ccd_pickle):
+def test_fast_path_entity_id_matches_the_pipeline(ccd_subset):
     fast = prepare_protein_features(C1_SEQUENCES["tiny"])
     full = full_pipeline_features(C1_SEQUENCES["tiny"])
     assert torch.equal(fast["entity_id"], full["entity_id"])
@@ -211,21 +188,19 @@ def test_fast_path_input_ids_match_the_pipeline_for_unknown_residues():
     assert torch.equal(fast["input_ids"], full["input_ids"])
 
 
+@pytest.mark.xfail(
+    strict=True,
+    reason="PROTEIN_REF_POS was not frozen from ESMFOLD2_CCD_REVISION (ALA CB "
+    "differs by ~0.9 A), so the fast path and the pipeline hand the model "
+    "different geometry. Fix: regenerate protein_ref_pos from the pin.",
+)
 @pytest.mark.parametrize("name", sorted(C1_SEQUENCES))
-def test_fast_path_ref_pos_reproduces_the_ccd_conformers(name, ccd_pickle):
+def test_fast_path_ref_pos_reproduces_the_ccd_conformers(name, ccd_subset):
     """The fast path's literal conformer table must equal the CCD's.
 
-    Split out from the shared-key test because it is the one feature that
-    depends on an external data artifact rather than on code: the table is a
-    frozen copy of ``ESMFOLD2_CCD_REVISION``, so overriding
-    ``ESMCFOLD_CCD_PATH`` with a different release makes the two paths hand the
-    model different geometry. Regenerate with
-    ``python -m tests.regenerate_reference protein_ref_pos`` when the pin moves;
-    the guard below turns a stale table into a skip rather than a confusing
-    coordinate mismatch.
+    Both are frozen copies of ``ESMFOLD2_CCD_REVISION``; when the pin moves,
+    regenerate ``ccd_subset`` and ``protein_ref_pos`` together.
     """
-    if not ccd_matches_the_hardcoded_table():
-        pytest.skip(MISMATCHED_CCD)  # ty:ignore[too-many-positional-arguments]
     fast = prepare_protein_features(C1_SEQUENCES[name])
     full = full_pipeline_features(C1_SEQUENCES[name])
     assert torch.equal(fast["ref_pos"], full["ref_pos"])
@@ -257,7 +232,7 @@ assert set(EXPECTED_CHAIN_IDS) == set(ESMFOLD2_COMPLEX_NAMES)
 
 
 @pytest.mark.parametrize("name", ESMFOLD2_COMPLEX_NAMES)
-def test_complex_identity_tensors_take_the_hand_computed_values(name, ccd_pickle):
+def test_complex_identity_tensors_take_the_hand_computed_values(name, ccd_subset):
     """asym / sym / entity / residue_index / token_index for every complex.
 
     These five tensors are the entire multimer input contract: the relative
@@ -292,7 +267,7 @@ def test_complex_identity_tensors_take_the_hand_computed_values(name, ccd_pickle
     assert torch.equal(features["token_index"], torch.arange(sum(lengths)))
 
 
-def test_repeated_chains_share_an_entity_but_not_a_sym_id(ccd_pickle):
+def test_repeated_chains_share_an_entity_but_not_a_sym_id(ccd_subset):
     """The invariant behind the whole table, stated once without literals.
 
     A homomer whose copies collapsed to one sym_id would claim the two chains
@@ -524,7 +499,7 @@ def lm_hidden_states_for(recording_esmc, features, **kwargs):
     )
 
 
-def test_lm_shim_wraps_each_chain_in_bos_and_eos(recording_esmc, ccd_pickle):
+def test_lm_shim_wraps_each_chain_in_bos_and_eos(recording_esmc, ccd_subset):
     """``[BOS] c1 [EOS BOS] c2 [EOS BOS] c3 [EOS]``, asserted token by token.
 
     The layout is what makes ESMC read the input as three proteins rather than
@@ -565,7 +540,7 @@ def test_lm_shim_wraps_each_chain_in_bos_and_eos(recording_esmc, ccd_pickle):
     assert torch.isfinite(hidden).all()
 
 
-def test_lm_shim_gives_each_chain_its_own_sequence_id(recording_esmc, ccd_pickle):
+def test_lm_shim_gives_each_chain_its_own_sequence_id(recording_esmc, ccd_subset):
     """``sequence_id`` increments once per chain and covers every chain.
 
     Cross-checked against the ESMC suite's own multi-chain masking test: given
@@ -729,9 +704,8 @@ def test_garbage_in_atom_pad_rows_does_not_move_valid_outputs(
 DECODE_CHAINS = (CHAIN_A[:10], CHAIN_B[:8])
 
 
-@pytest.fixture(scope="module")
-def input_builder(ccd_pickle):
-    """Loads the CCD once for the whole module."""
+@pytest.fixture
+def input_builder(ccd_subset):
     return ESMFold2InputBuilder()
 
 

@@ -291,7 +291,7 @@ with open("1mht_pred.cif", "w") as f:
     f.write(result.complex.to_mmcif())
 ```
 
-> **AMD ROCm users:** use ROCm 6.4 or newer. `esm` requires PyTorch 2.11.
+> **AMD ROCm users:** use ROCm 6.4 or newer. `esm` requires PyTorch 2.11 or newer.
 
 ### Running ESMFold2 Through the Biohub Platform
 

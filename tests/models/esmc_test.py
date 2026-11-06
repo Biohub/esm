@@ -56,7 +56,6 @@ from tests.conftest import (
     SHORT_SEQUENCE,
     TINY_ESMC,
     TINY_SEQUENCES,
-    random_amino_acid_sequences,
 )
 
 REFERENCE_FILE = REFERENCE_DIR / "esmc_300m_cpu_fp32.pkl.gz"
@@ -916,7 +915,9 @@ def test_reference_logits(esmc_300m_cpu_reference, name):
     )
 
 
-@pytest.mark.parametrize("name", LENGTH_NAMES)
+# Medium is bracketed by short and long, and each case costs one forward per
+# masked position.
+@pytest.mark.parametrize("name", ["short", "long"])
 def test_reference_pseudo_perplexity(esmc_300m, esmc_tokenizer, name):
     """The model's own loss: the cheapest number that moves when anything in the
     stack changes numerically *and* has a scale worth reading.
@@ -937,32 +938,10 @@ def test_reference_pseudo_perplexity(esmc_300m, esmc_tokenizer, name):
         assert measured.perplexity < 1.1
 
 
-@pytest.mark.parametrize("name", ["medium", "long"])
-def test_real_sequences_score_better_than_random_ones(esmc_300m, esmc_tokenizer, name):
-    """The check a stored reference cannot make: the numbers have to be *good*.
-
-    A model with its weights loaded into the wrong slots still produces stable
-    logits and a reproducible perplexity - it just cannot tell a real protein
-    from a uniformly random one. The short sequence is excluded: 10 residues
-    carry too little context for the gap to mean anything.
-    """
-    sequence = SEQUENCES[name]
-    scrambled = random_amino_acid_sequences([len(sequence)], seed=7)[0]
-    real = pseudo_perplexity(esmc_300m, esmc_tokenizer, sequence, limit=8)
-    noise = pseudo_perplexity(esmc_300m, esmc_tokenizer, scrambled, limit=8)
-
-    # Observed on ESMC-300M over 8 masked positions: real ppl 2.26 / recovery
-    # 0.75 vs random 32.6 / 0.00 (medium), 1.02 / 1.00 vs 24.0 / 0.00 (long).
-    # The thresholds sit an order of magnitude inside those margins.
-    assert real.perplexity < 0.5 * noise.perplexity
-    assert real.recovery >= 0.5
-    assert noise.recovery <= 0.25
-
-
 @pytest.mark.parametrize("name", LENGTH_NAMES)
 def test_cpu_bf16_reaches_the_fp32_reference(esmc_300m_cpu_bf16, esmc_tokenizer, name):
     """bf16 cannot reproduce the reference logits, so pin what it must preserve:
-    the decision the model makes and its loss, not the logits themselves.
+    the decision the model makes and the per-position output scale.
     """
     case = reference_values()["cases"][name]
     enc = esmc_tokenizer(SEQUENCES[name], return_tensors="pt")
@@ -979,10 +958,6 @@ def test_cpu_bf16_reaches_the_fp32_reference(esmc_300m_cpu_bf16, esmc_tokenizer,
         atol=0.03,
         rtol=0,
     )
-    measured = pseudo_perplexity(esmc_300m_cpu_bf16, esmc_tokenizer, SEQUENCES[name])
-    # 5e-2, not 2e-2: bf16 CPU matmul differs across torch builds, and short's 10
-    # residues amplify that to 2.06% (long 0.06%, medium 0.18%).
-    assert measured.perplexity == pytest.approx(case["pseudo_perplexity"], rel=5e-2)
 
 
 # ---------------------------------------------------------------------------

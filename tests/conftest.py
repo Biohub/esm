@@ -1,12 +1,15 @@
 """Shared fixtures for the ESMC and ESMFold2 test suites.
 
 Tiny randomly-initialised models cover the structural contracts on CPU in
-milliseconds. Anything fetching from the Hub is marked ``merge_only`` and runs
-in the lane that has network; it warns when unreachable, and fails outright
+milliseconds, and the CCD comes from a committed subset. Anything fetching from
+the Hub is marked ``manual``; it warns when unreachable, and fails outright
 under ``ESM_TESTS_STRICT_ARTIFACTS``.
 """
 
+import functools
+import gzip
 import os
+import pickle
 import random
 import warnings
 from pathlib import Path
@@ -16,6 +19,7 @@ import pytest
 import torch
 
 REFERENCE_DIR = Path(__file__).parent / "reference"
+CCD_SUBSET_FILE = REFERENCE_DIR / "ccd_subset.pkl.gz"
 
 # Small enough to build instantly, wide enough that the head dim is sane. Every
 # field the architecture depends on is present: `from_dict` defaults none of them.
@@ -35,6 +39,13 @@ ESMFOLD2_EXPERIMENTAL_REPO = "biohub/ESMFold2-Experimental"
 #: ``PROTEIN_REF_POS`` is a frozen copy of this snapshot. Move both or neither,
 #: and never track ``main``: the release changes per-residue atom ordering.
 ESMFOLD2_CCD_REVISION = "69869f737beffec5294845ede23db5fc0b4f509e"
+#: Every CCD entry the suite reads, cut from ``ESMFOLD2_CCD_REVISION`` by
+#: ``regenerate_reference ccd_subset``: the full release is 417 MB and needs the Hub.
+CCD_SUBSET_CODES = (
+    *("ALA", "ARG", "ASN", "ASP", "CYS", "GLN", "GLU", "GLY", "HIS", "ILE"),
+    *("LEU", "LYS", "MET", "PHE", "PRO", "SER", "THR", "TRP", "TYR", "VAL"),
+    *("UNK", "NAG", "BMA", "HEM"),
+)
 # The ESMFold2 weights in the upstream transformers layout. A staging repo:
 # biohub/ESMFold2 has not been republished through their converter yet.
 ESMFOLD2_HF_PORT_REPO = "Rocketknight1/ESMFold2-merged-temp"
@@ -189,48 +200,15 @@ def _skip_if_unreachable(repo: str) -> str:
         artifact_unavailable(f"{repo} ({type(exc).__name__})")
 
 
-#: Fixtures that fetch from the Hub. Anything using one needs network, so it is
-#: marked ``merge_only`` below and runs in the lane that has it.
+#: Fixtures that fetch from the Hub. Anything using one contacts an external
+#: API, so it is marked ``manual`` below and never runs in CI.
 WEIGHTS_FIXTURES = frozenset(
-    {"ccd_pickle", "esmc_300m_dir", "esmfold2_dir", "esmfold2_experimental_dir"}
+    {"esmc_300m_dir", "esmfold2_dir", "esmfold2_experimental_dir"}
 )
 
 
-def resolve_ccd_path() -> str | None:
-    """The pinned CCD snapshot, or ``None`` when the runner cannot reach it.
-
-    Beats an ambient ``ESMCFOLD_CCD_PATH``, which named three different releases
-    across ``.bashrc``, ``.env`` and the old default - so how you launched pytest
-    decided the numbers. Ambient is the fallback only when the Hub is down.
-    """
-    from huggingface_hub import hf_hub_download
-    from huggingface_hub.errors import LocalEntryNotFoundError, OfflineModeIsEnabled
-    from requests.exceptions import ConnectionError as RequestsConnectionError
-    from requests.exceptions import Timeout
-
-    try:
-        return hf_hub_download(ESMFOLD2_REPO, "ccd.pkl", revision=ESMFOLD2_CCD_REVISION)
-    except (
-        LocalEntryNotFoundError,
-        OfflineModeIsEnabled,
-        RequestsConnectionError,
-        Timeout,
-    ):
-        return os.environ.get("ESMCFOLD_CCD_PATH") or None
-
-
-def pytest_configure(config):
-    """Point ``conformers.py`` at the pinned CCD before it is imported.
-
-    Not a fixture: ``conformers.py`` reads the variable at import time.
-    """
-    path = resolve_ccd_path()
-    if path:
-        os.environ["ESMCFOLD_CCD_PATH"] = path
-
-
 def pytest_collection_modifyitems(items):
-    """Mark every published-weight test ``merge_only``.
+    """Mark every published-weight test ``manual``.
 
     Derived from the fixture graph rather than written on each test, so a
     weights-backed test cannot be added without the marker.
@@ -240,7 +218,7 @@ def pytest_collection_modifyitems(items):
             # `gpu` already routes to its own job; a second marker would only
             # deselect it there.
             if not item.get_closest_marker("gpu"):
-                item.add_marker(pytest.mark.merge_only)
+                item.add_marker(pytest.mark.manual)
 
 
 @pytest.fixture(scope="session")
@@ -460,18 +438,41 @@ def esmfold2_complex_features(model, chains, seed: int = 0):
 # ---------------------------------------------------------------------------
 
 
-@pytest.fixture(scope="session")
-def ccd_pickle() -> str:
-    """The CCD pickle every non-protein featurization path needs.
+@functools.cache
+def _load_ccd_subset() -> dict:
+    with gzip.open(CCD_SUBSET_FILE, "rb") as f:
+        return pickle.load(f)
 
-    ``load_ccd`` reaches for this on its own, so depending on the fixture makes
-    that reach explicit. Was a cluster mount no CI runner has, which skipped 46
-    items silently.
+
+#: Per-component caches ``conformers`` fills from ``_CCD_MOLECULES``.
+_CCD_CACHES = (
+    "_CCD_CONFORMERS",
+    "_CCD_ATOM_CACHE",
+    "_CCD_BONDS_CACHE",
+    "_CCD_LEAVING_ATOMS_CACHE",
+    "_IDEALIZED_POS_CACHE",
+    "_LIGAND_IDEALIZED_POS_CACHE",
+)
+
+
+@functools.cache
+def _ccd_subset_caches() -> dict[str, dict]:
+    """Caches owned by the subset, so its results never mix with the full release's."""
+    return {name: {} for name in _CCD_CACHES}
+
+
+@pytest.fixture
+def ccd_subset(monkeypatch) -> None:
+    """Install the committed CCD subset, and its own caches, for one test.
+
+    Restored afterwards, so code outside this suite that shares the process
+    still loads the full release.
     """
-    path = resolve_ccd_path()
-    if not path or not Path(path).exists():
-        artifact_unavailable(f"{ESMFOLD2_REPO}:ccd.pkl at {ESMFOLD2_CCD_REVISION[:12]}")
-    return path
+    from esm.models.esmfold2 import conformers
+
+    monkeypatch.setattr(conformers, "_CCD_MOLECULES", _load_ccd_subset())
+    for name, cache in _ccd_subset_caches().items():
+        monkeypatch.setattr(conformers, name, cache)
 
 
 @pytest.fixture(scope="session")
@@ -542,6 +543,22 @@ def tiny_esmfold2(tiny_esmfold2_config):
 
     torch.manual_seed(0)
     model = EsmFold2Model(tiny_esmfold2_config).eval()
+    model.set_chunk_size(None)
+    return model
+
+
+@pytest.fixture
+def tiny_esmfold2_experimental(tiny_esmfold2_config):
+    """The experimental architecture at the tiny widths."""
+    from esm.models.esmfold2 import EsmFold2Config, EsmFold2ExperimentalModel
+
+    fields = {
+        k: v for k, v in tiny_esmfold2_config.to_dict().items() if k != "model_type"
+    }
+    torch.manual_seed(0)
+    model = EsmFold2ExperimentalModel(
+        EsmFold2Config(**{**fields, "type": "experimental"})
+    ).eval()
     model.set_chunk_size(None)
     return model
 

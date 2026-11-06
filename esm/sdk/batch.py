@@ -8,11 +8,16 @@ from esm.sdk.api import ESMProteinError
 
 @dataclass(frozen=True)
 class BatchSubmission:
-    """A durable handle; task IDs contain only identifiers returned by the server."""
+    """A durable handle; task IDs contain only identifiers returned by the server.
+
+    If ``replayed`` is true, check the existing batch's status; failed items were
+    not restarted.
+    """
 
     endpoint: str
     task_ids: tuple[str, ...] = ()
     batch_id: str | None = None
+    replayed: bool = False
 
     def __post_init__(self) -> None:
         if not self.batch_id and not self.task_ids:
@@ -36,6 +41,7 @@ class BatchSubmission:
             "endpoint": self.endpoint,
             "batch_id": self.batch_id,
             "task_ids": list(self.task_ids),
+            "replayed": self.replayed,
         }
 
     @classmethod
@@ -45,6 +51,7 @@ class BatchSubmission:
             endpoint=data["endpoint"],
             batch_id=data["batch_id"],
             task_ids=tuple(data["task_ids"]),
+            replayed=data.get("replayed") is True,
         )
 
 

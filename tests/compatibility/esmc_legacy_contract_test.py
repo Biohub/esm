@@ -124,7 +124,7 @@ def test_v3_readme_quickstart_runs_verbatim_on_the_published_esmc_300m(
     """The same block against the real checkpoint, on CPU.
 
     ``esmc_300m_dir`` is never read: it resolves the snapshot up front, which
-    skips an offline runner and earns the conftest's ``merge_only`` marker. The
+    skips an offline runner and earns the conftest's ``manual`` marker. The
     snippet's own ``# or "cpu"`` sanctions the one substitution.
     """
     namespace: dict = {}

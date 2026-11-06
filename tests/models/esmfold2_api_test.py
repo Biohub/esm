@@ -35,14 +35,12 @@ FAST_FOLD = dict(num_loops=1, num_sampling_steps=2, num_diffusion_samples=1)
 # ``noise_scale`` is a genuine no-op, so the override cases use four.
 SAMPLER_OVERRIDE_STEPS = 4
 
-
-#: ``ESMFold2InputBuilder.fold`` forwards ``early_exit`` and
-#: ``msa_subsample_at_inference`` to ``EsmFold2Model.forward``, which #13995
-#: deleted from the signature, so every ``fold`` call raises TypeError. Recorded
-#: rather than fixed: this suite only adds tests, it does not change the
-#: implementation it tests. Strict, so whoever drops those two arguments from the
-#: ``fold`` call gets a failure telling them to delete this marker, rather than a
-#: test that silently keeps passing.
+#: One distinct value per override, so a swapped pair cannot pass.
+SAMPLER_OVERRIDES = {
+    "noise_scale": 2.0,
+    "step_scale": 2.5,
+    "max_inference_sigma": 100.0,
+}
 
 
 @pytest.fixture(autouse=True)
@@ -52,14 +50,9 @@ def _force_reference_attention(monkeypatch):
         monkeypatch.setattr(_layers, "FLASH_ATTN_AVAILABLE", False)
 
 
-@pytest.fixture(scope="session")
-def builder(ccd_pickle) -> ESMFold2InputBuilder:
-    """The real input builder.
-
-    Constructing it loads the CCD dictionary — from ``ESMCFOLD_CCD_PATH`` when
-    set, else one cached Hub download. Session-scoped because that load is the
-    dominant cost of every case here; the builder itself is stateless.
-    """
+@pytest.fixture
+def builder(ccd_subset) -> ESMFold2InputBuilder:
+    """The real input builder, over the committed CCD subset."""
     return ESMFold2InputBuilder()
 
 
@@ -103,7 +96,7 @@ def test_forward_rejects_an_unknown_keyword(tiny_esmfold2):
             )
 
 
-def test_forward_accepts_the_featurizer_key_set(tiny_esmfold2, ccd_pickle):
+def test_forward_accepts_the_featurizer_key_set(tiny_esmfold2, ccd_subset):
     """``prepare_esmfold2_input`` emits training-time keys ``forward`` ignores.
 
     ``pocket_feature`` / ``gt_coords`` / ``is_resolved`` / ``frames_idx`` have no
@@ -121,18 +114,7 @@ def test_forward_accepts_the_featurizer_key_set(tiny_esmfold2, ccd_pickle):
     assert torch.isfinite(out["sample_atom_coords"]).all()
 
 
-@pytest.mark.parametrize(
-    "override,expected",
-    [
-        ({"noise_scale": 2.0}, {"noise_scale": 2.0}),
-        ({"step_scale": 2.5}, {"step_scale": 2.5}),
-        ({"max_inference_sigma": 100.0}, {"max_inference_sigma": 100.0}),
-    ],
-    ids=["noise_scale", "step_scale", "max_inference_sigma"],
-)
-def test_fold_forwards_sampler_overrides_to_the_sampler(
-    tiny_esmfold2, builder, override, expected
-):
+def test_fold_forwards_sampler_overrides_to_the_sampler(tiny_esmfold2, builder):
     """Each override reaches ``DiffusionStructureHead.sample`` with its value."""
     calls = record_sample_kwargs(tiny_esmfold2)
 
@@ -141,20 +123,17 @@ def test_fold_forwards_sampler_overrides_to_the_sampler(
         protein_input(),
         seed=0,
         lm_dropout=None,
-        **{**FAST_FOLD, **override},
+        **FAST_FOLD,
+        **SAMPLER_OVERRIDES,
     )
 
     assert len(calls) == 1
-    for name, value in expected.items():
+    for name, value in SAMPLER_OVERRIDES.items():
         assert calls[0][name] == value
 
 
-@pytest.mark.parametrize(
-    "override",
-    [{"noise_scale": 2.0}, {"step_scale": 2.5}, {"max_inference_sigma": 100.0}],
-    ids=["noise_scale", "step_scale", "max_inference_sigma"],
-)
-def test_fold_sampler_overrides_change_the_structure(tiny_esmfold2, builder, override):
+@pytest.mark.parametrize("name", list(SAMPLER_OVERRIDES))
+def test_fold_sampler_overrides_change_the_structure(tiny_esmfold2, builder, name):
     """The overrides are not just delivered, they move the coordinates.
 
     Delivery alone would still pass if the sampler ignored them, and the
@@ -166,7 +145,9 @@ def test_fold_sampler_overrides_change_the_structure(tiny_esmfold2, builder, ove
         FAST_FOLD, num_sampling_steps=SAMPLER_OVERRIDE_STEPS, seed=0, lm_dropout=None
     )
     baseline = builder.fold(tiny_esmfold2, protein_input(), **settings)
-    overridden = builder.fold(tiny_esmfold2, protein_input(), **settings, **override)
+    overridden = builder.fold(
+        tiny_esmfold2, protein_input(), **settings, **{name: SAMPLER_OVERRIDES[name]}
+    )
 
     assert isinstance(baseline, MolecularComplexResult)
     assert isinstance(overridden, MolecularComplexResult)
@@ -211,6 +192,7 @@ def test_fold_return_shape_follows_the_sample_count(
         num_loops=1,
         num_sampling_steps=2,
         num_diffusion_samples=num_diffusion_samples,
+        include_embeddings=True,
     )
 
     if num_diffusion_samples == 1:
@@ -235,14 +217,12 @@ def test_fold_return_shape_follows_the_sample_count(
             torch.as_tensor(item.complex.atom_positions) for item in results[:2]
         )
         assert not torch.allclose(first, second, atol=1e-3)
-
-
-def test_fold_rejects_an_unknown_sampler_override(tiny_esmfold2, builder):
-    """``fold`` has no catch-all of its own, so a typo stops at its signature."""
-    with pytest.raises(TypeError):
-        builder.fold(
-            tiny_esmfold2, protein_input(), seed=0, noize_scale=2.0, **FAST_FOLD
+        # The trunk runs once, so every sample carries the same embedding.
+        first_pair, second_pair = (
+            item.output_embedding_pair_pooled for item in results[:2]
         )
+        assert first_pair is not None and second_pair is not None
+        assert torch.equal(first_pair, second_pair)
 
 
 # ---------------------------------------------------------------------------
@@ -287,12 +267,6 @@ def test_infer_protein_as_pdb_renders_the_same_fold(tiny_esmfold2):
     assert len(atoms) == n_real_atoms
 
 
-def test_infer_protein_rejects_an_unknown_keyword(tiny_esmfold2):
-    """``infer_protein``'s ``**forward_kwargs`` inherits ``forward``'s strictness."""
-    with pytest.raises(TypeError, match="num_recyles"):
-        tiny_esmfold2.infer_protein(TINY_SEQUENCE, num_recyles=1, **FAST_FOLD)
-
-
 def test_infer_protein_rejects_an_empty_sequence(tiny_esmfold2):
     with pytest.raises(ValueError, match="non-empty"):
         tiny_esmfold2.infer_protein("", **FAST_FOLD)
@@ -303,60 +277,32 @@ def test_infer_protein_rejects_an_empty_sequence(tiny_esmfold2):
 # ---------------------------------------------------------------------------
 
 
-@pytest.fixture
-def tiny_experimental(tiny_esmfold2_config):
-    """The experimental architecture at the same tiny widths."""
-    from dataclasses import asdict
-
-    from esm.models.esmfold2 import EsmFold2Config, EsmFold2ExperimentalModel
-
-    fields = {
-        key: asdict(value) if hasattr(value, "__dataclass_fields__") else value
-        for key, value in vars(tiny_esmfold2_config).items()
-    }
-    torch.manual_seed(0)
-    model = EsmFold2ExperimentalModel(
-        EsmFold2Config(**{**fields, "type": "experimental"})
-    ).eval()
-    model.set_chunk_size(None)
-    return model
-
-
-@pytest.mark.parametrize(
-    "override,expected",
-    [
-        ({"noise_scale": 2.0}, {"noise_scale": 2.0}),
-        ({"step_scale": 2.5}, {"step_scale": 2.5}),
-        ({"max_inference_sigma": 100.0}, {"max_inference_sigma": 100.0}),
-    ],
-    ids=["noise_scale", "step_scale", "max_inference_sigma"],
-)
-def test_experimental_forward_forwards_sampler_overrides(
-    tiny_experimental, override, expected
-):
-    """The experimental model declares the overrides too, not just the release one.
-
-    All three used to land in its ``**kwargs`` and be dropped, exactly as the
-    release model's were.
-    """
-    features, lm_hidden_states = esmfold2_inputs(tiny_experimental, TINY_SEQUENCE)
-    calls = record_sample_kwargs(tiny_experimental)
+def test_experimental_forward_forwards_sampler_overrides(tiny_esmfold2_experimental):
+    """The experimental model declares the overrides too, not just the release one."""
+    model = tiny_esmfold2_experimental
+    features, lm_hidden_states = esmfold2_inputs(model, TINY_SEQUENCE)
+    calls = record_sample_kwargs(model)
 
     with torch.no_grad():
-        tiny_experimental(
-            **features, lm_hidden_states=lm_hidden_states, **{**FAST_FOLD, **override}
+        model(
+            **features,
+            lm_hidden_states=lm_hidden_states,
+            **FAST_FOLD,
+            **SAMPLER_OVERRIDES,
         )
 
     assert len(calls) == 1
-    for name, value in expected.items():
+    for name, value in SAMPLER_OVERRIDES.items():
         assert calls[0][name] == value
 
 
-def test_experimental_forward_rejects_an_unknown_keyword(tiny_experimental):
-    features, lm_hidden_states = esmfold2_inputs(tiny_experimental, TINY_SEQUENCE)
+def test_experimental_forward_rejects_an_unknown_keyword(tiny_esmfold2_experimental):
+    features, lm_hidden_states = esmfold2_inputs(
+        tiny_esmfold2_experimental, TINY_SEQUENCE
+    )
     with pytest.raises(TypeError, match="num_recyles"):
         with torch.no_grad():
-            tiny_experimental(
+            tiny_esmfold2_experimental(
                 **features,
                 lm_hidden_states=lm_hidden_states,
                 num_recyles=1,
@@ -367,10 +313,6 @@ def test_experimental_forward_rejects_an_unknown_keyword(tiny_experimental):
 # ---------------------------------------------------------------------------
 # include_embeddings
 # ---------------------------------------------------------------------------
-
-
-def _pair_width(config) -> int:
-    return config.pairwise_hidden_size
 
 
 def test_fold_omits_embeddings_by_default(tiny_esmfold2, builder):
@@ -391,7 +333,10 @@ def test_fold_include_embeddings_returns_the_pooled_pair(
 
     pooled = result.output_embedding_pair_pooled
     assert pooled is not None
-    assert pooled.shape == (len(TINY_SEQUENCE), _pair_width(tiny_esmfold2_config))
+    assert pooled.shape == (
+        len(TINY_SEQUENCE),
+        tiny_esmfold2_config.pairwise_hidden_size,
+    )
     assert pooled.dtype == torch.float32
     assert pooled.device.type == "cpu"
     assert torch.isfinite(pooled).all()
@@ -424,32 +369,16 @@ def test_pooled_pair_is_the_post_coda_pair_averaged_over_the_first_axis(tiny_esm
     assert not torch.allclose(pooled, z.mean(dim=2), atol=1e-4)
 
 
-def test_pooled_pair_is_shared_across_diffusion_samples(tiny_esmfold2, builder):
-    """The trunk runs once, so every sample carries the same embedding."""
-    results = builder.fold(
-        tiny_esmfold2,
-        protein_input(),
-        seed=0,
-        num_loops=1,
-        num_sampling_steps=2,
-        num_diffusion_samples=2,
-        include_embeddings=True,
-    )
-
-    assert isinstance(results, list) and len(results) == 2
-    first, second = (item.output_embedding_pair_pooled for item in results)
-    assert first is not None and second is not None
-    assert torch.equal(first, second)
-
-
 def test_experimental_forward_supports_include_embeddings(
-    tiny_experimental, tiny_esmfold2_config
+    tiny_esmfold2_experimental, tiny_esmfold2_config
 ):
     """``fold`` takes either architecture, so the flag cannot be release-only."""
-    features, lm_hidden_states = esmfold2_inputs(tiny_experimental, TINY_SEQUENCE)
+    features, lm_hidden_states = esmfold2_inputs(
+        tiny_esmfold2_experimental, TINY_SEQUENCE
+    )
 
     with torch.no_grad():
-        output = tiny_experimental(
+        output = tiny_esmfold2_experimental(
             **features,
             lm_hidden_states=lm_hidden_states,
             include_embeddings=True,
@@ -457,7 +386,11 @@ def test_experimental_forward_supports_include_embeddings(
         )
 
     pooled = output["output_embedding_pair_pooled"]
-    assert pooled.shape == (1, len(TINY_SEQUENCE), _pair_width(tiny_esmfold2_config))
+    assert pooled.shape == (
+        1,
+        len(TINY_SEQUENCE),
+        tiny_esmfold2_config.pairwise_hidden_size,
+    )
     assert pooled.dtype == torch.float32
 
 

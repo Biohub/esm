@@ -312,12 +312,19 @@ class _BaseForgeBatchClient(_BaseForgeInferenceClient):
         self.transfer_timeout = transfer_timeout
 
     def submit(
-        self, endpoint: str, payload: list[dict[str, Any]], disable_cache: bool = False
+        self,
+        endpoint: str,
+        payload: list[dict[str, Any]],
+        disable_cache: bool = False,
+        submission_id: str | None = None,
     ) -> BatchSubmission:
+        request = {"endpoint": endpoint, "payload": payload}
+        if submission_id is not None:
+            request["submission_id"] = submission_id
         try:
             response_data = self._post(
                 "batch/submit",
-                {"endpoint": endpoint, "payload": payload},
+                request,
                 disable_cache=disable_cache,
                 timeout=self.transfer_timeout,
             )
@@ -326,12 +333,19 @@ class _BaseForgeBatchClient(_BaseForgeInferenceClient):
         return self._submission_response(endpoint, len(payload), response_data)
 
     async def async_submit(
-        self, endpoint: str, payload: list[dict[str, Any]], disable_cache: bool = False
+        self,
+        endpoint: str,
+        payload: list[dict[str, Any]],
+        disable_cache: bool = False,
+        submission_id: str | None = None,
     ) -> BatchSubmission:
+        request = {"endpoint": endpoint, "payload": payload}
+        if submission_id is not None:
+            request["submission_id"] = submission_id
         try:
             response_data = await self._async_post(
                 "batch/submit",
-                {"endpoint": endpoint, "payload": payload},
+                request,
                 disable_cache=disable_cache,
                 timeout=self.transfer_timeout,
             )
@@ -355,9 +369,14 @@ class _BaseForgeBatchClient(_BaseForgeInferenceClient):
                 endpoint=endpoint,
                 batch_id=batch_id if valid_batch_id else None,
                 task_ids=(task_id,),
+                replayed=data.get("replayed") is True,
             )
         elif valid_batch_id:
-            submission = BatchSubmission(endpoint=endpoint, batch_id=batch_id)
+            submission = BatchSubmission(
+                endpoint=endpoint,
+                batch_id=batch_id,
+                replayed=data.get("replayed") is True,
+            )
 
         # Legacy support
         if (
@@ -1030,6 +1049,7 @@ class EndpointHandler(ABC, Generic[TRequest, TResponse]):
         *,
         model_name: str | None = None,
         disable_cache: bool = False,
+        submission_id: str | None = None,
         **kwargs: Any,
     ) -> BatchSubmission:
         """Submit one task from request fields as keywords, or an iterable of requests.
@@ -1038,10 +1058,15 @@ class EndpointHandler(ABC, Generic[TRequest, TResponse]):
         Iterables, including generators, are materialized before validation.
         With ``requests``, only ``config`` supplies a default for requests whose
         config is ``None``. Other inputs must be set on each request.
+
+        Supply a lowercase UUIDv4 as ``submission_id`` for submission replay.
         """
         payloads = self._prepare_requests(requests, kwargs, model_name=model_name)
         return self._batch_client.submit(
-            self.endpoint_name, payloads, disable_cache=disable_cache
+            self.endpoint_name,
+            payloads,
+            disable_cache=disable_cache,
+            submission_id=submission_id,
         )
 
     async def async_submit(
@@ -1050,11 +1075,15 @@ class EndpointHandler(ABC, Generic[TRequest, TResponse]):
         *,
         model_name: str | None = None,
         disable_cache: bool = False,
+        submission_id: str | None = None,
         **kwargs: Any,
     ) -> BatchSubmission:
         payloads = self._prepare_requests(requests, kwargs, model_name=model_name)
         return await self._batch_client.async_submit(
-            self.endpoint_name, payloads, disable_cache=disable_cache
+            self.endpoint_name,
+            payloads,
+            disable_cache=disable_cache,
+            submission_id=submission_id,
         )
 
     def _check_submission(self, submission: BatchSubmission) -> None:
