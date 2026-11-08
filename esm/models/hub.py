@@ -23,16 +23,6 @@ _SAFETENSORS_INDEX = "model.safetensors.index.json"
 _SAFETENSORS_SINGLE = "model.safetensors"
 
 
-def drop_te_extra_state(
-    module: nn.Module, state_dict: dict, prefix: str, local_metadata: dict
-) -> None:
-    """Strip Transformer Engine's non-tensor ``_extra_state`` entries; TE returns
-    these as ``io.BytesIO`` objects the checkpoint writer cannot dtype-infer."""
-    for key in list(state_dict):
-        if key.endswith("_extra_state"):
-            del state_dict[key]
-
-
 def read_safetensors_dir(directory: str | os.PathLike) -> dict[str, torch.Tensor]:
     """Read a (possibly sharded) safetensors checkpoint into a single dict."""
     directory = Path(directory)
@@ -140,7 +130,7 @@ class HubPreTrainedModel(nn.Module):
 
         Runs before any key accounting, so a family whose in-memory parameters
         are packed differently from its published ones (ESMC fuses q/k/v and
-        gate/up for Transformer Engine) is still held to the same
+        gate/up) is still held to the same
         nothing-dropped guarantee. The default is the identity.
         """
         return raw

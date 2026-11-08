@@ -73,7 +73,8 @@ class PocketConditioning:
 @dataclass
 class CovalentBond:
     """``res_idx`` and ``atom_idx`` are 0-based. Use care when working with PDB
-    files residue numbers that are 1-based.
+    files residue numbers that are 1-based. ``atom_idx`` counts the residue's heavy
+    atoms without CCD leaving atoms (a polymer's last modified residue keeps them).
     """
 
     chain_id1: str
@@ -300,9 +301,10 @@ def deserialize_structure_prediction_input(
             for b in bonds_blk
         ]
 
-    return StructurePredictionInput(
+    result = StructurePredictionInput(
         sequences=sequences,
         pocket=pocket,
         distogram_conditioning=distogram_conditioning,
         covalent_bonds=covalent_bonds,
     )
+    return result

@@ -11,14 +11,15 @@ from tenacity import (
 )
 
 from esm.sdk.api import ESMProteinError
+from esm.sdk.batch import BatchError
 
 skip_retries_var = ContextVar("skip_retries", default=False)
 
 
-def retry_if_specific_error(exception):
-    """
-    We only retry on specific errors.
-    """
+def retry_if_specific_error(exception: object) -> bool:
+    """Retry transient request errors"""
+    if isinstance(exception, BatchError) and exception.task_status is not None:
+        return False
     return isinstance(exception, ESMProteinError) and exception.error_code in {
         429,  # Too Many Requests
         500,  # Internal Server Error

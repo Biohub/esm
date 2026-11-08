@@ -7,11 +7,13 @@ from esm.models.esmfold2.prepare_input import (
     _entity_key,
     build_chains_from_input,
     compute_token_bonds,
+    prepare_esmfold2_input,
 )
 from esm.models.esmfold2.types import (
     CovalentBond,
     LigandInput,
     Modification,
+    PocketConditioning,
     ProteinInput,
     StructurePredictionInput,
 )
@@ -106,6 +108,32 @@ def test_build_chains_numbers_copies_across_both_id_forms():
     assert [c.sym_id for c in chains] == [0, 1, 2]
 
 
+def test_pocket_conditioning_raises_not_implemented():
+    """``pocket`` must fail loudly, not fold unconditioned.
+
+    No released checkpoint consumes pocket features, so the featurizer rejects
+    the input rather than emitting the all-zeros ``pocket_feature`` that
+    ``forward`` would then drop.
+    """
+    spi = StructurePredictionInput(
+        sequences=[ProteinInput(id="A", sequence="MKT")],
+        pocket=PocketConditioning(binder_chain_id="A", contacts=[("A", 0)]),
+    )
+
+    with pytest.raises(NotImplementedError, match="pocket conditioning"):
+        prepare_esmfold2_input(spi)
+
+
+def test_pocket_unset_still_emits_zero_pocket_feature(ccd_subset):
+    """The happy path is untouched: no ``pocket`` means no raise."""
+    spi = StructurePredictionInput(sequences=[ProteinInput(id="A", sequence="MKT")])
+
+    features, _ = prepare_esmfold2_input(spi)
+
+    assert "pocket_feature" in features
+    assert not features["pocket_feature"].any()
+
+
 def _covalent_bond_input(bonds: list[CovalentBond] | None) -> StructurePredictionInput:
     """Protein with a lysine at residue 3 plus an ethanol ligand.
 
@@ -121,7 +149,7 @@ def _covalent_bond_input(bonds: list[CovalentBond] | None) -> StructurePredictio
     )
 
 
-def test_valid_covalent_bond_is_added_to_token_bonds(ccd_pickle):
+def test_valid_covalent_bond_is_added_to_token_bonds(ccd_subset):
     """A resolvable bond must reach the matrix, on the LYS NZ token pair."""
     plain = _covalent_bond_input(None)
     chains, tokens, atoms = build_chains_from_input(plain, seed=0)
@@ -153,7 +181,7 @@ def test_valid_covalent_bond_is_added_to_token_bonds(ccd_pickle):
     assert token_bonds[ligand_token, nz_token, 0] != 0
 
 
-def test_covalent_bond_with_unknown_chain_id_raises(ccd_pickle):
+def test_covalent_bond_with_unknown_chain_id_raises(ccd_subset):
     """A chain id that does not exist must not be silently dropped."""
     spi = _covalent_bond_input(
         [
@@ -172,7 +200,7 @@ def test_covalent_bond_with_unknown_chain_id_raises(ccd_pickle):
         compute_token_bonds(tokens, atoms, spi, chains)
 
 
-def test_covalent_bond_with_out_of_range_residue_index_raises(ccd_pickle):
+def test_covalent_bond_with_out_of_range_residue_index_raises(ccd_subset):
     """A complex-wide residue index must not be silently dropped."""
     spi = _covalent_bond_input(
         [
@@ -193,7 +221,7 @@ def test_covalent_bond_with_out_of_range_residue_index_raises(ccd_pickle):
         compute_token_bonds(tokens, atoms, spi, chains)
 
 
-def test_covalent_bond_with_out_of_range_atom_index_raises(ccd_pickle):
+def test_covalent_bond_with_out_of_range_atom_index_raises(ccd_subset):
     """A 1-based atom index must not be silently dropped (LYS has 9 atoms, 0-8)."""
     spi = _covalent_bond_input(
         [

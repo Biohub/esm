@@ -17,11 +17,17 @@ import sys
 from pathlib import Path
 
 import torch
+from huggingface_hub import hf_hub_download
+from rdkit import Chem
 
 from esm.models.esmc import EsmcForMaskedLM, EsmcTokenizer
 from tests.conftest import (
+    CCD_SUBSET_CODES,
+    CCD_SUBSET_FILE,
     ESMC_300M_REPO,
     ESMC_300M_STAGED_DIR,
+    ESMFOLD2_CCD_REVISION,
+    ESMFOLD2_REPO,
     ESMFOLD2_SEQUENCES,
     REFERENCE_DIR,
     SEQUENCES,
@@ -147,7 +153,66 @@ def esmfold2_tiny() -> None:
     )
 
 
-REGENERATORS = {"esmc": esmc_300m, "esmfold2": esmfold2_tiny}
+def protein_ref_pos() -> None:
+    """Rewrite ``PROTEIN_REF_POS`` from the pinned CCD release.
+
+    The table is the fast path's literal copy of the CCD conformers, so it is
+    only correct for one release. Run this whenever ``ESMFOLD2_CCD_REVISION``
+    moves, then re-run ``esmfold2_inputs_test.py``: the fast-path parity tests
+    are what prove the two paths still agree.
+    """
+    from esm.models.esmfold2.conformers import get_idealized_atom_pos
+    from esm.models.esmfold2.protein_utils import (
+        PROTEIN_HEAVY_ATOMS,
+        PROTEIN_RESIDUE_TO_RES_TYPE,
+        PROTEIN_UNK_RES_TYPE,
+    )
+
+    header = "PROTEIN_REF_POS: dict[str, dict[str, tuple[float, float, float]]] = {"
+    lines = [header]
+    for res_3, atom_names in PROTEIN_HEAVY_ATOMS.items():
+        lines.append(f'    "{res_3}": {{')
+        # ``.get`` with the UNK fallback mirrors ``prepare_protein_features``:
+        # UNK is in PROTEIN_HEAVY_ATOMS but not in the residue->res_type map.
+        res_type = PROTEIN_RESIDUE_TO_RES_TYPE.get(res_3, PROTEIN_UNK_RES_TYPE)
+        for name in atom_names:
+            pos = get_idealized_atom_pos(res_type, name)
+            if pos is None:
+                raise RuntimeError(f"{res_3}:{name} missing from the loaded CCD")
+            x, y, z = (float(v) for v in pos)
+            lines.append(f'        "{name}": ({x}, {y}, {z}),')
+        lines.append("    },")
+    lines.append("}")
+
+    source = Path("esm/models/esmfold2/protein_utils.py")
+    text = source.read_text()
+    start = text.index(header)
+    end = text.index("\n}\n", start) + len("\n}")
+    source.write_text(text[:start] + "\n".join(lines) + text[end:])
+    print(f"rewrote PROTEIN_REF_POS in {source}")
+
+
+def ccd_subset() -> None:
+    """Rewrite the CCD subset the tests load, from the pinned full release."""
+    full_path = hf_hub_download(
+        ESMFOLD2_REPO, "ccd.pkl", revision=ESMFOLD2_CCD_REVISION
+    )
+    with open(full_path, "rb") as f:
+        full = pickle.load(f)
+    # RDKit drops atom/conformer properties from pickles by default; the
+    # conformer lookup reads them.
+    Chem.SetDefaultPickleProperties(Chem.PropertyPickleOptions.AllProps)
+    with gzip.open(CCD_SUBSET_FILE, "wb") as f:
+        pickle.dump({code: full[code] for code in CCD_SUBSET_CODES}, f)
+    print(f"wrote {len(CCD_SUBSET_CODES)} CCD entries to {CCD_SUBSET_FILE}")
+
+
+REGENERATORS = {
+    "ccd_subset": ccd_subset,
+    "esmc": esmc_300m,
+    "esmfold2": esmfold2_tiny,
+    "protein_ref_pos": protein_ref_pos,
+}
 
 
 def main() -> None:

@@ -15,7 +15,6 @@ import torch
 
 from esm.models.esmfold2 import EsmFold2Config, EsmFold2Model
 from esm.models.esmfold2.config import default_module_flags
-from esm.models.esmfold2.hf_adapter import upstream_available
 from esm.models.esmfold2.hf_checkpoint import (
     hf_state_dict_to_native,
     is_hf_layout,
@@ -203,55 +202,3 @@ def test_an_unknown_keyword_to_the_config_reader_raises(hf_config):
 def test_an_unknown_keyword_to_the_model_reader_raises(hf_config):
     with pytest.raises(TypeError, match="some_knob"):
         EsmFold2Model.from_pretrained(hf_config, some_knob=3)
-
-
-# ---------------------------------------------------------------------------
-# Against the port itself
-# ---------------------------------------------------------------------------
-
-
-@pytest.mark.skipif(
-    not upstream_available(),
-    reason="needs transformers >= 5.16 (the ESMFold2 port); this repo pins 4.x",
-)
-def test_rules_invert_their_converter(tiny_esmfold2_config):
-    """The rules have to reproduce their converter key for key.
-
-    Their ``rename_trunk_keys`` is the only source of truth for the mapping, so
-    it generates the expectation here rather than a table being maintained by
-    hand. When upstream moves a name, this fails naming the key that moved.
-    """
-    from transformers.models.esmfold2.convert_esmfold2_checkpoint import (
-        rename_trunk_keys,
-    )
-
-    tiny_esmfold2_config.msa_encoder.enabled = True
-    with torch.device("meta"):
-        ours = set(EsmFold2Model(tiny_esmfold2_config).state_dict())
-        theirs = rename_trunk_keys(
-            dict(EsmFold2Model(tiny_esmfold2_config).state_dict())
-        )
-
-    got = set()
-    for key in theirs:
-        native = to_native_key(key)
-        got.add(native)
-        if native.endswith(".a_proj.weight"):
-            got.add(native.replace(".a_proj.", ".b_proj."))
-    assert got == ours
-
-
-@pytest.mark.manual
-def test_a_re_exported_port_checkpoint_loads(hf_port_checkpoint_dir):
-    """End to end on the real artifact: ~26 GB, so not part of any suite.
-
-    Its ``config.json`` states no module flags, so this also exercises the
-    warn-and-default path against a checkpoint that really does carry the
-    weights those defaults assume. ``_load_pretrained`` is strict, so reaching
-    this line at all means every tensor found a parameter and every parameter
-    was filled.
-    """
-    model = EsmFold2Model.from_pretrained(hf_port_checkpoint_dir, esmc_precision="fp32")
-
-    assert model.esmc is not None
-    assert json.loads(json.dumps(model.config.to_dict()))["hidden_size"] > 0

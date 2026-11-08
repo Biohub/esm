@@ -12,14 +12,11 @@ re-implemented in Triton.
 
 from __future__ import annotations
 
-import os
 import warnings
 
 warnings.filterwarnings("ignore", category=FutureWarning)
 warnings.filterwarnings("ignore", category=UserWarning)
 warnings.filterwarnings("ignore", category=DeprecationWarning)
-os.environ.setdefault("CUEQ_DEFAULT_CONFIG", "1")
-os.environ.setdefault("CUEQ_DISABLE_AOT_TUNING", "1")
 
 import torch
 import triton

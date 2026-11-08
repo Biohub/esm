@@ -11,14 +11,11 @@ attention itself to ``torch.nn.functional.scaled_dot_product_attention``.
 
 # ruff: noqa: E402
 
-import os
 import warnings
 
 warnings.filterwarnings("ignore", category=FutureWarning)
 warnings.filterwarnings("ignore", category=UserWarning)
 warnings.filterwarnings("ignore", category=DeprecationWarning)
-os.environ.setdefault("CUEQ_DEFAULT_CONFIG", "1")
-os.environ.setdefault("CUEQ_DISABLE_AOT_TUNING", "1")
 
 import torch
 import triton
@@ -87,10 +84,12 @@ def _pair_bias_kernel(
     mask_k = offs_k < K
     mask_h = offs_h < NUM_HEADS
 
+    # int64 before the scale, not after. Each term is added to the pointer on
+    # its own, so b*Q*K*DIM_Z wraps at 5 diffusion samples of 1,449 tokens and
+    # q*K*DIM_Z wraps at 2,897 tokens. In-tile offsets stay int32.
     z_full_ptrs = (
         z_ptr
-        + pid_b * Q * K * DIM_Z
-        + pid_q * K * DIM_Z
+        + (pid_b.to(tl.int64) * Q + pid_q) * K * DIM_Z
         + offs_k[:, None] * DIM_Z
         + offs_z_full[None, :]
     )
@@ -109,9 +108,9 @@ def _pair_bias_kernel(
     # head-blocks have the same value so this avoids racy duplicate writes.
     if SAVE_STATS:
         if pid_hblk == 0:
-            stats_ptrs = mean_ptr + pid_b * Q * K + pid_q * K + offs_k
+            stats_ptrs = mean_ptr + (pid_b.to(tl.int64) * Q + pid_q) * K + offs_k
             tl.store(stats_ptrs, mean, mask=mask_k)
-            stats_ptrs2 = rstd_ptr + pid_b * Q * K + pid_q * K + offs_k
+            stats_ptrs2 = rstd_ptr + (pid_b.to(tl.int64) * Q + pid_q) * K + offs_k
             tl.store(stats_ptrs2, rstd, mask=mask_k)
 
     acc = tl.zeros([TILE_K, HEADS_PER_BLK], dtype=tl.float32)
@@ -122,8 +121,7 @@ def _pair_bias_kernel(
 
         z_slice_ptrs = (
             z_ptr
-            + pid_b * Q * K * DIM_Z
-            + pid_q * K * DIM_Z
+            + (pid_b.to(tl.int64) * Q + pid_q) * K * DIM_Z
             + offs_k[:, None] * DIM_Z
             + offs_c[None, :]
         )
@@ -155,9 +153,7 @@ def _pair_bias_kernel(
 
     out_ptrs = (
         out_ptr
-        + pid_b * NUM_HEADS * Q * K
-        + offs_h[None, :] * Q * K
-        + pid_q * K
+        + ((pid_b.to(tl.int64) * NUM_HEADS + offs_h[None, :]) * Q + pid_q) * K
         + offs_k[:, None]
     )
     tl.store(
@@ -229,18 +225,18 @@ def _pair_bias_backward_kernel(
     mask_z = offs_z < DIM_Z
     mask_h = offs_h < NUM_HEADS
 
+    # int64 before the scale, same as the forward kernel.
     z_ptrs = (
         z_ptr
-        + pid_b * Q * K * DIM_Z
-        + pid_q * K * DIM_Z
+        + (pid_b.to(tl.int64) * Q + pid_q) * K * DIM_Z
         + offs_k[:, None] * DIM_Z
         + offs_z[None, :]
     )
     z = tl.load(z_ptrs, mask=mask_k[:, None] & mask_z[None, :], other=0.0).to(
         tl.float32
     )
-    mean_ptrs = mean_ptr + pid_b * Q * K + pid_q * K + offs_k
-    rstd_ptrs = rstd_ptr + pid_b * Q * K + pid_q * K + offs_k
+    mean_ptrs = mean_ptr + (pid_b.to(tl.int64) * Q + pid_q) * K + offs_k
+    rstd_ptrs = rstd_ptr + (pid_b.to(tl.int64) * Q + pid_q) * K + offs_k
     mean = tl.load(mean_ptrs, mask=mask_k, other=0.0)
     rstd = tl.load(rstd_ptrs, mask=mask_k, other=0.0)
 
@@ -259,9 +255,7 @@ def _pair_bias_backward_kernel(
 
     d_bias_ptrs = (
         d_bias_ptr
-        + pid_b * NUM_HEADS * Q * K
-        + offs_h[None, :] * Q * K
-        + pid_q * K
+        + ((pid_b.to(tl.int64) * NUM_HEADS + offs_h[None, :]) * Q + pid_q) * K
         + offs_k[:, None]
     )
     d_bias = tl.load(d_bias_ptrs, mask=mask_k[:, None] & mask_h[None, :], other=0.0).to(
@@ -298,8 +292,7 @@ def _pair_bias_backward_kernel(
 
     d_z_ptrs = (
         d_z_ptr
-        + pid_b * Q * K * DIM_Z
-        + pid_q * K * DIM_Z
+        + (pid_b.to(tl.int64) * Q + pid_q) * K * DIM_Z
         + offs_k[:, None] * DIM_Z
         + offs_z[None, :]
     )

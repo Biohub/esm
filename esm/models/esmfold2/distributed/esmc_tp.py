@@ -21,109 +21,109 @@
 
 """Tensor-parallel ESM-C over the CP ranks (inference-only).
 
-The replicated ESM-C 6B forward is the dominant per-rank floor (T0 re-hook:
-~19.8 GB live, identical on every rank). Tensor parallelism shards its weights
-AND intra-block activations across the CP ranks.
+The replicated ESM-C 6B forward is the dominant per-rank floor (~19.8 GB live,
+identical on every rank). This module shards its SwiGLU MLP, ~67% of ESM-C's
+params, across the CP ranks.
 
-**Phase 1 (this module): the SwiGLU MLP** — ~67% of ESM-C's params. Each
-``UnifiedTransformerBlock.ffn`` is a Transformer Engine ``LayerNormMLP``; TE has
-native TP (``set_parallel_mode=True`` → column-parallel fc1 with the SwiGLU
-gate/up split handled internally + row-parallel fc2 + an internal all-reduce), so
-the wrap is: construct a TP ``LayerNormMLP`` over the CP process group and copy the
-full weights in sharded. The MLP's ``ffn_hidden`` (6912) divides 4/9/16, so this
-works at every CP grid (unlike head-parallel attention, blocked by n_heads=40).
+fc1 is column-parallel: each rank keeps its slice of both gate and up. fc2 is
+row-parallel: each rank keeps the matching input columns. One all-reduce after
+fc2 restores the full, replicated block output. ``ffn_hidden`` (6912) divides
+4/9/16, so this works at every CP grid.
 
-Validated bit-exact (modulo bf16 rounding) under ``torch.inference_mode`` — the
-column/row shard + internal all-reduce reproduce the serial output; the ESM-C
-forward already runs under the model's ``@torch.inference_mode`` so TE-TP (plain
-sharded matmuls + NCCL, no autograd hooks) is inference-safe.
-
-Attention TP (qkv column + out_proj row + the full-width QK-LayerNorm all-reduce,
-constrained to TP=4 by the 40 heads) is a later phase — see ``fix_9x_ESMC_TP.md``.
+Attention TP (blocked to TP=4 by n_heads=40) is not implemented.
 """
 
 import torch
+import torch.distributed as dist
 import torch.nn as nn
+from torch import Tensor
+
+from esm.models.esmc.layers import EsmcLayerNormMLP
+from esm.models.esmfold2.fp8 import Fp8LayerNormMLP, Fp8Linear
 
 
-def _tp_layernorm_mlp(old, tp_group, tp_size: int, rank: int):
-    """Build a TE LayerNormMLP TP-shard of ``old`` (a serial te.LayerNormMLP),
-    holding only this rank's slice. Bit-exact (bf16) vs the full module."""
-    import transformer_engine.pytorch as te
+class AllReduced(nn.Module):
+    """Runs one rank's MLP shard and sums the partial outputs across ranks."""
 
-    hidden = old.layer_norm_weight.shape[0]
-    ffn = old.fc2_weight.shape[1]  # fc2 = [hidden, ffn]
-    if ffn % tp_size:
-        raise ValueError(f"ESM-C ffn_hidden={ffn} not divisible by tp_size={tp_size}")
-    dtype = old.fc1_weight.dtype
-    device = old.fc1_weight.device
+    def __init__(self, shard: nn.Module, tp_group: dist.ProcessGroup) -> None:
+        super().__init__()
+        self.shard = shard
+        self.tp_group = tp_group
 
-    new = te.LayerNormMLP(
-        hidden,
-        ffn,
-        eps=getattr(old, "eps", 1e-5),
-        normalization=getattr(old, "normalization", "LayerNorm"),
-        activation=getattr(old, "activation", "swiglu"),
-        bias=False,  # ESM-C trained with bias=False
-        zero_centered_gamma=getattr(old, "zero_centered_gamma", False),
-        set_parallel_mode=True,
-        tp_group=tp_group,
-        tp_size=tp_size,
-        sequence_parallel=False,
-        params_dtype=dtype,
-    ).to(device=device, dtype=dtype)
-    new.eval()
+    def forward(self, x: Tensor) -> Tensor:
+        out = self.shard(x)
+        dist.all_reduce(out, group=self.tp_group)
+        return out
 
-    fl = ffn // tp_size
-    with torch.no_grad():
-        new.layer_norm_weight.copy_(old.layer_norm_weight)  # ty:ignore[call-non-callable]
-        new.layer_norm_bias.copy_(old.layer_norm_bias)  # ty:ignore[unresolved-attribute]
-        # fc1 full = [2*ffn, hidden] laid out [gate(ffn); up(ffn)]; column-parallel
-        # SwiGLU shard = cat([gate[r], up[r]]) (confirmed bit-exact by the spike).
-        gate, up = old.fc1_weight[:ffn], old.fc1_weight[ffn:]
-        new.fc1_weight.copy_(
-            torch.cat(
-                [gate[rank * fl : (rank + 1) * fl], up[rank * fl : (rank + 1) * fl]],
-                dim=0,
-            )
-        )  # ty:ignore[call-non-callable]
-        # fc2 full = [hidden, ffn]; row-parallel shards the input (ffn) dim.
-        new.fc2_weight.copy_(old.fc2_weight[:, rank * fl : (rank + 1) * fl])  # ty:ignore[call-non-callable]
-    return new
+
+def _gate_up_rows(fc1: Tensor, ffn: int, lo: int, hi: int) -> Tensor:
+    """fc1 is packed ``[gate; up]``, so a shard takes the same rows from each half."""
+    return torch.cat([fc1[lo:hi], fc1[ffn + lo : ffn + hi]])
+
+
+def _shard_bf16(src: EsmcLayerNormMLP, lo: int, hi: int) -> EsmcLayerNormMLP:
+    with torch.device("meta"):
+        shard = EsmcLayerNormMLP(src.hidden_size, hi - lo, src.eps)
+    shard.layer_norm_weight = src.layer_norm_weight
+    shard.layer_norm_bias = src.layer_norm_bias
+    ffn = src.ffn_hidden_size
+    shard.fc1_weight = nn.Parameter(
+        _gate_up_rows(src.fc1_weight, ffn, lo, hi), requires_grad=False
+    )
+    shard.fc2_weight = nn.Parameter(
+        src.fc2_weight[:, lo:hi].contiguous(), requires_grad=False
+    )
+    return shard
+
+
+def _shard_fp8(src: Fp8LayerNormMLP, lo: int, hi: int) -> Fp8LayerNormMLP:
+    # Scales are per output row, so a column slice of fc2 keeps its scales.
+    ffn = src.fc2.in_features
+    fc1 = Fp8Linear(
+        _gate_up_rows(src.fc1.weight_fp8, ffn, lo, hi),
+        _gate_up_rows(src.fc1.weight_scale, ffn, lo, hi),
+    )
+    fc2 = Fp8Linear(src.fc2.weight_fp8[:, lo:hi].contiguous(), src.fc2.weight_scale)
+    return Fp8LayerNormMLP(
+        src.layer_norm_weight, src.layer_norm_bias, src.eps, fc1, fc2
+    )
 
 
 def tp_shard_esmc_mlp(model: nn.Module, dist_manager, tp_group=None) -> int:
-    """Replace every ESM-C block's SwiGLU MLP with a TE tensor-parallel shard
+    """Replace every ESM-C block's SwiGLU MLP with its tensor-parallel shard
     over ``tp_group`` (default: the full CP process group). Returns the number of
     blocks sharded. No-op (returns 0) if ESM-C isn't loaded.
-
-    Each rank ends up holding ``1/tp_size`` of every MLP weight; the per-block
-    forward all-reduces internally so the block output stays replicated — the
-    ESM-C hidden states reach all CP ranks unchanged for the #14 lm_z builder.
     """
     esmc = getattr(model, "esmc", None)
     if esmc is None:
         return 0
-    blocks = esmc.transformer.blocks
 
     if tp_group is None:
         tp_group = dist_manager.group["cp"]
-    tp_size = torch.distributed.get_world_size(tp_group)
-    rank = torch.distributed.get_rank(tp_group)
+    tp_size = dist.get_world_size(tp_group)
+    rank = dist.get_rank(tp_group)
     if tp_size == 1:
         return 0
 
     n = 0
-    for block in blocks:
-        ffn = getattr(block, "ffn", None)
-        # Only the TE LayerNormMLP path is supported (the accelerated build);
-        # the pure-PyTorch fallback would need a DTensor TP and isn't on this path.
-        if ffn is None or type(ffn).__name__ != "LayerNormMLP":
-            raise TypeError(
-                f"expected block.ffn to be a TE LayerNormMLP, got "
-                f"{type(ffn).__name__ if ffn is not None else None}"
+    for block in esmc.transformer.blocks:
+        ffn = block.ffn
+        width = (
+            ffn.fc2.in_features
+            if isinstance(ffn, Fp8LayerNormMLP)
+            else ffn.ffn_hidden_size
+        )
+        if width % tp_size:
+            raise ValueError(
+                f"ESM-C ffn_hidden={width} not divisible by tp_size={tp_size}"
             )
-        block.ffn = _tp_layernorm_mlp(ffn, tp_group, tp_size, rank)
-        del ffn
+        lo, hi = rank * (width // tp_size), (rank + 1) * (width // tp_size)
+        if isinstance(ffn, Fp8LayerNormMLP):
+            shard: nn.Module = _shard_fp8(ffn, lo, hi)
+        elif isinstance(ffn, EsmcLayerNormMLP):
+            shard = _shard_bf16(ffn, lo, hi)
+        else:
+            raise TypeError(f"cannot shard block.ffn of type {type(ffn).__name__}")
+        block.ffn = AllReduced(shard, tp_group)
         n += 1
     return n

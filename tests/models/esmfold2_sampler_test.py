@@ -207,7 +207,7 @@ def test_seeds_differ_mostly_by_a_rigid_motion(sampler_model):
 # ---------------------------------------------------------------------------
 
 
-def test_homodimer_chain_swap_reproduces_the_complex(sampler_model, ccd_pickle):
+def test_homodimer_chain_swap_reproduces_the_complex(sampler_model, ccd_subset):
     """Swapping the two identical chains must reproduce the same complex.
 
     Two statements, because only the first is exact.
@@ -312,7 +312,7 @@ def test_homodimer_chain_swap_reproduces_the_complex(sampler_model, ccd_pickle):
     assert control > 1.5 * 8.0
 
 
-def test_chain_identity_tensors_reach_the_prediction(sampler_model, ccd_pickle):
+def test_chain_identity_tensors_reach_the_prediction(sampler_model, ccd_subset):
     """``asym_id``/``sym_id``/``entity_id`` must not be dead inputs.
 
     Without this, ``test_homodimer_chain_swap_reproduces_the_complex`` would
@@ -432,7 +432,7 @@ def test_residue_index_gap_changes_the_prediction(sampler_model, name):
 
 
 @pytest.mark.parametrize("chain", [0, 1])
-def test_chains_fold_the_same_together_and_apart(sampler_model, chain, ccd_pickle):
+def test_chains_fold_the_same_together_and_apart(sampler_model, chain, ccd_subset):
     """Each chain's internal structure must survive being folded in a complex.
 
     A coarse bound by construction: on a randomly-initialised model the two

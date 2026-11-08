@@ -266,9 +266,9 @@ KERNEL_BACKEND_VARIANTS = ["release", "release_msa", "experimental", "experiment
 
 
 @pytest.mark.parametrize("variant", KERNEL_BACKEND_VARIANTS)
-@pytest.mark.parametrize("backend", [None, "fused", "cuequivariance"])
+@pytest.mark.parametrize("backend", [None, "fused"])
 def test_set_kernel_backend_reaches_every_module(
-    tiny_esmfold2_config, monkeypatch, variant, backend
+    tiny_esmfold2_config, variant, backend
 ):
     """Every module that *can* take a backend must be *given* one.
 
@@ -279,13 +279,7 @@ def test_set_kernel_backend_reaches_every_module(
     the reference path, and every output comparison still passes because the
     reference path is correct, merely slow. That is exactly the defect behind
     ``fix(esm): no-op set_kernel_backend on the CP diffusion wrapper``.
-
-    ``CUE_AVAILABLE`` is forced on because ``TriangleMultiplicativeUpdate``
-    refuses ``cuequivariance`` outright when the package is missing, which would
-    reduce this case to a skip on every CPU runner. Nothing here executes a
-    kernel, so the flag only unblocks the traversal.
     """
-    monkeypatch.setattr(_layers, "CUE_AVAILABLE", True)
     model = model_variant(variant, tiny_esmfold2_config).eval()
     calls, expected = instrument_fanout(model, "set_kernel_backend")
 
@@ -484,9 +478,10 @@ def cpu_fp32_result(kernel_esmfold2_config):
 # fp32, and that dominates.
 #
 # Observed at L=197, first the floor (two eager CUDA runs, so only CUDA's own
-# reduction-order nondeterminism separates them), then the worst case across all
-# seven GPU_BUILDS:
-#                       gpu-vs-gpu floor   cpu-vs-gpu, all seven builds
+# reduction-order nondeterminism separates them), then the worst case across
+# every GPU_BUILDS row. Measured while the matrix still carried two
+# cuequivariance rows, so these are upper bounds for the five that remain:
+#                       gpu-vs-gpu floor   cpu-vs-gpu, all builds
 #   sample_atom_coords  1.19e-03 A         9.96e-03 to 1.014e-02 A
 #   distogram_logits    2.72e-02           2.44
 #   pae                 2.41e-02           2.28 to 2.30
@@ -522,8 +517,6 @@ GPU_BUILDS = [
     (None, True, None),
     ("fused", False, None),
     ("fused", True, 64),
-    ("cuequivariance", False, None),
-    ("cuequivariance", True, 64),
 ]
 
 
@@ -558,9 +551,6 @@ def assert_backend_dispatched(model, backend):
         for module in transitions:
             assert module._fused_swiglu is None
 
-    for tri_mul in tri_muls:
-        assert tri_mul._engine._use_kernels == (backend == "cuequivariance")
-
 
 def assert_chunking_dispatched(model, chunk_size):
     engines = [
@@ -593,8 +583,6 @@ def skip_if_flash_missing(flash: bool):
 def skip_if_backend_missing(backend):
     if backend == "fused" and not _layers.TRITON_KERNELS_AVAILABLE:
         pytest.skip("triton kernels unavailable")  # ty:ignore[too-many-positional-arguments]
-    if backend == "cuequivariance" and not _layers.CUE_AVAILABLE:
-        pytest.skip("cuequivariance unavailable")  # ty:ignore[too-many-positional-arguments]
 
 
 @pytest.mark.gpu

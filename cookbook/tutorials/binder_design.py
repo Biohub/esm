@@ -48,9 +48,7 @@ from esm.models.esmfold2.constants import (
 from esm.models.esmfold2.experimental import EsmFold2ExperimentalModel
 from esm.models.esmfold2.experimental import MSAEncoder as EsmFold2MSAEncoder
 from esm.models.esmfold2.layers import (
-    BACKEND_CUEQ,
     BACKEND_FUSED,
-    CUE_AVAILABLE,
     TRITON_KERNELS_AVAILABLE,
     PairUpdateBlock,
 )
@@ -1239,11 +1237,7 @@ def _load_hf_model(
             _ESMC_CACHE[esmc_id] = model.esmc
         model.esmc = _ESMC_CACHE[esmc_id]
     model.configure_lm_dropout(lm_dropout, force_lm_dropout_during_inference=True)
-    kernel_backend = None
-    if TRITON_KERNELS_AVAILABLE:
-        kernel_backend = BACKEND_FUSED
-    elif CUE_AVAILABLE:
-        kernel_backend = BACKEND_CUEQ
+    kernel_backend = BACKEND_FUSED if TRITON_KERNELS_AVAILABLE else None
     model.set_kernel_backend(kernel_backend)
     return model.to(device=device).eval().requires_grad_(False)
 
@@ -1371,7 +1365,6 @@ def get_base_image():
         .pip_install(
             "flash-attn==2.8.3",
             "transformer-engine[core-cu12,pytorch]==2.13.0",
-            "xformers==0.0.32.post1",
             extra_options="--no-build-isolation",
             env={
                 "CPATH": (
@@ -1389,13 +1382,7 @@ def get_base_image():
             },
         )
         .pip_install("abnumber", "esm", "modal")
-        .env(
-            {
-                "HF_HOME": "/models",
-                "HF_XET_HIGH_PERFORMANCE": "1",
-                "XFORMERS_IGNORE_FLASH_VERSION_CHECK": "1",
-            }
-        )
+        .env({"HF_HOME": "/models", "HF_XET_HIGH_PERFORMANCE": "1"})
     )
 
 

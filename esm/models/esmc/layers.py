@@ -1,9 +1,8 @@
 """ESMC-specific transformer layers.
 
 RoPE, QK-LayerNorm attention, SwiGLU feed-forward and the transformer stack used
-by the ESMC encoder. Each fused module (Transformer Engine LayerNorm+Linear /
-LayerNorm+MLP, xformers / flash-attn attention, Triton RoPE) has a pure-PyTorch
-fallback with matching parameter names so state dicts are interchangeable.
+by the ESMC encoder. Each fused kernel (flash-attn attention, Triton RoPE) has a
+pure-PyTorch fallback.
 """
 
 import math
@@ -17,12 +16,9 @@ from esm.layers.rotary import apply_rotary_emb_torch
 from esm.models.esmc.kernels import (
     FLASH_ATTN_INSTALLED,
     FLASH_ATTN_ROTARY_INSTALLED,
-    XFORMERS_INSTALLED,
     apply_triton_rotary,
     flash_attn_func,
     flash_attn_varlen_qkvpacked_func,
-    te,
-    xops,
 )
 
 
@@ -198,34 +194,65 @@ class EsmcTritonRotaryEmbedding(EsmcRotaryEmbedding):
 
     Used inside :class:`EsmcFlashMultiHeadAttention` when Flash Attention 2 is
     available. The ``forward`` signature differs from
-    :class:`EsmcRotaryEmbedding` because Flash Attention packs Q, K, V together.
+    :class:`EsmcRotaryEmbedding` because Flash Attention uses a varlen-flat
+    layout: positions restart at zero at every ``cu_seqlens`` boundary.
     """
 
     def forward(
-        self, qkv: torch.Tensor, cu_seqlens: torch.Tensor, max_seqlen: int
-    ) -> torch.Tensor:
-        """Apply RoPE in-place to a packed ``(N, 3, n_heads, head_dim)`` tensor."""
-        self._update_cos_sin_cache(max_seqlen, device=qkv.device, dtype=qkv.dtype)
+        self,
+        q: torch.Tensor,
+        k: torch.Tensor,
+        cu_seqlens: torch.Tensor | None = None,
+        max_seqlen: int | None = None,
+    ) -> tuple[torch.Tensor, torch.Tensor]:
+        """Apply RoPE to varlen-flat Q and K.
+
+        Parameters
+        ----------
+        q, k : torch.Tensor
+            Varlen-flat tensors of shape ``(total_tokens, n_heads, head_dim)``,
+            or batched ``(batch, seqlen, n_heads, head_dim)`` when ``cu_seqlens``
+            is ``None``.
+        cu_seqlens : torch.Tensor | None
+            Cumulative sequence lengths, shape ``(batch + 1,)``, ``int32``.
+            ``None`` selects the batched parent path, which the flash block takes
+            once the model has been moved off CUDA.
+        max_seqlen : int | None
+            Length of the longest sequence in the batch; required with
+            ``cu_seqlens``.
+
+        Returns
+        -------
+        tuple[torch.Tensor, torch.Tensor]
+            Rotated ``q`` and ``k``, same shapes as the inputs.
+        """
+        if cu_seqlens is None:
+            return super().forward(q, k)
+        assert max_seqlen is not None
+        self._update_cos_sin_cache(max_seqlen, device=q.device, dtype=q.dtype)
         assert self._cos_cached is not None and self._sin_cached is not None
         assert apply_triton_rotary is not None
 
-        apply_triton_rotary(
-            qkv[:, 0],
-            self._cos_cached,
-            self._sin_cached,
-            cu_seqlens=cu_seqlens,
-            max_seqlen=max_seqlen,
-            inplace=True,
+        # The raw ``flash_attn.ops.triton.rotary.apply_rotary`` driver is not an autograd
+        # op, so its output carried no ``grad_fn`` and backward skipped RoPE entirely.
+        return (
+            apply_triton_rotary(
+                q,
+                self._cos_cached,
+                self._sin_cached,
+                interleaved=self.interleaved,
+                cu_seqlens=cu_seqlens,
+                max_seqlen=max_seqlen,
+            ),
+            apply_triton_rotary(
+                k,
+                self._cos_cached,
+                self._sin_cached,
+                interleaved=self.interleaved,
+                cu_seqlens=cu_seqlens,
+                max_seqlen=max_seqlen,
+            ),
         )
-        apply_triton_rotary(
-            qkv[:, 1],
-            self._cos_cached,
-            self._sin_cached,
-            cu_seqlens=cu_seqlens,
-            max_seqlen=max_seqlen,
-            inplace=True,
-        )
-        return qkv
 
 
 def esmc_swiglu_hidden_dim(expansion_ratio: float, d_model: int) -> int:
@@ -236,10 +263,7 @@ def esmc_swiglu_hidden_dim(expansion_ratio: float, d_model: int) -> int:
 class EsmcLayerNormMLP(nn.Module):
     """LayerNorm + SwiGLU MLP (no bias), as used by ESMC.
 
-    Shares the parameter names ``layer_norm_weight``, ``layer_norm_bias``,
-    ``fc1_weight`` and ``fc2_weight`` with Transformer Engine's fused
-    ``LayerNormMLP`` so the two are state-dict compatible: the fused kernel is
-    used when available and this pure-PyTorch module is the fallback.
+    ``fc1_weight`` packs the gate and up projections as ``[gate; up]``.
     """
 
     def __init__(
@@ -270,21 +294,10 @@ class EsmcLayerNormMLP(nn.Module):
         return F.linear(x, self.fc2_weight)
 
 
-def esmc_swiglu_ln_ffn(
-    d_model: int, expansion_ratio: float, bias: bool, use_te: bool
-) -> nn.Module:
-    """LayerNorm + SwiGLU MLP, fused via Transformer Engine when ``use_te``."""
+def esmc_swiglu_ln_ffn(d_model: int, expansion_ratio: float, bias: bool) -> nn.Module:
+    """LayerNorm + SwiGLU MLP."""
     assert not bias, "ESMC was trained with bias=False; bias=True not supported"
     hidden = esmc_swiglu_hidden_dim(expansion_ratio, d_model)
-    if use_te:
-        return te.LayerNormMLP(
-            hidden_size=d_model,
-            ffn_hidden_size=hidden,
-            bias=bias,
-            activation="swiglu",
-            init_method=None,
-            output_layer_init_method=None,
-        )
     return EsmcLayerNormMLP(hidden_size=d_model, ffn_hidden_size=hidden)
 
 
@@ -300,13 +313,7 @@ def esmc_gelu_ln_ffn(d_model: int, expansion_ratio: float, bias: bool) -> nn.Seq
 
 
 class EsmcLayerNormLinear(nn.Module):
-    """LayerNorm followed by a Linear projection (no bias).
-
-    Shares the parameter names ``layer_norm_weight``, ``layer_norm_bias`` and
-    ``weight`` with Transformer Engine's fused ``LayerNormLinear`` so the two
-    are state-dict compatible: the fused kernel is used when available and this
-    pure-PyTorch module is the fallback.
-    """
+    """LayerNorm followed by a Linear projection (no bias)."""
 
     def __init__(self, d_in: int, d_out: int, eps: float = 1e-5) -> None:
         super().__init__()
@@ -324,19 +331,14 @@ class EsmcLayerNormLinear(nn.Module):
         return F.linear(x, self.weight)
 
 
-def make_esmc_attn_layernorm_qkv(d_model: int, bias: bool, use_te: bool) -> nn.Module:
-    """LayerNorm + fused QKV projection, fused via Transformer Engine when
-    ``use_te``."""
+def make_esmc_attn_layernorm_qkv(d_model: int, bias: bool) -> nn.Module:
+    """LayerNorm + packed QKV projection."""
     assert not bias, "ESMC was trained with bias=False; bias=True not supported"
-    if use_te:
-        return te.LayerNormLinear(d_model, d_model * 3, bias=bias, init_method=None)
     return EsmcLayerNormLinear(d_model, d_model * 3)
 
 
-def make_esmc_attn_out_proj(d_model: int, bias: bool, use_te: bool) -> nn.Module:
-    """Attention output projection, fused via Transformer Engine when ``use_te``."""
-    if use_te:
-        return te.Linear(d_model, d_model, bias=bias, init_method=None)
+def make_esmc_attn_out_proj(d_model: int, bias: bool) -> nn.Module:
+    """Attention output projection."""
     return nn.Linear(d_model, d_model, bias=bias)
 
 
@@ -358,22 +360,11 @@ def esmc_scaled_dot_product_attention(
 
     Dispatches in order of preference:
 
-    1. xformers ``memory_efficient_attention`` - preferred fused kernel,
-       requires ``xformers``, unmasked only.
-    2. Flash Attention 2 (``flash_attn_func``) - secondary fused kernel,
-       requires ``flash-attn``, unmasked only, fp16 / bf16 only.
-    3. PyTorch's ``F.scaled_dot_product_attention`` - last-resort path; the only
+    1. Flash Attention 2 (``flash_attn_func``) - fused kernel, requires
+       ``flash-attn``, unmasked only, fp16 / bf16 only.
+    2. PyTorch's ``F.scaled_dot_product_attention`` - last-resort path; the only
        one that takes a mask, and the only fp32 one.
     """
-    if seq_id is None and XFORMERS_INSTALLED and q.is_cuda:
-        b, s, _ = q.shape
-        q4 = q.view(b, s, n_heads, d_head)
-        k4 = k.view(b, s, n_heads, d_head)
-        v4 = v.view(b, s, n_heads, d_head)
-        context = xops.memory_efficient_attention(
-            q4, k4, v4, attn_bias=None, scale=d_head**-0.5
-        )
-        return context.reshape(b, s, n_heads * d_head)
     if (
         seq_id is None
         and FLASH_ATTN_INSTALLED
@@ -411,12 +402,7 @@ class EsmcMultiHeadAttention(nn.Module):
     """
 
     def __init__(
-        self,
-        d_model: int,
-        n_heads: int,
-        bias: bool = False,
-        qk_layernorm: bool = True,
-        use_te: bool = False,
+        self, d_model: int, n_heads: int, bias: bool = False, qk_layernorm: bool = True
     ):
         super().__init__()
         self.d_model = d_model
@@ -424,8 +410,8 @@ class EsmcMultiHeadAttention(nn.Module):
         self.d_head = d_model // n_heads
 
         assert not bias, "ESMC was trained with bias=False; bias=True not supported"
-        self.layernorm_qkv = make_esmc_attn_layernorm_qkv(d_model, bias, use_te)
-        self.out_proj = make_esmc_attn_out_proj(d_model, bias, use_te)
+        self.layernorm_qkv = make_esmc_attn_layernorm_qkv(d_model, bias)
+        self.out_proj = make_esmc_attn_out_proj(d_model, bias)
 
         if qk_layernorm:
             self.q_ln = nn.LayerNorm(d_model, bias=bias)
@@ -490,19 +476,10 @@ class EsmcFlashMultiHeadAttention(EsmcMultiHeadAttention):
     """Flash-Attention 2 variant of :class:`EsmcMultiHeadAttention`."""
 
     def __init__(
-        self,
-        d_model: int,
-        n_heads: int,
-        bias: bool = False,
-        qk_layernorm: bool = True,
-        use_te: bool = False,
+        self, d_model: int, n_heads: int, bias: bool = False, qk_layernorm: bool = True
     ):
         super().__init__(
-            d_model=d_model,
-            n_heads=n_heads,
-            bias=bias,
-            qk_layernorm=qk_layernorm,
-            use_te=use_te,
+            d_model=d_model, n_heads=n_heads, bias=bias, qk_layernorm=qk_layernorm
         )
         self.rotary = EsmcTritonRotaryEmbedding(d_model // n_heads)
 
@@ -512,6 +489,10 @@ class EsmcFlashMultiHeadAttention(EsmcMultiHeadAttention):
         seq_id: torch.Tensor | None,
         output_attentions: bool = False,
     ) -> tuple[torch.Tensor, torch.Tensor | None]:
+        if not x.is_cuda:
+            # Built on CUDA then moved off it: the parent model hands over the
+            # batched layout and a padding mask, so the SDPA path applies as is.
+            return super().forward(x, seq_id, output_attentions=output_attentions)
         if output_attentions:
             raise ValueError(
                 "output_attentions=True is not supported with "
@@ -532,9 +513,11 @@ class EsmcFlashMultiHeadAttention(EsmcMultiHeadAttention):
         # q/k/v are 2D (T, D) here: the parent model unpads the batch before the
         # transformer stack to produce the varlen-flat layout that
         # ``flash_attn_varlen_qkvpacked_func`` requires.
-        T = q.shape[0]
-        qkv_packed = torch.stack([q, k, v], dim=1).view(T, 3, self.n_heads, self.d_head)
-        qkv_packed = self.rotary(qkv_packed, cu_seqlens, max_seqlen)
+        q, k, v = (t.unflatten(-1, (self.n_heads, self.d_head)) for t in (q, k, v))
+        # Rotate before packing: stacking the rotated q/k is one copy, whereas rotating
+        # a packed tensor out-of-place and re-stacking is two.
+        q, k = self.rotary(q, k, cu_seqlens, max_seqlen)
+        qkv_packed = torch.stack([q, k, v], dim=1)
 
         assert flash_attn_varlen_qkvpacked_func is not None
         context = flash_attn_varlen_qkvpacked_func(
@@ -567,8 +550,6 @@ class EsmcUnifiedTransformerBlock(nn.Module):
         Whether to apply QK LayerNorm in attention.
     ffn_type : str
         Feed-forward activation: ``"swiglu"`` or ``"gelu"``.
-    use_te : bool
-        Build the Transformer Engine fused LayerNorm modules.
     """
 
     def __init__(
@@ -581,19 +562,16 @@ class EsmcUnifiedTransformerBlock(nn.Module):
         residue_scaling_factor: float = 1.0,
         qk_layernorm: bool = True,
         ffn_type: str = "swiglu",
-        use_te: bool = False,
     ):
         super().__init__()
 
         attn_cls = (
             EsmcFlashMultiHeadAttention if use_flash_attn else EsmcMultiHeadAttention
         )
-        self.attn = attn_cls(
-            d_model, n_heads, bias=bias, qk_layernorm=qk_layernorm, use_te=use_te
-        )
+        self.attn = attn_cls(d_model, n_heads, bias=bias, qk_layernorm=qk_layernorm)
 
         if ffn_type == "swiglu":
-            self.ffn = esmc_swiglu_ln_ffn(d_model, expansion_ratio, bias, use_te)
+            self.ffn = esmc_swiglu_ln_ffn(d_model, expansion_ratio, bias)
         elif ffn_type == "gelu":
             self.ffn = esmc_gelu_ln_ffn(d_model, expansion_ratio, bias)
         else:
@@ -654,8 +632,6 @@ class EsmcTransformerStack(nn.Module):
         FFN expansion ratio.
     use_flash_attn : bool
         Use the Flash Attention 2 kernel when available.
-    use_te : bool
-        Build the Transformer Engine fused LayerNorm modules.
     """
 
     def __init__(
@@ -669,7 +645,6 @@ class EsmcTransformerStack(nn.Module):
         ffn_type: str = "swiglu",
         expansion_ratio: float = 8 / 3,
         use_flash_attn: bool = False,
-        use_te: bool = False,
     ):
         super().__init__()
         self.blocks = nn.ModuleList(
@@ -685,7 +660,6 @@ class EsmcTransformerStack(nn.Module):
                     bias=bias,
                     qk_layernorm=qk_layernorm,
                     ffn_type=ffn_type,
-                    use_te=use_te,
                 )
                 for _ in range(n_layers)
             ]

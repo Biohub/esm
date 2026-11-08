@@ -234,10 +234,13 @@ class ESMC(nn.Module, ESMCInferenceClient):
         pad = self.tokenizer.pad_token_id
         assert pad is not None
         assert sequence.ndim == 2
-        return [
-            self.tokenizer.decode(row[row != pad][1:-1]).replace(" ", "")
-            for row in sequence
-        ]
+        out = []
+        for row in sequence:
+            text = self.tokenizer.decode(row[row != pad][1:-1])
+            # transformers 5 types decode() as str | list[str]; a 1-D row gives str.
+            assert isinstance(text, str)
+            out.append(text.replace(" ", ""))
+        return out
 
     def forward(
         self,

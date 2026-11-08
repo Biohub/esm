@@ -26,7 +26,9 @@ import torch
 from einops import rearrange, repeat
 
 try:
-    from flash_attn.ops.triton.rotary import apply_rotary as apply_triton_rotary
+    # Autograd-aware wrapper around the same Triton kernel; the bare
+    # ``flash_attn.ops.triton.rotary.apply_rotary`` driver has no ``grad_fn``.
+    from flash_attn.layers.rotary import apply_rotary_emb as apply_triton_rotary
 except ImportError:
     apply_triton_rotary = None  # ty:ignore[invalid-assignment]
 
@@ -227,33 +229,40 @@ class RotaryEmbedding(torch.nn.Module):
 
 
 class TritonRotaryEmbedding(RotaryEmbedding):
-    def forward(self, qkv: torch.Tensor, cu_seqlens, max_seqlen) -> torch.Tensor:
+    def forward(
+        self,
+        q: torch.Tensor,
+        k: torch.Tensor,
+        cu_seqlens: torch.Tensor,
+        max_seqlen: int,
+    ) -> Tuple[torch.Tensor, torch.Tensor]:
         """
-        qkv: (n, 3, nheads, headdim)
+        q, k: (n, nheads, headdim) varlen-flat
         cu_seqlens: cumulative sequence lengths
         max_seqlen: max sequence length
         """
-        self._update_cos_sin_cache(max_seqlen, device=qkv.device, dtype=qkv.dtype)
+        self._update_cos_sin_cache(max_seqlen, device=q.device, dtype=q.dtype)
         assert self._cos_cached is not None
         assert self._sin_cached is not None
 
         assert apply_triton_rotary is not None
-        # In-place modification
-        apply_triton_rotary(
-            qkv[:, 0],
-            self._cos_cached,
-            self._sin_cached,
-            cu_seqlens=cu_seqlens,
-            max_seqlen=max_seqlen,
-            inplace=True,
+        # The raw ``flash_attn.ops.triton.rotary.apply_rotary`` driver is not an autograd
+        # op, so its output carried no ``grad_fn`` and backward skipped RoPE entirely.
+        return (
+            apply_triton_rotary(
+                q,
+                self._cos_cached,
+                self._sin_cached,
+                interleaved=self.interleaved,
+                cu_seqlens=cu_seqlens,
+                max_seqlen=max_seqlen,
+            ),
+            apply_triton_rotary(
+                k,
+                self._cos_cached,
+                self._sin_cached,
+                interleaved=self.interleaved,
+                cu_seqlens=cu_seqlens,
+                max_seqlen=max_seqlen,
+            ),
         )
-        apply_triton_rotary(
-            qkv[:, 1],
-            self._cos_cached,
-            self._sin_cached,
-            cu_seqlens=cu_seqlens,
-            max_seqlen=max_seqlen,
-            inplace=True,
-        )
-
-        return qkv

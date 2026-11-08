@@ -6,13 +6,19 @@ Verifies that from_mmcif -> to_blob -> from_blob -> to_mmcif preserves:
 3. Correct atom counts after roundtrip
 """
 
+import io
+import string
+
 import biotite.structure as bs
 import biotite.structure.io.pdbx as pdbx
 import numpy as np
 import pytest
 
 from esm.utils import residue_constants
-from esm.utils.structure.molecular_complex import MolecularComplex
+from esm.utils.structure.molecular_complex import (
+    MolecularComplex,
+    MolecularComplexMetadata,
+)
 
 # Minimal CIF with protein (chain A) + ligand (chain B in label_asym_id, chain A in auth_asym_id)
 # This is the standard PDB convention that was previously broken.
@@ -124,6 +130,17 @@ def test_from_mmcif_ligand_on_separate_chain():
     ligand_chain = mc.metadata.chain_lookup[int(mc.chain_id[2])]
     assert protein_chain == "A"
     assert ligand_chain == "B"
+
+
+def test_from_mmcif_keeps_label_chains_when_residue_has_only_altloc_b():
+    """A residue whose only alt-loc is "B" must not collapse chains to auth IDs."""
+    cif = PROTEIN_LIGAND_CIF.replace(" . LIG B", " B LIG B")
+    assert cif.count(" B LIG B") == 3
+
+    mc = MolecularComplex.from_mmcif(cif)
+
+    assert mc.sequence == ["ALA", "GLY", "LIG"]
+    assert [mc.metadata.chain_lookup[int(c)] for c in mc.chain_id] == ["A", "A", "B"]
 
 
 def test_to_mmcif_entity_categories():
@@ -368,3 +385,108 @@ def test_from_mmcif_groups_residues_without_reordering_their_atoms(
     np.testing.assert_array_equal(actual.chain_id, [0, 0, 2])
     assert actual.metadata.chain_lookup == {0: "A", 1: "AA", 2: "Z"}
     np.testing.assert_array_equal(actual.plddt, np.array([0.8, 0.2, 1], np.float32))
+
+
+def _poly_ala_chains(chain_lookup: dict[int, str]) -> MolecularComplex:
+    """Lengths differ so no two chains share a sequence, hence none share an entity."""
+    chain_of_token = [
+        cid for i, cid in enumerate(sorted(chain_lookup)) for _ in range(i + 1)
+    ]
+    n_tokens = len(chain_of_token)
+    return MolecularComplex(
+        id="synthetic",
+        sequence=["ALA"] * n_tokens,
+        atom_positions=np.arange(3 * n_tokens, dtype=np.float32).reshape(n_tokens, 3),
+        atom_elements=np.array(["C"] * n_tokens, dtype=object),
+        token_to_atoms=np.array([[i, i + 1] for i in range(n_tokens)], dtype=np.int32),
+        chain_id=np.array(chain_of_token, dtype=np.int64),
+        plddt=np.ones(n_tokens, dtype=np.float32),
+        metadata=MolecularComplexMetadata(entity_lookup={}, chain_lookup=chain_lookup),
+        atom_names=np.array(["CA"] * n_tokens, dtype=object),
+        atom_hetero=np.zeros(n_tokens, dtype=bool),
+    )
+
+
+def _asym_and_entity(cif: str) -> list[tuple[str, str]]:
+    """Each distinct (label_asym_id, label_entity_id) pair, in file order."""
+    site = pdbx.CIFFile.read(io.StringIO(cif)).block["atom_site"]
+    rows = zip(
+        site["label_asym_id"].as_array(str), site["label_entity_id"].as_array(str)
+    )
+    return list(dict.fromkeys(rows))
+
+
+def test_to_mmcif_names_null_chains_with_distinct_entities() -> None:
+    # 28 chains so labels run past Z, where chr(65 + n) emitted punctuation.
+    rows = _asym_and_entity(
+        _poly_ala_chains({i: "" for i in range(28)}).to_mmcif(name_null_chains=True)
+    )
+
+    assert [asym for asym, _ in rows] == [*string.ascii_uppercase, "AA", "AB"]
+    assert len({entity for _, entity in rows}) == 28
+
+
+def test_to_mmcif_null_chain_does_not_take_an_existing_name() -> None:
+    rows = _asym_and_entity(
+        _poly_ala_chains({0: "", 1: "A"}).to_mmcif(name_null_chains=True)
+    )
+
+    assert [asym for asym, _ in rows] == ["B", "A"]
+    assert len({entity for _, entity in rows}) == 2
+
+
+def test_to_mmcif_leaves_null_chains_blank_by_default() -> None:
+    rows = _asym_and_entity(_poly_ala_chains({i: "" for i in range(3)}).to_mmcif())
+
+    # All three chains collapse onto one unnamed asym id, hence onto one entity.
+    assert {asym for asym, _ in rows} == {""}
+    assert len({entity for _, entity in rows}) == 1
+
+
+_RES_NAMES = ["GLY", "GLY", "ALA", "SER", "CYS"]
+
+
+def _chain_a(residues: list[tuple[int, str]]) -> bs.AtomArray:
+    """Chain A of ``_RES_NAMES`` with the given ``(res_id, ins_code)``, 2 atoms each."""
+    atoms = bs.AtomArray(2 * len(residues))
+    atoms.coord = np.arange(3 * len(atoms), dtype=np.float32).reshape(-1, 3)
+    atoms.chain_id = ["A"] * len(atoms)
+    atoms.res_id = np.repeat([res_id for res_id, _ in residues], 2)
+    atoms.ins_code = np.repeat([ins for _, ins in residues], 2)
+    atoms.res_name = np.repeat(_RES_NAMES, 2)
+    atoms.atom_name = ["N", "CA"] * len(residues)
+    atoms.element = ["N", "C"] * len(residues)
+    atoms.hetero = np.zeros(len(atoms), dtype=bool)
+    atoms.set_annotation("b_factor", np.full(len(atoms), 50.0))
+    return atoms
+
+
+def _from_cif(atoms: bs.AtomArray) -> MolecularComplex:
+    cif = pdbx.CIFFile()
+    pdbx.set_structure(cif, atoms)
+    return MolecularComplex.from_cif_file(cif)
+
+
+@pytest.mark.parametrize(
+    "build", [MolecularComplex.from_atomarray, _from_cif], ids=["atomarray", "cif"]
+)
+@pytest.mark.parametrize(
+    "residues",
+    [
+        # Antibody-style insertion codes: 52, 52A, 52B, 52C, 53.
+        [(52, ""), (52, "A"), (52, "B"), (52, "C"), (53, "")],
+        # Author numbering that goes backwards (e.g. circular permutants).
+        [(10, ""), (11, ""), (1, ""), (2, ""), (3, "")],
+    ],
+    ids=["insertion_codes", "backwards_numbering"],
+)
+def test_residues_are_separate_tokens_in_file_order(build, residues) -> None:
+    atoms = _chain_a(residues)
+
+    actual = build(atoms)
+
+    assert actual.sequence == _RES_NAMES
+    np.testing.assert_array_equal(
+        actual.token_to_atoms, [[0, 2], [2, 4], [4, 6], [6, 8], [8, 10]]
+    )
+    np.testing.assert_array_equal(actual.atom_positions, atoms.coord)

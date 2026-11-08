@@ -3,6 +3,7 @@ from typing import Any, Callable, Sequence
 from warnings import warn
 
 import attr
+import numpy as np
 import torch
 from tqdm import tqdm
 
@@ -123,6 +124,20 @@ def iterative_sampling_raw(
             # Function and residue annotation encoding/decoding is lossy
             # There is no guarantee that decoding encoded tokens will yield the same input
             raw_protein.function_annotations = input_protein.function_annotations
+        if input_protein.coordinates is not None:
+            input_protein_chain = input_protein.to_protein_chain()
+            raw_protein_chain = raw_protein.to_protein_chain()
+            has_coords = np.where(
+                input_protein.coordinates[:, :3].isfinite().all(-1).any(-1)
+            )[0]
+            raw_protein.crmsd = torch.tensor(
+                input_protein_chain.rmsd(
+                    raw_protein_chain,
+                    only_compute_backbone_rmsd=config.only_compute_backbone_rmsd,
+                    mobile_inds=has_coords,
+                    target_inds=has_coords,
+                )
+            )
 
     return raw_proteins
 

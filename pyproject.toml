@@ -1,6 +1,6 @@
 [project]
 name = "esm"
-version = "3.4.1.post1"
+version = "3.4.2"
 description = "EvolutionaryScale open model repository"
 readme = "README.md"
 requires-python = ">=3.12"
@@ -23,11 +23,12 @@ classifiers = [
 ]
 
 dependencies = [
-  "torch>=2.11.0,<2.12.0",
-  "transformers>=4.57.6,<5.0.0",
+  "torch>=2.11.0",
+  "transformers>=5.16.0",
   "ipython",
   "einops",
-  "biotite>=1.0.0",
+  # biotite 2 renamed RigidTransformation fields and annotate_sse output, breaking from_rcsb.
+  "biotite>=1.0.0,<2",
   "rdkit",
   "msgpack-numpy",
   "biopython",
@@ -51,19 +52,9 @@ dependencies = [
   "pygtrie",
   "dna_features_viewer",
   "accelerate",
-  "cuequivariance-torch>=0.8.1; sys_platform == 'linux' and platform_machine == 'x86_64'",
-  "cuequivariance-ops-torch-cu13>=0.8.1; sys_platform == 'linux' and platform_machine == 'x86_64'",
+  # CPU-index torch doesn't pull triton in, but the ESMFold2 kernels import it.
+  "triton>=3.6; sys_platform == 'linux' and platform_machine == 'x86_64'",
 ]
-
-[project.optional-dependencies]
-# ESMFold2 "fused" kernel backend (set_kernel_backend("fused"))
-# inference kernels for tri-mul / LN+SwiGLU / dropout-residual.
-fused = ["triton>=3,<4"]
-# ESMFold2 context-parallel ESM-C tensor parallelism (wrap_model_with_cp(tp_esmc=True)).
-fold-cp = ["transformer-engine[pytorch]>=2,<3"]
-# "cuequivariance" kernel backend — pick the build matching your CUDA toolkit.
-cueq12 = ["cuequivariance-torch", "cuequivariance-ops-torch-cu12"]
-cueq13 = ["cuequivariance-torch", "cuequivariance-ops-torch-cu13"]
 
 # Pytest
 [tool.pytest.ini_options]
@@ -71,13 +62,13 @@ addopts = """
   --cov=esm
 	--cov-report term-missing:skip-covered
 	-n auto
-	-m 'not gpu and not manual and not merge_only'
+	-m 'not gpu and not manual'
 	--ignore=tests/oss_pytests/test_oss_client.py
 """
 markers = [
-  "gpu: requires a CUDA device; run in the monorepo's gpu-ci",
-  "manual: too heavy for a hosted runner; run in the monorepo's research-ci",
-  "merge_only: needs a real published checkpoint; run in the monorepo's research-ci",
+  "gpu: requires a CUDA device",
+  "manual: run by hand, never by CI",
+  "merge_only: needs a real published checkpoint (network or staged weights)",
 ]
 
 [tool.setuptools]
@@ -135,6 +126,7 @@ matplotlib = "*"
 numpy = ">=2.0.0,<2.4"
 pre-commit = "*"
 pytest = "*"
+pytest-asyncio = "*"
 pytest-cov = "*"
 pytest-xdist = "*"
 seaborn = "*"
@@ -149,20 +141,14 @@ dockq = { git = "https://github.com/nrontsis/DockQ.git", rev = "ba4df5adaad7c77f
 lint-all = "pre-commit run --all-files --show-diff-on-failure"
 cov-test = "pytest -v --junitxml=pytest.xml --cov=esm"
 
-[tool.pixi.feature.fused]
-platforms = ["linux-64"]
-
-[tool.pixi.feature.fused.pypi-dependencies]
+# PyPI rejects URL requirements, so pip users get this command from a warning in
+# esm/models/esmc/kernels.py instead. The wheel is cp312-only.
+[tool.pixi.feature.py312.target.linux-64.pypi-dependencies]
 flash_attn = { url = "https://github.com/evolutionaryscale/wheels/releases/download/py312-pt211-cu13-sm80-90/flash_attn-2.7.4.post1-cp312-cp312-linux_x86_64.whl" }
-xformers = { url = "https://download.pytorch.org/whl/cu130/xformers-0.0.35-py39-none-manylinux_2_28_x86_64.whl" }
-cuequivariance-torch = ">=0.8.1"
-cuequivariance-ops-torch-cu13 = ">=0.8.1"
 
-# `gpu` stays on 3.12: the prebuilt flash_attn wheel in `fused` is cp312-only.
 [tool.pixi.environments]
 default = {features = ["py312"], solve-group = "default"}
 dev = {features = ["dev", "py312"], solve-group = "default"}
-gpu = {features = ["dev", "fused", "py312"], solve-group = "default"}
 dev-py313 = {features = ["dev", "py313"], solve-group = "py313"}
 dev-py314 = {features = ["dev", "py314"], solve-group = "py314"}
 
@@ -232,13 +218,6 @@ replace-imports-with-any = [
     "biotite.sequence.align",
     "biotite.sequence.align.**",
     "scipy.spatial",
-    "transformer_engine",
-    "transformer_engine.**",
-    "transformer_engine_torch",
-    "xformers",
-    "xformers.**",
-    "cuequivariance_torch",
-    "cuequivariance_torch.**",
     "flash_attn",
     "flash_attn.**",
     "zstd",

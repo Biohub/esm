@@ -14,10 +14,13 @@ proteins than fit on a single GPU. Wrapping results in the same object with a fe
 
 ## Quickstart
 
-Install the fold-cp dependency
+Install ESM, then `transformer-engine`. PyPI only ships it as an sdist that needs
+a CUDA toolchain, and its core wants a cuBLAS symbol newer than the one torch
+pins, so take the prebuilt wheel from the
+[EvolutionaryScale wheels release](https://github.com/evolutionaryscale/wheels/releases).
 
 ```bash
-pip install "esm[fold-cp] @ git+https://github.com/Biohub/esm.git@main"
+pip install "esm @ git+https://github.com/Biohub/esm.git@main"
 ```
 
 Use [esmfold2-cp.py](esmfold2-cp.py) as the CP version of the single-GPU
@@ -43,7 +46,7 @@ unchanged.
 
 - Python environment:
   - This ESM package
-  - transformer-engine 2 (installed by `esm[fold-cp]` dependency)
+  - transformer-engine 2, from the EvolutionaryScale wheels release
 - Use a perfect-square number of GPUs: 1, 4, 9, 16, ...
 - Keep `num_diffusion_samples=1` in `ESMFold2InputBuilder().fold(...)`. The CP
   diffusion path currently expects one diffusion sample.
@@ -111,7 +114,7 @@ Two differences are expected, both small:
 - **Rounding** differs at about 1e-3, because numbers are summed across GPUs in a
   different order.
 
-Single-GPU kernel backends such as `"fused"` and `"cuequivariance"` are ignored by the CP-wrapped stages; those stages use the distributed CP implementations instead.
+The single-GPU `"fused"` kernel backend is ignored by the CP-wrapped stages; those stages use the distributed CP implementations instead.
 
 ## Larger example
 
@@ -125,7 +128,7 @@ Context parallelism sharding will split the memory and allow this protein to be 
 Launch with torchrun on a perfect-square number of GPUs:
 
 ```bash
-PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True torchrun --nproc-per-node=4 cuequivariance_cp.py
+PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True torchrun --nproc-per-node=4 large_input_cp.py
 ```
 
 ## How context parallelism works

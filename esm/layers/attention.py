@@ -129,11 +129,14 @@ class FlashMultiHeadAttention(MultiHeadAttention):
             self.k_ln(key_ND).to(query_ND.dtype),
         )
 
-        qkv_N3D = torch.stack([query_ND, key_ND, value_ND], dim=1)
-        qkv_N3HD = einops.rearrange(
-            qkv_N3D, pattern="n a (h d) -> n a h d", h=self.n_heads
+        query_NHD, key_NHD, value_NHD = (
+            einops.rearrange(t, pattern="n (h d) -> n h d", h=self.n_heads)
+            for t in (query_ND, key_ND, value_ND)
         )
-        qkv_N3HD = self.rotary(qkv_N3HD, cu_seqlens, max_seqlen)
+        # Rotate before packing: stacking the rotated q/k is one copy, whereas rotating
+        # a packed tensor out-of-place and re-stacking is two.
+        query_NHD, key_NHD = self.rotary(query_NHD, key_NHD, cu_seqlens, max_seqlen)
+        qkv_N3HD = torch.stack([query_NHD, key_NHD, value_NHD], dim=1)
 
         assert flash_attn_varlen_qkvpacked_func is not None
         context_NHD = flash_attn_varlen_qkvpacked_func(

@@ -85,6 +85,7 @@ def _lnlin_swiglu_fwd_kernel(
     stride_out_m,
     stride_out_n,
     HAS_LN_BIAS: tl.constexpr,
+    SAVE_LIN: tl.constexpr,
     BLOCK_SIZE_M: tl.constexpr,
     BLOCK_SIZE_N: tl.constexpr,
     BLOCK_SIZE_K: tl.constexpr,
@@ -157,18 +158,20 @@ def _lnlin_swiglu_fwd_kernel(
         wa_ptrs += BLOCK_SIZE_K * stride_wk
         wb_ptrs += BLOCK_SIZE_K * stride_wk
 
-    a_bf = a_acc.to(Lin_ptr.type.element_ty)
-    b_bf = b_acc.to(Lin_ptr.type.element_ty)
-
     out_mask = (offs_m[:, None] < M) & (offs_n[None, :] < N)
-    lin_a_ptrs = (
-        Lin_ptr + offs_m[:, None] * stride_lin_m + offs_n[None, :] * stride_lin_n
-    )
-    lin_b_ptrs = (
-        Lin_ptr + offs_m[:, None] * stride_lin_m + (N + offs_n[None, :]) * stride_lin_n
-    )
-    tl.store(lin_a_ptrs, a_bf, mask=out_mask)
-    tl.store(lin_b_ptrs, b_bf, mask=out_mask)
+    # The [M, 2N] linear output is read only by backward. A forward-only call
+    # skips the store, which is the single largest write this kernel makes.
+    if SAVE_LIN:
+        lin_a_ptrs = (
+            Lin_ptr + offs_m[:, None] * stride_lin_m + offs_n[None, :] * stride_lin_n
+        )
+        lin_b_ptrs = (
+            Lin_ptr
+            + offs_m[:, None] * stride_lin_m
+            + (N + offs_n[None, :]) * stride_lin_n
+        )
+        tl.store(lin_a_ptrs, a_acc.to(Lin_ptr.type.element_ty), mask=out_mask)
+        tl.store(lin_b_ptrs, b_acc.to(Lin_ptr.type.element_ty), mask=out_mask)
 
     # SwiGLU = silu(a) * b. SiLU computed in fp32 for numerical accuracy.
     sig = tl.sigmoid(a_acc)
@@ -253,7 +256,11 @@ def _ln_stats_settings(K: int) -> tuple[int, int]:
 
 
 def _lnlin_swiglu_fwd(
-    x_2d: torch.Tensor, W12: torch.Tensor, LN_W: torch.Tensor, LN_B: torch.Tensor | None
+    x_2d: torch.Tensor,
+    W12: torch.Tensor,
+    LN_W: torch.Tensor,
+    LN_B: torch.Tensor | None,
+    save_lin: bool = True,
 ):
     assert x_2d.is_contiguous(), "X must be contiguous"
     M, K = x_2d.shape
@@ -262,7 +269,11 @@ def _lnlin_swiglu_fwd(
     N = two_N // 2
 
     out = torch.empty((M, N), dtype=x_2d.dtype, device=x_2d.device)
-    lin = torch.empty((M, two_N), dtype=x_2d.dtype, device=x_2d.device)
+    # Placeholder when the caller has no backward: the kernel still needs a
+    # valid pointer of the right dtype, but never dereferences it.
+    lin = torch.empty(
+        (M, two_N) if save_lin else (1,), dtype=x_2d.dtype, device=x_2d.device
+    )
     Mean = torch.empty((M,), dtype=x_2d.dtype, device=x_2d.device)
     Rstd = torch.empty((M,), dtype=x_2d.dtype, device=x_2d.device)
 
@@ -300,11 +311,12 @@ def _lnlin_swiglu_fwd(
         x_2d.stride(1),
         W12.stride(0),
         W12.stride(1),
-        lin.stride(0),
-        lin.stride(1),
+        two_N if save_lin else 0,
+        1,
         out.stride(0),
         out.stride(1),
         HAS_LN_BIAS=(LN_B is not None),  # ty:ignore[invalid-argument-type]
+        SAVE_LIN=save_lin,  # ty:ignore[invalid-argument-type]
         BLOCK_SIZE_M=cfg["BLOCK_SIZE_M"],
         BLOCK_SIZE_N=cfg["BLOCK_SIZE_N"],
         BLOCK_SIZE_K=cfg["BLOCK_SIZE_K"],
@@ -342,11 +354,14 @@ class FusedLNLinearSwiGLUFunction(torch.autograd.Function):
 
     @staticmethod
     @torch.amp.custom_fwd(device_type="cuda", cast_inputs=torch.bfloat16)
-    def forward(ctx, X, W12, LN_W, LN_B):
+    def forward(ctx, X, W12, LN_W, LN_B, needs_backward: bool = True):
         x_shape = X.shape
         x_2d = X.contiguous().view(-1, x_shape[-1])
-        out, lin, mean, rstd = _lnlin_swiglu_fwd(x_2d, W12, LN_W, LN_B)
-        ctx.save_for_backward(x_2d, W12, LN_W, LN_B, mean, rstd, lin)
+        out, lin, mean, rstd = _lnlin_swiglu_fwd(
+            x_2d, W12, LN_W, LN_B, save_lin=needs_backward
+        )
+        if needs_backward:
+            ctx.save_for_backward(x_2d, W12, LN_W, LN_B, mean, rstd, lin)
         ctx.x_shape = x_shape
         ctx.has_ln_bias = LN_B is not None
         return out.view(*x_shape[:-1], out.shape[-1])
@@ -375,7 +390,7 @@ class FusedLNLinearSwiGLUFunction(torch.autograd.Function):
             dx_norm, x_2d, [K], mean.float(), rstd.float(), LN_W, LN_B, output_mask
         )
         # If LN_B was None (no bias), ATen returns dLN_B=None and we just pass it through.
-        return dX.view(ctx.x_shape), dW12, dLN_W, dLN_B
+        return dX.view(ctx.x_shape), dW12, dLN_W, dLN_B, None
 
 
 class FusedLNLinearSwiGLU(nn.Module):
@@ -410,4 +425,12 @@ class FusedLNLinearSwiGLU(nn.Module):
         nn.init.uniform_(self.W12, -bound, bound)
 
     def forward(self, X: torch.Tensor) -> torch.Tensor:
-        return FusedLNLinearSwiGLUFunction.apply(X, self.W12, self.LN_W, self.LN_B)
+        # Decided here, not inside forward(): autograd runs Function.forward under
+        # no_grad, so torch.is_grad_enabled() is always False in there.
+        needs_backward = torch.is_grad_enabled() and any(
+            t is not None and t.requires_grad
+            for t in (X, self.W12, self.LN_W, self.LN_B)
+        )
+        return FusedLNLinearSwiGLUFunction.apply(
+            X, self.W12, self.LN_W, self.LN_B, needs_backward
+        )

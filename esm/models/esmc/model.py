@@ -19,12 +19,7 @@ from torch.nn import BCEWithLogitsLoss, CrossEntropyLoss, MSELoss
 
 from esm.models.esmc.checkpoint_layout import native_to_published, published_to_native
 from esm.models.esmc.config import EsmcConfig
-from esm.models.esmc.kernels import (
-    FLASH_ATTN_INSTALLED,
-    TE_INSTALLED,
-    pad_input,
-    unpad_input,
-)
+from esm.models.esmc.kernels import FLASH_ATTN_INSTALLED, pad_input, unpad_input
 from esm.models.esmc.layers import EsmcRotaryEmbedding, EsmcTransformerStack
 from esm.models.esmc.sae import EsmcSaeLayer
 from esm.models.hub import HubPreTrainedModel, resolve_model_dir
@@ -103,37 +98,6 @@ class EsmcSequenceClassifierOutput:
 
 
 # ---------------------------------------------------------------------------
-# State-dict / weight loading helpers
-# ---------------------------------------------------------------------------
-
-
-def _drop_te_extra_state(
-    module: nn.Module, state_dict: dict, prefix: str, local_metadata: dict
-) -> None:
-    """Strip Transformer Engine's non-tensor ``_extra_state`` entries; TE
-    returns these as ``io.BytesIO`` objects the checkpoint writer cannot
-    dtype-infer."""
-    for key in list(state_dict):
-        if key.endswith("_extra_state"):
-            del state_dict[key]
-
-
-def _ignore_te_extra_state(module: nn.Module, incompatible_keys) -> None:
-    """The load-side counterpart of :func:`_drop_te_extra_state`.
-
-    Without it a model cannot even reload its own ``state_dict``, since the keys
-    stripped on the way out are still expected on the way in. They hold nothing
-    but fp8 scaling metadata, which is empty until fp8 runs and is recomputed
-    when it does.
-    """
-    incompatible_keys.missing_keys[:] = [
-        key
-        for key in incompatible_keys.missing_keys
-        if not key.endswith("_extra_state")
-    ]
-
-
-# ---------------------------------------------------------------------------
 # Base class
 # ---------------------------------------------------------------------------
 
@@ -181,8 +145,8 @@ class EsmcPreTrainedModel(HubPreTrainedModel):
         ``lm_head.*``. Keys are first translated out of the published layout
         (see :mod:`.checkpoint_layout`), then matched against the target tree:
         this keeps keys that already match, strips the ``esmc.`` prefix when
-        loading the bare encoder, drops Transformer-Engine ``_extra_state``
-        entries, and ignores keys with no counterpart (e.g. ``lm_head.*`` when
+        loading the bare encoder, drops ``_extra_state`` entries left by
+        checkpoints saved with Transformer Engine, and ignores keys with no counterpart (e.g. ``lm_head.*`` when
         loading :class:`EsmcModel`).
         """
         adapted: dict[str, torch.Tensor] = {}
@@ -204,8 +168,8 @@ class EsmcPreTrainedModel(HubPreTrainedModel):
     def save_pretrained(self, save_directory: str | os.PathLike) -> None:
         """Write ``config.json`` and ``model.safetensors`` in published layout.
 
-        The in-memory state dict keeps Transformer Engine's fused parameters, so
-        it is translated on the way out; see :mod:`.checkpoint_layout`.
+        The in-memory state dict keeps the projections fused, so it is
+        translated on the way out; see :mod:`.checkpoint_layout`.
         """
         directory = Path(save_directory)
         directory.mkdir(parents=True, exist_ok=True)
@@ -284,11 +248,10 @@ class EsmcModel(EsmcPreTrainedModel):
 
     def __init__(self, config: EsmcConfig):
         super().__init__(config)
-        # Every fused kernel is CUDA-only, so all of them hang off one condition:
-        # the device this model's parameters are being created on. Deriving them
-        # separately is what let the LayerNorm and attention gates disagree.
+        # Fused kernels are CUDA-only; gate on the device the parameters are
+        # being created on.
         on_cuda = torch.get_default_device().type == "cuda"
-        self._use_flash_attn = (
+        self._flash_attn_requested = (
             on_cuda
             and FLASH_ATTN_INSTALLED
             and config.attn_implementation == "flash_attention_2"
@@ -298,12 +261,14 @@ class EsmcModel(EsmcPreTrainedModel):
             config.hidden_size,
             config.num_attention_heads,
             config.num_hidden_layers,
-            use_flash_attn=self._use_flash_attn,
-            use_te=on_cuda and TE_INSTALLED,
+            use_flash_attn=self._flash_attn_requested,
         )
         self._sae_models: nn.ModuleDict = nn.ModuleDict()
-        self._register_state_dict_hook(_drop_te_extra_state)
-        self.register_load_state_dict_post_hook(_ignore_te_extra_state)
+
+    @property
+    def _use_flash_attn(self) -> bool:
+        """Whether forward takes the varlen flash path; re-read so ``.to("cpu")`` falls back."""
+        return self._flash_attn_requested and self.embed.weight.is_cuda
 
     def get_input_embeddings(self) -> nn.Embedding:
         return self.embed

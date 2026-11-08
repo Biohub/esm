@@ -9,9 +9,9 @@ while ours has CCD ligands, MSA and multi-chain, so wrapping ours around theirs
 keeps the richer half. Their trunk/head split is re-exposed as
 :meth:`EsmFold2HFAdapter.trunk`.
 
-The port landed in ``transformers`` 5.16.0.dev0 and this repo pins 4.x, so nothing
-upstream is imported at module scope; :func:`upstream_available` gates the two
-entry points that need it.
+The port landed in ``transformers`` 5.16.0.dev0. Nothing upstream is imported at
+module scope, so this module still imports on older versions;
+:func:`upstream_available` gates the two entry points that need it.
 """
 
 import contextlib
@@ -182,8 +182,8 @@ class EsmFold2HFAdapter(torch.nn.Module):
         model = upstream.EsmFold2Model.from_pretrained(
             pretrained_model_name_or_path, dtype=dtype, **kwargs
         )
-        # No "fp8": ours quantizes TransformerEngine modules in place, and the
-        # port's ESMC is plain PyTorch with none for that walk to find.
+        # No "fp8": ours swaps the native ESMC's fused LayerNorm modules, and
+        # the port's ESMC has a different module tree.
         esmc_dtypes = {"bf16": torch.bfloat16, "fp32": torch.float32}
         if esmc_precision not in esmc_dtypes:
             raise ValueError(
