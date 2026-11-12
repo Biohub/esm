@@ -112,7 +112,8 @@ def test_align_preserves_handedness() -> None:
     chain = _helix_chain()
     mirror = _mirror(chain)
 
-    assert _handedness(chain) == -_handedness(mirror) != 0
+    assert _handedness(chain) != 0
+    assert _handedness(mirror) == -_handedness(chain)
     assert _handedness(mirror.align(chain)) == _handedness(mirror)
 
 
