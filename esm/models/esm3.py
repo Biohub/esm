@@ -335,6 +335,14 @@ class ESM3(nn.Module, ESM3InferenceClient):
         per_res_plddt = defaults(per_res_plddt, 0).float()
         chain_id = defaults(chain_id, 0)
 
+        if sequence_id is None:
+            # Batching right-pads the shorter prompts. Keep real tokens from attending
+            # to that padding, which would make a prompt's output depend on its
+            # batch. Unpadded inputs stay on the mask-free attention path.
+            is_pad = sequence_tokens == C.SEQUENCE_PAD_TOKEN
+            if is_pad.any():
+                sequence_id = (~is_pad).long()
+
         if residue_annotation_tokens is None:
             residue_annotation_tokens = torch.full(
                 (1, L, 16), C.RESIDUE_PAD_TOKEN, dtype=torch.long, device=device
