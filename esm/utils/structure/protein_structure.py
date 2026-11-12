@@ -147,6 +147,13 @@ def compute_alignment_tensors(
     # Singular Value Decomposition for each batch
     u, _, v = torch.svd(covariance_matrix)
 
+    # U V^T is the best orthogonal fit, which can be a reflection (det = -1) and
+    # would superimpose a structure onto its mirror image. Where it is, flip the
+    # axis of the smallest singular value (the last column, since torch.svd sorts
+    # them in descending order) to get the best proper rotation instead.
+    is_reflection = torch.linalg.det(torch.matmul(u, v.transpose(1, 2))) < 0
+    u[is_reflection, :, -1] *= -1
+
     # Calculate rotation matrices for each batch
     rotation_matrix = torch.matmul(u, v.transpose(1, 2))
 
