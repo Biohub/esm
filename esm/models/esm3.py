@@ -553,28 +553,34 @@ class ESM3(nn.Module, ESM3InferenceClient):
                 sequence_id=None,
             )
 
-        output = ESMOutput(
-            **{
-                k: v.to(device).to(torch.float32)
-                for k, v in vars(output).items()
-                if v is not None
-            }
-        )
-
         return LogitsOutput(
             logits=ForwardTrackData(
-                sequence=output.sequence_logits if config.sequence else None,
-                structure=output.structure_logits if config.structure else None,
-                secondary_structure=output.secondary_structure_logits
+                sequence=output.sequence_logits.to(device=device, dtype=torch.float32)
+                if config.sequence
+                else None,
+                structure=output.structure_logits.to(device=device, dtype=torch.float32)
+                if config.structure
+                else None,
+                secondary_structure=output.secondary_structure_logits.to(
+                    device=device, dtype=torch.float32
+                )
                 if config.secondary_structure
                 else None,
-                sasa=output.sasa_logits if config.sasa else None,
-                function=output.function_logits if config.function else None,
+                sasa=output.sasa_logits.to(device=device, dtype=torch.float32)
+                if config.sasa
+                else None,
+                function=output.function_logits.to(device=device, dtype=torch.float32)
+                if config.function
+                else None,
             ),
-            residue_annotation_logits=output.residue_logits
+            residue_annotation_logits=output.residue_logits.to(
+                device=device, dtype=torch.float32
+            )
             if config.residue_annotations
             else None,
-            embeddings=output.embeddings if config.return_embeddings else None,
+            embeddings=output.embeddings.to(device=device, dtype=torch.float32)
+            if config.return_embeddings
+            else None,
         )
 
     def forward_and_sample(
