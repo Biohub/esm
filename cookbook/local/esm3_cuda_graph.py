@@ -189,11 +189,14 @@ def compile_ffns(model, swiglu=False):
 
 def optimize(model, args):
     if args.mxfp8_ffn:
-        from torchao.prototype.mx_formats.inference_workflow import (
+        # TorchAO is an optional benchmark dependency, absent from the base environment.
+        from torchao.prototype.mx_formats.inference_workflow import (  # ty: ignore[unresolved-import]
             MXDynamicActivationMXWeightConfig,
         )
-        from torchao.quantization import quantize_
-        from torchao.quantization.quant_api import KernelPreference
+        from torchao.quantization import quantize_  # ty: ignore[unresolved-import]
+        from torchao.quantization.quant_api import (  # ty: ignore[unresolved-import]
+            KernelPreference,
+        )
 
         quantize_(
             model,
@@ -413,7 +416,7 @@ def main():
             for item in report["candidate_vs_baseline"]
             for head in item.values()
         )
-        bitwise_equal = all(
+        outputs_equal = all(
             head["exact"]
             for item in report["candidate_vs_baseline"]
             for head in item.values()
@@ -424,11 +427,11 @@ def main():
             or args.mxfp8_ffn
             or args.attention != "default"
         )
-        compatible = compatible and (experimental or bitwise_equal)
-        report["bitwise_equivalent"] = bitwise_equal
+        compatible = compatible and (experimental or outputs_equal)
+        report["exact_output_equality"] = outputs_equal
         report["validation"] = (
             "exact"
-            if bitwise_equal
+            if outputs_equal
             else "within_declared_tolerance"
             if compatible
             else "outside_declared_tolerance"
