@@ -546,7 +546,7 @@ class ESM3(nn.Module, ESM3InferenceClient):
                 sasa_tokens=input.sasa,
                 function_tokens=input.function,
                 residue_annotation_tokens=input.residue_annotations,
-                average_plddt=torch.tensor(1.0, device=input.device),
+                average_plddt=torch.ones((), device=input.device),
                 per_res_plddt=per_res_plddt,
                 structure_coords=input.coordinates,
                 chain_id=None,
