@@ -61,6 +61,8 @@ pip install esm
 
 This installs the models, the reference PyTorch path, and Triton on Linux x86-64, so the ESMFold2 `"fused"` backend works without extra packages.
 
+For fixed-shape local ESM3 inference, see the [CUDA Graph benchmark and optimization experiments](cookbook/local/esm3_cuda_graph.md).
+
 #### Install size
 
 `pip install esm` is about 5.6 GB, of which about 4.6 GB is the CUDA build of torch that PyPI always serves.

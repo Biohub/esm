@@ -8,16 +8,15 @@ _to be written_
 
 Improving test coverage and automating the process is high priority but not done yet. For now, to test:
 
-0. Ensure you are testing in a clean environment - we use micromamba for this
+0. Ensure you are testing in a clean environment with Python 3.12 or newer,
+as required by `pyproject.toml`. For example, using micromamba:
 
 ```bash
-micromamba create -n esm
+micromamba create -n esm -c conda-forge python=3.12 pip
 micromamba activate esm
-micromamba install -c conda-forge python=3.10
 
 # in root level of repo
-pip install -e .
-pip install examples/requirements.txt
+python -m pip install -e .
 python -c 'from huggingface_hub import login; login()'
 
 
@@ -32,15 +31,18 @@ ESM_API_KEY=$ESM_API_KEY PYTHONPATH='.' python cookbook/snippets/esm3.py
 
 ```
 
-1. Ensure the following scripts run without errors. Most have a pip install command installing the published `esm` package - comment this out so your release candidate version is tested and not the already published version.
+1. Ensure the following scripts and notebooks run without errors. Comment out
+notebook cells that install the published `esm` package so the candidate checkout
+is tested. Hosted notebooks prompt for an API token; run those interactively
+unless authenticated inputs have been configured for the `treon` run.
 
 ```bash
 ESM_API_KEY=$ESM_API_KEY PYTHONPATH='.' python cookbook/snippets/esm3.py
-pip install treon
-treon cookbook/tutorials/1_esmprotein.ipynb
-treon cookbook/tutorials/2_embed.ipynb
-treon cookbook/tutorials/3_gfp_design.ipynb
-treon cookbook/tutorials/4_forge_generate.ipynb
+python -m pip install treon
+treon cookbook/tutorials/esmprotein.ipynb
+treon cookbook/tutorials/embed.ipynb
+treon cookbook/tutorials/gfp_design.ipynb
+treon cookbook/tutorials/esm3_generate.ipynb
 
 # requires a GPU
 python cookbook/snippets/esm3.py
@@ -49,3 +51,7 @@ python cookbook/local/raw_forwards.py
 
 
 ```
+
+Setting `ESM_API_KEY` alone does not fill a notebook's `getpass` prompt.
+See [`cookbook/tutorials/README.md`](cookbook/tutorials/README.md) for the
+current notebook descriptions and their setup instructions.
