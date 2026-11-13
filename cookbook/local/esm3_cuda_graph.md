@@ -14,24 +14,25 @@ still require the appropriate autocast context.
 
 ## Running the benchmark
 
-Use a clean environment and install the candidate checkout, as described in
-[`CONTRIBUTIONS.md`](../../CONTRIBUTIONS.md). From the repository root:
+Use Python **3.12 or newer**, as required by `pyproject.toml`, and a CUDA GPU.
+The following creates an isolated Python 3.12 environment and installs the
+PyTorch 2.15/CUDA 13.2 stack used for the B200 measurements. Run these commands
+from the candidate checkout's root:
 
 ```bash
-export OMP_NUM_THREADS=4
+python3.12 -m venv .venv
+source .venv/bin/activate
+python -m pip install torch==2.15.0 --index-url https://download.pytorch.org/whl/cu132
 python -m pip install -e .
+export OMP_NUM_THREADS=4
 PYTHONPATH=. python cookbook/local/esm3_cuda_graph.py --output graph.json
 PYTHONPATH=. python cookbook/local/esm3_cuda_graph.py --outputs sequence --output sequence.json
 PYTHONPATH=. python cookbook/local/esm3_cuda_graph.py --batch-size 8 --output batch8.json
 ```
 
-For the versioned B200 experiment, install PyTorch 2.15.0 from its CUDA 13.2
-index before installing the checkout:
-
-```bash
-python -m pip install torch==2.15.0 --index-url https://download.pytorch.org/whl/cu132
-python -m pip install -e .
-```
+Python 3.12 must already be installed. For the repository's broader test workflow,
+see [`CONTRIBUTIONS.md`](../../CONTRIBUTIONS.md). Keep this performance environment
+separate from the repository's locked CI environment.
 
 The script reports the resolved checkpoint directory and source hash. To pin the
 checkpoint to the revision used here, use the loader's local-data mode:
