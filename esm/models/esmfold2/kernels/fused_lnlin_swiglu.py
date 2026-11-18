@@ -132,13 +132,19 @@ def _lnlin_swiglu_fwd_kernel(
             other=0.0,
         )
         ln_w = tl.load(LN_W_ptr + kk + offs_k, mask=k_mask, other=0.0)
+        # fp32 normalise, then one rounding: tl.dot needs x_hat to match the
+        # weight dtype.
+        xf = x.to(tl.float32)
         if HAS_LN_BIAS:
             ln_b = tl.load(LN_B_ptr + kk + offs_k, mask=k_mask, other=0.0)
-            x_hat = ((x - mean[:, None]) * rstd[:, None]) * ln_w[None, :] + ln_b[
-                None, :
-            ]
+            x_hat = ((xf - mean[:, None]) * rstd[:, None]) * ln_w[None, :].to(
+                tl.float32
+            ) + ln_b[None, :].to(tl.float32)
         else:
-            x_hat = ((x - mean[:, None]) * rstd[:, None]) * ln_w[None, :]
+            x_hat = ((xf - mean[:, None]) * rstd[:, None]) * ln_w[None, :].to(
+                tl.float32
+            )
+        x_hat = x_hat.to(x.dtype)
 
         wa = tl.load(
             wa_ptrs,
@@ -274,8 +280,10 @@ def _lnlin_swiglu_fwd(
     lin = torch.empty(
         (M, two_N) if save_lin else (1,), dtype=x_2d.dtype, device=x_2d.device
     )
-    Mean = torch.empty((M,), dtype=x_2d.dtype, device=x_2d.device)
-    Rstd = torch.empty((M,), dtype=x_2d.dtype, device=x_2d.device)
+    # fp32: the main kernel reloads these to build x_hat, so a bf16 buffer
+    # would round every row's mean and rstd before use.
+    Mean = torch.empty((M,), dtype=torch.float32, device=x_2d.device)
+    Rstd = torch.empty((M,), dtype=torch.float32, device=x_2d.device)
 
     block, num_warps = _ln_stats_settings(K)
     _ln_stats_kernel[(M,)](

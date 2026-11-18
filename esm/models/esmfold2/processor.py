@@ -7,6 +7,7 @@ from typing import Any
 import numpy as np
 import torch
 
+from esm.models.esmfold2 import rowpair
 from esm.models.esmfold2.conformers import load_ccd
 from esm.models.esmfold2.output import build_molecular_complex_from_features
 from esm.models.esmfold2.prepare_input import ChainInfo, prepare_esmfold2_input
@@ -405,6 +406,11 @@ class ESMFold2InputBuilder:
         features, chain_infos = self.prepare_input(
             input, seed=seed, device=model.device
         )
+        shards = getattr(model, "shards_pair_rows", None)
+        if shards is not None and shards():
+            rowpair.require_process_group(model.device)
+            # An unseeded conformer search differs per rank; rank 0's input is folded.
+            features = rowpair.broadcast_features(features)
 
         sampler_kwargs: dict[str, Any] = {}
         if noise_scale is not None:

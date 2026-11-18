@@ -498,8 +498,10 @@ class ProteinChain:
             return sasa_per_residue
         return sasa_per_atom
 
-    def sap_score(self, aggregation: str = "atom") -> np.ndarray:
-        """Compute static spatial aggregation propensity (SAP) with a 5-Angstrom radius.
+    def sap_score(
+        self, aggregation: str = "atom", sap_radius: float = 5.0
+    ) -> np.ndarray:
+        """Compute static spatial aggregation propensity (SAP) within a chosen radius.
 
         Each atom is a neighborhood center. Only side-chain SASA contributes,
         normalized by the residue's fully exposed side-chain area in Ala-X-Ala
@@ -512,6 +514,8 @@ class ProteinChain:
             Return per-atom scores, residue means (NaN for missing residues),
             or the sum of positive atom scores over the entire chain. The latter
             extends Lauer et al.'s CDR-only aggregation to all supplied atoms.
+        sap_radius : float, default=5.0
+            Neighborhood radius in Angstroms; use 8.0 for direct SAP8.
 
         Notes
         -----
@@ -525,7 +529,8 @@ class ProteinChain:
         Chennamsetty et al. (2009), doi:10.1073/pnas.0904191106.
         Lauer et al. (2012), doi:10.1002/jps.22758.
         """
-        sap_radius = 5.0
+        if not np.isfinite(sap_radius) or sap_radius <= 0:
+            raise ValueError("sap_radius must be finite and positive")
         arr = self.atom_array_no_insertions
 
         # asserts to avoid type errors
