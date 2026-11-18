@@ -55,9 +55,11 @@ if TYPE_CHECKING:
 else:
     Layout = Any
 
+# t16 loads its cubin through cuda-bindings; without it every call fails over to Triton.
 OPT_CORE_HINT = (
     'pip install "https://github.com/evolutionaryscale/wheels/releases/download/'
-    'opt-core/v0.5.228.0/opt_core-0.5.228.0-py3-none-any.whl"'
+    'opt-core/v0.5.228.0/opt_core-0.5.228.0-py3-none-any.whl" '
+    '"cuda-bindings>=13.3,<14"'
 )
 
 # Columns per in-place TriMul chunk.
@@ -91,13 +93,16 @@ def require_process_group(device: torch.device) -> None:
             "ESMFold2: shard_rows=True needs a process group. Call "
             "torch.distributed.init_process_group() before folding."
         )
-    local = int(os.environ.get("LOCAL_RANK", "0"))
-    if device.type == "cuda" and device.index != local:
-        raise RuntimeError(
-            f"ESMFold2: rank LOCAL_RANK={local} holds the model on {device}. "
-            "Call torch.cuda.set_device(int(os.environ['LOCAL_RANK'])) before "
-            "moving the model to CUDA, so each rank uses its own GPU."
-        )
+    # NCCL uses the current device. LOCAL_RANK is no index when each rank sees one GPU.
+    if device.type == "cuda":
+        current = torch.cuda.current_device()
+        index = current if device.index is None else device.index
+        if index != current:
+            raise RuntimeError(
+                f"ESMFold2: the model is on {device} but the current CUDA device "
+                f"is cuda:{current}. Call torch.cuda.set_device(...) before "
+                "moving the model to CUDA, so each rank uses its own GPU."
+            )
 
 
 def world() -> tuple[int, int]:

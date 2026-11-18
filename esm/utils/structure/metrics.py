@@ -32,6 +32,9 @@ def contact_precision(
 
     Since there are roughly ~L true contacts in a protein, this is a reasonable cutoff.
 
+    Each cutoff is capped at the number of valid pairs. Samples with no valid pairs
+    return NaN and should be excluded from aggregate precision metrics.
+
 
     Args:
         predictions (Tensor): Tensor of probabilities of size (B, L, L)
@@ -87,7 +90,9 @@ def contact_precision(
     # Step 2) Select the top half of the prediction (should be symmetric)
     x_ind, y_ind = np.triu_indices(seqlen, minsep)
     predictions_upper = predictions[:, x_ind, y_ind]
-    targets_upper = targets[:, x_ind, y_ind]
+    valid_upper = valid_mask[:, x_ind, y_ind]
+    valid_pair_counts = valid_upper.sum(dim=-1, keepdim=True)
+    targets_upper = targets[:, x_ind, y_ind].masked_fill(~valid_upper, 0)
 
     # Step 3) Select the topk values in each batch where k = L (length of sequence)
     topk = seqlen if override_length is None else max(seqlen, override_length)
@@ -122,7 +127,8 @@ def contact_precision(
 
     # Step 6) Gather the results and divide by the number of guesses to get the precision.
     binned_cumulative_dist = cumulative_dist.gather(1, gather_indices)
-    binned_precisions = binned_cumulative_dist / (gather_indices + 1).type_as(
+    denominators = torch.minimum(gather_indices + 1, valid_pair_counts)
+    binned_precisions = binned_cumulative_dist / denominators.type_as(
         binned_cumulative_dist
     )
 

@@ -317,10 +317,6 @@ def fast_trimul_refusal_reason(pair: Tensor) -> str:
 # autocast over the sampler is a different thing and measurably worse.
 BF16_DIT_GEMM = os.environ.get("ESMFOLD2_BF16_DIT_GEMM", "0") == "1"
 
-T16_INSTALL_HINT = (
-    'pip install "https://github.com/evolutionaryscale/wheels/releases/download/'
-    'opt-core/v0.5.228.0/opt_core-0.5.228.0-py3-none-any.whl"'
-)
 _t16_absent_warned = False
 
 
@@ -341,7 +337,7 @@ def warn_t16_absent(x: Tensor) -> None:
         "fastest pair-transition and TriMul kernels ship in Anthropic's opt_core, "
         "which is not installed. Folds run about 40% slower at 1000 tokens "
         'without it. Results stay within the "fast" backend\'s tolerance. '
-        f"Installing it is optional:\n  {T16_INSTALL_HINT}",
+        f"Installing it is optional:\n  {rowpair.OPT_CORE_HINT}",
         stacklevel=3,
     )
 

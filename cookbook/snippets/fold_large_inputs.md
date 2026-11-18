@@ -11,8 +11,8 @@ own input whole, as in any data-parallel script.
 `opt_core`, which provides the GPU-to-GPU data movement:
 
 ```bash
-pip install "esm @ git+https://github.com/Biohub/esm.git@main"
-pip install "https://github.com/evolutionaryscale/wheels/releases/download/opt-core/v0.5.228.0/opt_core-0.5.228.0-py3-none-any.whl"
+pip install esm
+pip install "https://github.com/evolutionaryscale/wheels/releases/download/opt-core/v0.5.228.0/opt_core-0.5.228.0-py3-none-any.whl" "cuda-bindings>=13.3,<14"
 ```
 
 ## Run
@@ -23,7 +23,7 @@ import os
 import torch
 import torch.distributed as dist
 
-from evolutionaryscale.opensource.models.esmfold2 import (
+from esm.models.esmfold2 import (
     ESMFold2InputBuilder,
     EsmFold2Model,
     ProteinInput,
