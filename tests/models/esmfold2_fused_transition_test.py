@@ -11,6 +11,7 @@ from __future__ import annotations
 import pytest
 import torch
 
+from esm.models.esmfold2 import layers as L
 from esm.models.esmfold2.layers import Transition
 
 D_MODEL = 256
@@ -30,10 +31,8 @@ def _with_buffer(t: Transition, x: torch.Tensor) -> torch.Tensor:
         FusedLNLinearSwiGLUFunction,
     )
 
-    fused = t._fused_swiglu
-    assert fused is not None
     hidden = FusedLNLinearSwiGLUFunction.apply(
-        x, fused.W12, fused.LN_W, fused.LN_B, True
+        x, *t._fused_kernel_weights(x.dtype), True
     )
     return t._addmm_residual(x, hidden)
 
@@ -130,3 +129,62 @@ def test_chunked_forward_is_bitwise_too():
             [_with_buffer(t, x[:, s : s + 32]) for s in range(0, 70, 32)], dim=1
         )
     assert torch.equal(got, ref)
+
+
+def test_cached_kernel_weights_drop_when_the_weights_can_change() -> None:
+    """A stale t16/tx weight copy would serve the old weights after a reload."""
+    t = Transition(D_MODEL)
+    tri = L.TriangleMultiplicativeUpdate(dim=D_MODEL)
+    for mod, attr in ((t, "_t16_pack"), (tri, "_tx_weights")):
+        setattr(mod, attr, {"stale": torch.zeros(1)})
+        mod.to(torch.float32)
+        assert getattr(mod, attr) is None, f"{attr} survived .to()"
+        setattr(mod, attr, {"stale": torch.zeros(1)})
+        mod.load_state_dict(mod.state_dict())
+        assert getattr(mod, attr) is None, f"{attr} survived load_state_dict"
+
+
+@pytest.mark.gpu
+def test_fused_training_updates_norm_and_w12(monkeypatch) -> None:
+    """The fused kernel must train the real LayerNorm and w12, not frozen copies."""
+    served = {"n": 0}
+    orig = L._FusedLNLinearSwiGLUFunction
+
+    class Counted:
+        @staticmethod
+        def apply(*args):
+            out = orig.apply(*args)
+            served["n"] += 1
+            return out
+
+    monkeypatch.setattr(L, "_FusedLNLinearSwiGLUFunction", Counted)
+    torch.manual_seed(0)
+    ref = Transition(D_MODEL).cuda()
+    fused = Transition(D_MODEL).cuda()
+    fused.load_state_dict(ref.state_dict())
+    ref.set_chunk_size(None)
+    fused.set_chunk_size(None)
+    fused.set_kernel_backend("fused")
+    x = torch.randn(1, 64, 64, D_MODEL, device="cuda", dtype=torch.bfloat16)
+    x_ref = x.clone().requires_grad_(True)
+    x_fused = x.clone().requires_grad_(True)
+
+    with torch.autocast("cuda", dtype=torch.bfloat16):
+        ref(x_ref).float().pow(2).mean().backward()
+        fused(x_fused).float().pow(2).mean().backward()
+
+    assert served["n"] == 1, "the fused kernel did not serve the training call"
+    grads = {"x": (x_ref.grad, x_fused.grad)}
+    for (name, p_ref), p_fused in zip(ref.named_parameters(), fused.parameters()):
+        grads[name] = (p_ref.grad, p_fused.grad)
+    for name, (g_ref, g_fused) in grads.items():
+        assert g_fused is not None, f"{name} got no gradient under 'fused'"
+        assert g_ref is not None and g_ref.abs().max() > 0
+        rel = (g_fused.float() - g_ref.float()).abs().max() / g_ref.float().abs().max()
+        assert rel < 2e-2, f"{name}: relative max gradient delta {rel.item():.3e}"
+
+    with torch.no_grad(), torch.autocast("cuda", dtype=torch.bfloat16):
+        before = fused(x)
+        fused.ffn.w12.weight.add_(0.1)
+        after = fused(x)
+    assert not torch.equal(before, after), "the fused path ignored a weight update"

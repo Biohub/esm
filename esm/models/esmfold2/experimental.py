@@ -612,12 +612,14 @@ class EsmFold2ExperimentalModel(HubPreTrainedModel):
     def set_kernel_backend(self, backend: str | None) -> None:
         """Select kernel backend (None / "fused" / "fast").
 
-        "fast" reaches the trunk here, but not this model's own MSA encoder: its
-        block multiplies each triangle update by the MSA track mask before the
-        residual add, which the kernel's fused residual cannot express. That
-        encoder keeps the eager engine under every backend.
+        "fast" does not reach this model's MSA encoder: its block scales each
+        triangle update by the MSA track mask before the residual, which the
+        kernel's fused residual cannot express. ``ESMFOLD2_BF16_DIT_GEMM=1``,
+        set before import, selects bf16 GEMM operands in the diffusion as it
+        does for ``EsmFold2Model.set_kernel_backend``.
         """
         self.folding_trunk.set_kernel_backend(backend)
+        self.inputs_embedder.set_kernel_backend(backend)
         if self.confidence_head is not None:
             self.confidence_head.set_kernel_backend(backend)
         self.structure_head.set_kernel_backend(backend)

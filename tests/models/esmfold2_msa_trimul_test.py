@@ -290,8 +290,14 @@ def test_fused_backend_leaves_the_msa_encoder_bit_exact():
 
 
 @pytest.mark.gpu
-def test_fast_keeps_the_trunk_identical_to_fused():
+def test_fast_keeps_the_trunk_identical_to_fused(monkeypatch):
     """ "fast" is a superset: the trunk's bit-exact kernel must still run, unchanged."""
+    from esm.models.esmfold2 import layers
+
+    # t16 and tx replace the pair transition and the TriMul under "fast" on
+    # sm_90; each has its own tolerance test.
+    monkeypatch.setattr(layers, "T16_AVAILABLE", False)
+    monkeypatch.setattr(layers, "TX_AVAILABLE", False)
     blk = PairUpdateBlock(d_pair=D_PAIR).cuda().eval()
     pair, mask = _pair_and_mask(64, "cuda", torch.bfloat16)
     mask_f32 = mask.to(torch.float32)

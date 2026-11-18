@@ -548,6 +548,39 @@ def tiny_esmfold2(tiny_esmfold2_config):
 
 
 @pytest.fixture
+def wide_esmfold2(tiny_esmfold2_config):
+    """The tiny depth at release widths, on CUDA, the only shapes the "fast" kernels serve.
+
+    Zero-init weights are drawn so the adaLN-Zero gates and out-projections are live.
+    """
+    from esm.models.esmfold2 import EsmFold2Config, EsmFold2Model
+
+    fields = tiny_esmfold2_config.to_dict()
+    fields.pop("model_type", None)
+    fields["pairwise_hidden_size"] = 256
+    diffusion = fields["structure_head"]["diffusion_module"]
+    diffusion.update(token_hidden_size=768, c_z=256, token_num_heads=16)
+    diffusion["atom_encoder"].update(hidden_size=128, num_attention_heads=4)
+    torch.manual_seed(0)
+    model = EsmFold2Model(EsmFold2Config(**fields)).cuda().eval()
+    model.set_chunk_size(None)
+    with torch.no_grad():
+        for p in model.parameters():
+            if not p.any():
+                p.normal_(0.0, 0.02)
+    return model
+
+
+@pytest.fixture
+def deterministic():
+    """Bitwise-repeatable CUDA folds, so a tolerance measures the code, not the run."""
+    os.environ.setdefault("CUBLAS_WORKSPACE_CONFIG", ":4096:8")
+    torch.use_deterministic_algorithms(True)
+    yield
+    torch.use_deterministic_algorithms(False)
+
+
+@pytest.fixture
 def tiny_esmfold2_experimental(tiny_esmfold2_config):
     """The experimental architecture at the tiny widths."""
     from esm.models.esmfold2 import EsmFold2Config, EsmFold2ExperimentalModel

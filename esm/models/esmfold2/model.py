@@ -12,6 +12,8 @@ companion ``esm`` package.
 """
 
 import math
+from collections.abc import Callable
+from contextlib import nullcontext
 from typing import cast
 
 import torch
@@ -21,13 +23,16 @@ from torch import Tensor
 
 from esm.models.esmc import EsmcModel
 from esm.models.esmc.checkpoint_layout import published_to_native_subtree
+from esm.models.esmfold2 import rowpair
 from esm.models.esmfold2.config import EsmFold2Config, default_module_flags
 from esm.models.esmfold2.constants import MOL_TYPE_NONPOLYMER
 from esm.models.esmfold2.fp8 import convert_esmc_to_fp8_
 from esm.models.esmfold2.hf_checkpoint import hf_state_dict_to_native, is_hf_layout
 from esm.models.esmfold2.layers import (
+    _VALID_MEMORY_MODES,
     CHAR_VOCAB_SIZE,
     MAX_ATOMIC_NUMBER,
+    MEMORY_BIG,
     NUM_RES_TYPES,
     DiffusionStructureHead,
     FoldingTrunk,
@@ -41,6 +46,7 @@ from esm.models.esmfold2.layers import (
     TriangleMultiplicativeUpdate,
     _categorical_mean,
     _compute_intra_token_idx,
+    _memory_big,
     _to_fused_kernel_dtype,
     compute_lm_hidden_states,
     fast_trimul_refusal_reason,
@@ -48,6 +54,7 @@ from esm.models.esmfold2.layers import (
     gather_token_to_atom,
     maybe_apply_msa_column_masking,
     maybe_subsample_msa,
+    row_bands,
     warn_fast_trimul_refused,
 )
 from esm.models.hub import HubPreTrainedModel, resolve_model_dir
@@ -60,6 +67,16 @@ _EPS = 1e-6
 # ``model.set_chunk_size(...)``; pass None to disable chunking (faster for
 # short L but OOM-prone past ~600).
 _DEFAULT_CHUNK_SIZE = 64
+
+# Below this, ESM-C's weights never set the peak, so the memory mode leaves them
+# resident rather than pay the round trip to the host.
+_ESMC_OFFLOAD_MIN_TOKENS = 1500
+
+# ``ConfidenceHead._pair_scores``: per-row reductions, chain TM rows, PAE / PDE.
+PairScores = dict[str, Tensor | list[Tensor | None] | None]
+
+# A pair encoding by local row band: ``fn(lo, hi) -> [B, hi - lo, L, C]``.
+RowsFn = Callable[[int, int], Tensor]
 
 # Keys ``prepare_esmfold2_input`` emits that inference has no consumer for.
 # ``forward`` accepts and drops these and rejects every other unknown keyword; it
@@ -91,6 +108,20 @@ class PairTransition(nn.Module):
             sl = x[:, s:e]
             out.append(self.ffn(self.norm(sl)))
         return torch.cat(out, dim=1)
+
+
+def _cat_scores(parts: list[PairScores], dim: int) -> PairScores:
+    """``ConfidenceHead._pair_scores`` of consecutive pieces, joined along ``dim``."""
+    out: PairScores = {
+        key: torch.cat([cast(Tensor, p[key]) for p in parts], dim=dim)
+        for key in ("pae", "pde", "ptm_per_row", "iptm_per_row")
+    }
+    chains = [cast(list, p["chain_tm"]) for p in parts]
+    out["chain_tm"] = [
+        None if col[0] is None else torch.cat(list(col), dim=dim)
+        for col in zip(*chains)
+    ]
+    return out
 
 
 class ConfidenceHead(nn.Module):
@@ -146,12 +177,16 @@ class ConfidenceHead(nn.Module):
         self.resolved_weight = nn.Parameter(
             torch.zeros(max_atoms_per_token, d_single, 2)
         )
+        self._memory_mode: str | None = None
 
     def set_kernel_backend(self, backend: str | None) -> None:
         self.folding_trunk.set_kernel_backend(backend)
 
     def set_chunk_size(self, chunk_size: int | None) -> None:
         self.folding_trunk.set_chunk_size(chunk_size)
+
+    def set_memory_mode(self, mode: str | None) -> None:
+        self._memory_mode = mode
 
     @staticmethod
     def _repeat_batch(x: Tensor, num_diffusion_samples: int) -> Tensor:
@@ -167,6 +202,101 @@ class ConfidenceHead(nn.Module):
             b, mult, n, c = x.shape
             return x.reshape(b * mult, n, c)
         return x
+
+    def _pair_terms(
+        self, s_inputs_normed: Tensor
+    ) -> tuple[Tensor, Tensor, Tensor, Tensor]:
+        """The single-to-pair terms of the pair base: row, column and product."""
+        return (
+            self.s_to_z(s_inputs_normed).unsqueeze(2),
+            self.s_to_z_transpose(s_inputs_normed).unsqueeze(1),
+            self.s_to_z_prod_in1(s_inputs_normed)[:, :, None, :],
+            self.s_to_z_prod_in2(s_inputs_normed)[:, None, :, :],
+        )
+
+    def _base_band(
+        self,
+        terms: tuple[Tensor, Tensor, Tensor, Tensor],
+        z: Tensor,
+        rel: Tensor | None,
+        bonds: Tensor | None,
+        g0: int,
+        g1: int,
+    ) -> Tensor:
+        """Global pair rows ``[g0, g1)`` of the pair base; the inputs are those rows."""
+        row, col, prod_in1, prod_in2 = terms
+        out = self.z_norm(z.float())
+        if rel is not None:
+            out = out + rel
+        if bonds is not None:
+            out = out + bonds
+        out = out + row[:, g0:g1]
+        out = out + col
+        return out + self.s_to_z_prod_out(prod_in1[:, g0:g1] * prod_in2)
+
+    def _pair_base(
+        self,
+        s_inputs_normed: Tensor,
+        z: Tensor,
+        relative_position_encoding: Tensor | None,
+        token_bonds_encoding: Tensor | None,
+    ) -> Tensor:
+        terms = self._pair_terms(s_inputs_normed)
+
+        def band(lo: int, hi: int) -> Tensor:
+            rel, bonds = relative_position_encoding, token_bonds_encoding
+            return self._base_band(
+                terms,
+                z[:, lo:hi],
+                None if rel is None else rel[:, lo:hi],
+                None if bonds is None else bonds[:, lo:hi],
+                lo,
+                hi,
+            )
+
+        if not _memory_big(self):
+            return band(0, z.shape[1])
+        base = torch.empty_like(z, dtype=torch.float32)
+        for lo, hi in row_bands(z.shape[1]):
+            base[:, lo:hi] = band(lo, hi)
+        return base
+
+    def _pair_outputs(
+        self,
+        pair_base: Tensor,
+        x_pred: Tensor,
+        rep_idx: Tensor,
+        mask: Tensor,
+        pair_mask: Tensor,
+    ) -> tuple[Tensor, Tensor, Tensor]:
+        rep_coords = gather_rep_atom_coords(x_pred, rep_idx)
+        rep_distances = torch.cdist(
+            rep_coords, rep_coords, compute_mode="donot_use_mm_for_euclid_dist"
+        )
+        bins = (rep_distances.unsqueeze(-1) > self.boundaries).sum(dim=-1).long()
+        pair = pair_base + self.dist_bin_pairwise_embed(bins)
+
+        # FoldingTrunk handles the bf16 cast internally during inference so
+        # each block's fused trimul engages. In-place residual avoids an
+        # extra fp32 pair allocation.
+        with torch.amp.autocast("cuda", enabled=pair.is_cuda, dtype=torch.bfloat16):
+            pair_delta = self.folding_trunk(pair, pair_attention_mask=pair_mask)
+        pair.add_(pair_delta.float())
+        del pair_delta
+        single = self.row_attention_pooling(pair, mask)
+        if not _memory_big(self):
+            return (
+                single,
+                self.pae_head(self.pae_ln(pair)),
+                self.pde_head(self.pde_ln(pair)),
+            )
+        # Banded, so the fp32 LayerNorm copy of the pair never exists whole.
+        pae = pair.new_empty((*pair.shape[:-1], self.pae_head.out_features))
+        pde = pair.new_empty((*pair.shape[:-1], self.pde_head.out_features))
+        for lo, hi in row_bands(pair.shape[1]):
+            pae[:, lo:hi] = self.pae_head(self.pae_ln(pair[:, lo:hi]))
+            pde[:, lo:hi] = self.pde_head(self.pde_ln(pair[:, lo:hi]))
+        return single, pae, pde
 
     def forward(
         self,
@@ -184,46 +314,35 @@ class ConfidenceHead(nn.Module):
         token_bonds_encoding: Tensor | None = None,
     ) -> dict[str, Tensor]:
         s_inputs_normed = self.s_inputs_norm(s_inputs)
-
-        z_base = self.z_norm(z)
-        if relative_position_encoding is not None:
-            z_base = z_base + relative_position_encoding
-        if token_bonds_encoding is not None:
-            z_base = z_base + token_bonds_encoding
-        z_base = z_base + self.s_to_z(s_inputs_normed).unsqueeze(2)
-        z_base = z_base + self.s_to_z_transpose(s_inputs_normed).unsqueeze(1)
-        z_base = z_base + self.s_to_z_prod_out(
-            self.s_to_z_prod_in1(s_inputs_normed)[:, :, None, :]
-            * self.s_to_z_prod_in2(s_inputs_normed)[:, None, :, :]
+        z_base = self._pair_base(
+            s_inputs_normed, z, relative_position_encoding, token_bonds_encoding
         )
 
-        pair = self._repeat_batch(z_base, num_diffusion_samples)
         x_pred_flat = self._flatten_sample_axis(x_pred)
         rep_idx_m = self._repeat_batch(distogram_atom_idx, num_diffusion_samples).long()
         mask = self._repeat_batch(token_attention_mask, num_diffusion_samples)
-
-        rep_coords = gather_rep_atom_coords(x_pred_flat, rep_idx_m)
-        rep_distances = torch.cdist(
-            rep_coords, rep_coords, compute_mode="donot_use_mm_for_euclid_dist"
-        )
-        distogram_bins = (
-            (rep_distances.unsqueeze(-1) > self.boundaries).sum(dim=-1).long()
-        )
-        pair = pair + self.dist_bin_pairwise_embed(distogram_bins)
-
         pair_mask = mask[:, :, None].float() * mask[:, None, :].float()
 
-        # FoldingTrunk handles the bf16 cast internally during inference so
-        # each block's fused trimul engages. In-place residual avoids an
-        # extra fp32 pair allocation.
-        with torch.amp.autocast("cuda", enabled=pair.is_cuda, dtype=torch.bfloat16):
-            pair_delta = self.folding_trunk(pair, pair_attention_mask=pair_mask)
-        pair.add_(pair_delta.float())
-        del pair_delta
-        single = self.row_attention_pooling(pair, mask)
-
-        pae_logits = self.pae_head(self.pae_ln(pair))
-        pde_logits = self.pde_head(self.pde_ln(pair))
+        if _memory_big(self) and num_diffusion_samples > 1:
+            parts = [
+                self._pair_outputs(
+                    z_base[i // num_diffusion_samples : i // num_diffusion_samples + 1],
+                    x_pred_flat[i : i + 1],
+                    rep_idx_m[i : i + 1],
+                    mask[i : i + 1],
+                    pair_mask[i : i + 1],
+                )
+                for i in range(x_pred_flat.shape[0])
+            ]
+            single, pae_logits, pde_logits = (torch.cat(t, dim=0) for t in zip(*parts))
+        else:
+            single, pae_logits, pde_logits = self._pair_outputs(
+                self._repeat_batch(z_base, num_diffusion_samples),
+                x_pred_flat,
+                rep_idx_m,
+                mask,
+                pair_mask,
+            )
         return self._finish(
             single=single,
             pae_logits=pae_logits,
@@ -237,6 +356,136 @@ class ConfidenceHead(nn.Module):
             mol_type=mol_type,
             num_diffusion_samples=num_diffusion_samples,
         )
+
+    def scores_rows(
+        self,
+        *,
+        s_inputs: Tensor,
+        z: Tensor,
+        rel_rows: Callable[[int, int], Tensor] | None,
+        bonds_rows: Callable[[int, int], Tensor] | None,
+        x_pred: Tensor,
+        distogram_atom_idx: Tensor,
+        token_attention_mask: Tensor,
+        asym_id: Tensor,
+        mol_type: Tensor,
+        num_diffusion_samples: int,
+        layout: rowpair.Layout,
+    ) -> tuple[Tensor, PairScores, Tensor]:
+        """``(single, pair scores, interface_per_token)`` from this rank's rows.
+
+        ``z`` is the trunk's ``[1, R, N, C]`` rows; ``rel_rows(lo, hi)`` and
+        ``bonds_rows(lo, hi)`` give local rows ``[lo, hi)`` of the encodings.
+        Per sample, the pair base is rebuilt per band, the head trunk runs in
+        place on one shard, and every pair reduction is taken per band. So no
+        fp32 shard, no ``[S, N, N, bins]`` logits and no ``[S, N, N]`` distances
+        exist; the logits are not returned. pTM / ipTM / pLDDT are whole on
+        every rank; PAE and PDE are on rank 0's host only. ``z`` is no longer
+        read. Runs inside ``rowpair.sharded(layout)``.
+        """
+        r0, R = layout.r0, layout.R
+        terms = self._pair_terms(self.s_inputs_norm(s_inputs))
+        x_pred_flat = self._flatten_sample_axis(x_pred)
+        rep_idx_m = self._repeat_batch(distogram_atom_idx, num_diffusion_samples).long()
+        mask = self._repeat_batch(token_attention_mask, num_diffusion_samples)
+        asym_m = self._repeat_batch(asym_id, num_diffusion_samples)
+        is_ligand = (
+            self._repeat_batch(mol_type, num_diffusion_samples) == MOL_TYPE_NONPOLYMER
+        ).float()
+        pair_mask = (
+            rowpair.rows_of(mask, layout)[:, :, None].float() * mask[:, None, :].float()
+        )
+        trunk_dtype = self.folding_trunk.compute_dtype(torch.float32, z.is_cuda)
+
+        singles: list[Tensor] = []
+        scores: list[dict] = []
+        interfaces: list[Tensor] = []
+        for i in range(x_pred_flat.shape[0]):
+            rep = gather_rep_atom_coords(x_pred_flat[i : i + 1], rep_idx_m[i : i + 1])
+
+            def pair_band(lo: int, hi: int) -> tuple[Tensor, Tensor]:
+                dist = torch.cdist(
+                    rep[:, r0 + lo : r0 + hi],
+                    rep,
+                    compute_mode="donot_use_mm_for_euclid_dist",
+                )
+                bins = (dist.unsqueeze(-1) > self.boundaries).sum(dim=-1).long()
+                base = self._base_band(
+                    terms,
+                    z[:, lo:hi],
+                    None if rel_rows is None else rel_rows(lo, hi),
+                    None if bonds_rows is None else bonds_rows(lo, hi),
+                    r0 + lo,
+                    r0 + hi,
+                )
+                return base + self.dist_bin_pairwise_embed(bins), dist
+
+            trunk_in = torch.empty(
+                (1, R, *z.shape[2:]), dtype=trunk_dtype, device=z.device
+            )
+            for lo, hi in row_bands(R):
+                trunk_in[:, lo:hi] = pair_band(lo, hi)[0]
+            with torch.amp.autocast("cuda", enabled=z.is_cuda, dtype=torch.bfloat16):
+                trunk_out = self.folding_trunk(
+                    trunk_in, pair_attention_mask=pair_mask[i : i + 1], inplace=True
+                )
+            del trunk_in
+            band_singles, band_scores, band_interface = [], [], []
+            for lo, hi in row_bands(R):
+                pair, dist = pair_band(lo, hi)
+                pair.add_(trunk_out[:, lo:hi].float())
+                g = slice(r0 + lo, r0 + hi)
+                band_interface.append(
+                    self._interface_rows(
+                        dist,
+                        asym_m[i : i + 1, g],
+                        asym_m[i : i + 1],
+                        is_ligand[i : i + 1, g],
+                    )
+                )
+                band_singles.append(self.row_attention_pooling(pair, mask[i : i + 1]))
+                band_scores.append(
+                    self._pair_scores(
+                        self.pae_head(self.pae_ln(pair)),
+                        self.pde_head(self.pde_ln(pair)),
+                        mask[i : i + 1],
+                        asym_m[i : i + 1],
+                        r0 + lo,
+                    )
+                )
+                del pair, dist
+            del trunk_out
+            singles.append(torch.cat(band_singles, dim=1))
+            scores.append(_cat_scores(band_scores, dim=1))
+            interfaces.append(torch.cat(band_interface, dim=1))
+
+        merged = _cat_scores(scores, dim=0)
+        for key in ("ptm_per_row", "iptm_per_row"):
+            merged[key] = rowpair.all_gather_rows(
+                cast(Tensor, merged[key]).contiguous(), layout, dim=1
+            )
+        # The [S, N, N] matrices go to rank 0's host: whole on every rank they
+        # would be an N^2 term that no rank count shrinks.
+        for key in ("pae", "pde"):
+            rows = cast(Tensor, merged[key])
+            parts = [
+                rowpair.gather_rows_to_rank0_host(rows[i : i + 1].contiguous(), layout)
+                for i in range(rows.shape[0])
+            ]
+            merged[key] = (
+                None
+                if parts[0] is None
+                else torch.cat([cast(Tensor, p) for p in parts], dim=0)
+            )
+        merged["chain_tm"] = [
+            None
+            if t is None
+            else rowpair.all_gather_rows(t.contiguous(), layout, dim=1)
+            for t in cast(list, merged["chain_tm"])
+        ]
+        single = rowpair.all_gather_rows(torch.cat(singles, dim=0), layout, dim=1)
+        interface = rowpair.all_gather_rows(torch.cat(interfaces, dim=0), layout, dim=1)
+        return single, merged, interface
 
     def _finish(
         self,
@@ -260,16 +509,127 @@ class ConfidenceHead(nn.Module):
         ``single`` / ``pae_logits`` / ``pde_logits``, and reuse this exact
         (serial, replicated) reduction code — one source of truth for the fiddly
         pTM/ipTM/pair_chains logic."""
-        x_pred_flat = self._flatten_sample_axis(x_pred)
+        scores = self._pair_scores(
+            pae_logits,
+            pde_logits,
+            self._repeat_batch(token_attention_mask, num_diffusion_samples),
+            self._repeat_batch(asym_id, num_diffusion_samples),
+        )
+        out = self._finish_scores(
+            single=single,
+            scores=scores,
+            x_pred=x_pred,
+            distogram_atom_idx=distogram_atom_idx,
+            token_attention_mask=token_attention_mask,
+            atom_to_token=atom_to_token,
+            atom_attention_mask=atom_attention_mask,
+            asym_id=asym_id,
+            mol_type=mol_type,
+            num_diffusion_samples=num_diffusion_samples,
+        )
+        out["pae_logits"] = pae_logits
+        out["pde_logits"] = pde_logits
+        return out
+
+    @staticmethod
+    def _interface_rows(
+        rep_distances: Tensor, asym_rows: Tensor, asym: Tensor, is_ligand_rows: Tensor
+    ) -> Tensor:
+        """Per row token: 1 if within 8 A of another chain and not a ligand."""
+        inter_chain = (asym_rows.unsqueeze(-1) != asym.unsqueeze(-2)).float()
+        near_contact = (rep_distances < 8).float()
+        return (near_contact * inter_chain * (1.0 - is_ligand_rows).unsqueeze(-1)).amax(
+            dim=-1
+        )
+
+    def _pair_scores(
+        self,
+        pae_logits: Tensor,
+        pde_logits: Tensor,
+        mask: Tensor,
+        expanded_asym: Tensor,
+        row0: int = 0,
+    ) -> PairScores:
+        """The pair-head reductions of rows ``[row0, row0 + R)``.
+
+        Every value is a per-row reduction over all columns, so a rank computes
+        its own rows and the max over rows happens after the gather.
+        """
+        R = pae_logits.shape[1]
+        pae = _categorical_mean(pae_logits, start=0.0, end=32.0).detach()
+        pde = _categorical_mean(pde_logits, start=0.0, end=32.0).detach()
+
+        n_bins = pae_logits.shape[-1]
+        bin_width = 32.0 / n_bins
+        bin_centers = torch.arange(
+            0.5 * bin_width, 32.0, bin_width, device=pae_logits.device
+        )
+        mask_f = mask.float()
+        N_res = mask_f.sum(dim=-1, keepdim=True)
+        d0 = 1.24 * (N_res.clamp(min=19) - 15) ** (1 / 3) - 1.8
+        tm_per_bin = 1 / (1 + (bin_centers / d0) ** 2)
+        pae_probs = F.softmax(pae_logits, dim=-1)
+        tm_expected = (pae_probs * tm_per_bin[:, None, None, :]).sum(dim=-1)
+        del pae_probs
+
+        mask_rows = mask_f[:, row0 : row0 + R]
+        pair_mask_2d = mask_rows.unsqueeze(-1) * mask_f.unsqueeze(-2)
+        ptm_per_row = (tm_expected * pair_mask_2d).sum(dim=-1) / (
+            pair_mask_2d.sum(dim=-1) + _EPS
+        )
+        asym_rows = expanded_asym[:, row0 : row0 + R]
+        inter_chain_mask = (
+            asym_rows.unsqueeze(-1) != expanded_asym.unsqueeze(-2)
+        ).float() * pair_mask_2d
+        iptm_per_row = (tm_expected * inter_chain_mask).sum(dim=-1) / (
+            inter_chain_mask.sum(dim=-1) + _EPS
+        )
+
+        # chain_tm[c1][:, i] = mean over columns j in chain c1 of tm_expected[i, j].
+        n_chains = int(expanded_asym.max().item()) + 1 if mask.shape[0] > 0 else 1
+        chain_tm: list[Tensor | None] = []
+        for c1 in range(n_chains):
+            chain_c1 = (expanded_asym == c1).float() * mask_f
+            if chain_c1.sum() == 0:
+                chain_tm.append(None)
+                continue
+            col_mask = chain_c1.unsqueeze(-2)
+            chain_tm.append(
+                (tm_expected * col_mask).sum(dim=-1) / (col_mask.sum(dim=-1) + _EPS)
+            )
+        return {
+            "pae": pae,
+            "pde": pde,
+            "ptm_per_row": ptm_per_row,
+            "iptm_per_row": iptm_per_row,
+            "chain_tm": chain_tm,
+        }
+
+    def _finish_scores(
+        self,
+        *,
+        single: Tensor,
+        scores: PairScores,
+        x_pred: Tensor,
+        distogram_atom_idx: Tensor,
+        token_attention_mask: Tensor,
+        atom_to_token: Tensor,
+        atom_attention_mask: Tensor,
+        asym_id: Tensor,
+        mol_type: Tensor,
+        num_diffusion_samples: int,
+        interface_per_token: Tensor | None = None,
+    ) -> dict[str, Tensor]:
+        """``_finish`` from whole-row ``_pair_scores``.
+
+        ``interface_per_token``: :meth:`_interface_rows` over all rows, computed
+        by the caller; ``None`` computes it here from ``x_pred``.
+        """
         atom_to_token_m = self._repeat_batch(atom_to_token, num_diffusion_samples)
         atom_mask_m = self._repeat_batch(atom_attention_mask, num_diffusion_samples)
         rep_idx_m = self._repeat_batch(distogram_atom_idx, num_diffusion_samples).long()
         mask = self._repeat_batch(token_attention_mask, num_diffusion_samples)
         Bm = single.shape[0]
-        rep_coords = gather_rep_atom_coords(x_pred_flat, rep_idx_m)
-        rep_distances = torch.cdist(
-            rep_coords, rep_coords, compute_mode="donot_use_mm_for_euclid_dist"
-        )
 
         atom_mask_f = atom_mask_m.float()
         s_at_atoms = gather_token_to_atom(single, atom_to_token_m)
@@ -298,13 +658,18 @@ class ConfidenceHead(nn.Module):
         expanded_type = self._repeat_batch(mol_type, num_diffusion_samples)
         expanded_asym = self._repeat_batch(asym_id, num_diffusion_samples)
         is_ligand = (expanded_type == MOL_TYPE_NONPOLYMER).float()
-        inter_chain = (
-            expanded_asym.unsqueeze(-1) != expanded_asym.unsqueeze(-2)
-        ).float()
-        near_contact = (rep_distances < 8).float()
-        interface_per_token = (
-            near_contact * inter_chain * (1.0 - is_ligand).unsqueeze(-1)
-        ).amax(dim=-1)
+        if interface_per_token is None:
+            rep_coords = gather_rep_atom_coords(
+                self._flatten_sample_axis(x_pred), rep_idx_m
+            )
+            interface_per_token = self._interface_rows(
+                torch.cdist(
+                    rep_coords, rep_coords, compute_mode="donot_use_mm_for_euclid_dist"
+                ),
+                expanded_asym,
+                expanded_asym,
+                is_ligand,
+            )
         iplddt_weight = torch.where(
             is_ligand.bool(),
             torch.full_like(interface_per_token, 2.0),
@@ -320,79 +685,52 @@ class ConfidenceHead(nn.Module):
 
         plddt_ca = plddt_per_atom.gather(1, rep_idx_m)
 
-        # PAE / PDE (logits computed by the caller — serial front or CP wrapper).
-        pae = _categorical_mean(pae_logits, start=0.0, end=32.0).detach()
-        pde = _categorical_mean(pde_logits, start=0.0, end=32.0).detach()
+        pae = cast(Tensor | None, scores["pae"])
+        pde = cast(Tensor | None, scores["pde"])
 
         # Resolved (per-atom binary).
         s_at_atoms_res = self.resolved_ln(s_at_atoms)
         w_res = self.resolved_weight[intra_idx]
         resolved_logits = torch.einsum("...c,...cb->...b", s_at_atoms_res, w_res)
 
-        # pTM / ipTM from pae_logits.
-        n_bins = pae_logits.shape[-1]
-        bin_width = 32.0 / n_bins
-        bin_centers = torch.arange(
-            0.5 * bin_width, 32.0, bin_width, device=pae_logits.device
-        )
         mask_f = mask.float()
-        N_res = mask_f.sum(dim=-1, keepdim=True)
-        d0 = 1.24 * (N_res.clamp(min=19) - 15) ** (1 / 3) - 1.8
-        tm_per_bin = 1 / (1 + (bin_centers / d0) ** 2)
-        pae_probs = F.softmax(pae_logits, dim=-1)
-        tm_expected = (pae_probs * tm_per_bin[:, None, None, :]).sum(dim=-1)
-
-        pair_mask_2d = mask_f.unsqueeze(-1) * mask_f.unsqueeze(-2)
-        ptm_per_row = (tm_expected * pair_mask_2d).sum(dim=-1) / (
-            pair_mask_2d.sum(dim=-1) + _EPS
-        )
-        ptm = ptm_per_row.max(dim=-1).values
-
-        inter_chain_mask = (
-            expanded_asym.unsqueeze(-1) != expanded_asym.unsqueeze(-2)
-        ).float() * pair_mask_2d
-        iptm_per_row = (tm_expected * inter_chain_mask).sum(dim=-1) / (
-            inter_chain_mask.sum(dim=-1) + _EPS
-        )
-        iptm = iptm_per_row.max(dim=-1).values
-
-        max_chain_id = int(expanded_asym.max().item()) if Bm > 0 else 0
-        n_chains = max_chain_id + 1
+        ptm = cast(Tensor, scores["ptm_per_row"]).max(dim=-1).values
+        iptm = cast(Tensor, scores["iptm_per_row"]).max(dim=-1).values
+        chain_tm = cast(list, scores["chain_tm"])
+        n_chains = len(chain_tm)
         pair_chains_iptm = torch.zeros(
-            Bm, n_chains, n_chains, device=tm_expected.device, dtype=tm_expected.dtype
+            Bm, n_chains, n_chains, device=ptm.device, dtype=ptm.dtype
         )
         # pair_chains_iptm[c1, c2] = max over rows i in chain c2 of the mean over
         # columns j in chain c1 of tm_expected[i, j] (max-of-row-mean, as in the
         # global iptm above), so iptm equals the max off-diagonal entry.
         for c1 in range(n_chains):
-            chain_c1 = (expanded_asym == c1).float() * mask_f
-            if chain_c1.sum() == 0:
+            avg_tm = chain_tm[c1]
+            if avg_tm is None:
                 continue
-            col_mask = chain_c1.unsqueeze(-2)
-            avg_tm = (tm_expected * col_mask).sum(dim=-1) / (
-                col_mask.sum(dim=-1) + _EPS
-            )
             for c2 in range(n_chains):
                 chain_c2 = (expanded_asym == c2).float() * mask_f
                 row_vals = avg_tm.masked_fill(chain_c2 == 0, float("-inf"))
                 pair_chains_iptm[:, c1, c2] = row_vals.max(dim=-1).values.clamp(min=0.0)
 
-        return {
+        out = {
             "plddt_logits": plddt_logits,
             "plddt": plddt.detach(),
             "plddt_per_atom": plddt_per_atom.detach(),
             "plddt_ca": plddt_ca.detach(),
             "complex_plddt": complex_plddt.detach(),
             "complex_iplddt": complex_iplddt.detach(),
-            "pae_logits": pae_logits,
-            "pae": pae,
-            "pde_logits": pde_logits,
-            "pde": pde,
             "resolved_logits": resolved_logits,
             "ptm": ptm.detach(),
             "iptm": iptm.detach(),
             "pair_chains_iptm": pair_chains_iptm.detach(),
         }
+        # Row-sharded, PAE and PDE are assembled on rank 0 only.
+        if pae is not None:
+            out["pae"] = pae
+        if pde is not None:
+            out["pde"] = pde
+        return out
 
 
 def _inverse_softplus(value: float) -> float:
@@ -431,6 +769,11 @@ class EsmFold2Model(HubPreTrainedModel):
     * ``model.set_kernel_backend(None | "fused" | "fast")``:
       select kernel backend (None = reference path, "fused" = bit-exact
       Triton kernels, "fast" = those plus approximate ones).
+    * ``model.set_memory_mode(None | "big")``: lowest peak memory, for inputs
+      the other modes cannot hold. Inference only, and wants
+      ``PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True``. With
+      ``shard_rows=True`` in a process group, "big" also splits the pair rows
+      across the GPUs.
     """
 
     config_class = EsmFold2Config
@@ -484,10 +827,12 @@ class EsmFold2Model(HubPreTrainedModel):
         # computation (restored on the next call), freeing its ~6 GB (fp8) for the
         # recycling trunk + diffusion — the freed blocks stay in the caching pool
         # so the trunk reuses them without cudaMalloc, relieving the allocator
-        # pressure that drove rank desync / spin-wait. Opt-in (the CP entry point
-        # ``wrap_model_with_cp(offload_esmc=...)`` sets it). Validated with CP:
-        # 2.14x end-to-end + 18.5 GB lower peak vs fp32, pLDDT unchanged.
+        # pressure that drove rank desync / spin-wait. Opt-in via
+        # ``set_memory_mode("big")`` or ``wrap_model_with_cp(offload_esmc=...)``.
         self._offload_esmc: bool = False
+        self._esmc_parked: bool = False
+        self._memory_mode: str | None = None
+        self._shard_rows = False
 
         self.folding_trunk = FoldingTrunk(
             n_layers=config.folding_trunk_num_hidden_layers,
@@ -630,11 +975,19 @@ class EsmFold2Model(HubPreTrainedModel):
         Args:
             backend: ``None`` (reference path), ``"fused"`` (vendored Triton
                 kernels, bit-exact against the reference path), or ``"fast"``
-                (those plus approximate kernels — currently the MSA encoder's
-                triangle multiplication, which is bf16 where the eager engine
-                upcasts to fp32).
+                (those plus approximate, inference-only kernels: the MSA
+                encoder's triangle multiplication, the fused diffusion and
+                atom-transformer steps, and on sm_90 with Anthropic's
+                ``opt_core`` installed, its pair-transition and TriMul
+                kernels).
+
+        Under ``"fast"`` the diffusion sampler stays fp32. Set
+        ``ESMFOLD2_BF16_DIT_GEMM=1`` before importing this package to run the
+        diffusion and atom-transformer GEMMs on bf16 operands, with the
+        residual stream and normalisation statistics kept in fp32.
         """
         self.folding_trunk.set_kernel_backend(backend)
+        self.inputs_embedder.set_kernel_backend(backend)
         if self.lm_encoder is not None:
             self.lm_encoder.set_kernel_backend(backend)
         self.parcae_coda.set_kernel_backend(backend)
@@ -706,6 +1059,109 @@ class EsmFold2Model(HubPreTrainedModel):
         if self.msa_encoder is not None:
             self.msa_encoder.set_chunk_size(chunk_size)
 
+    def set_memory_mode(self, mode: str | None, *, shard_rows: bool = False) -> None:
+        """Select the memory mode: ``None`` (default) or ``"big"``.
+
+        "big" lowers peak GPU memory at some cost in speed, for inputs the
+        other modes cannot hold. Inference only.
+
+        ``shard_rows=True`` (with "big") splits every ``N x N`` pair tensor by
+        rows across the ranks of an initialised process group, so the reachable
+        input grows with the GPU count. Every rank then folds rank 0's input;
+        without it each rank folds its own input whole (data parallel). It
+        needs ``opt_core`` (see ``rowpair.OPT_CORE_HINT``), a process group
+        (``torch.distributed.init_process_group``) and each rank on its own GPU
+        (``torch.cuda.set_device(LOCAL_RANK)``). Sharded, a call folds one
+        complex. Every rank returns the same coordinates and scores, but
+        ``pae``, ``pde`` and ``distogram_logits`` exist on rank 0 only (``None``
+        elsewhere), and ``pae_logits`` / ``pde_logits`` are not returned.
+        """
+        if mode not in _VALID_MEMORY_MODES:
+            raise ValueError(
+                f"memory mode must be one of {_VALID_MEMORY_MODES}, got {mode!r}"
+            )
+        if shard_rows and mode != MEMORY_BIG:
+            raise ValueError('shard_rows needs set_memory_mode("big")')
+        if shard_rows:
+            rowpair.require_opt_core()
+        self._memory_mode = mode
+        self._shard_rows = shard_rows
+        self.confidence_head.set_memory_mode(mode)
+        self.structure_head.set_memory_mode(mode)
+
+    def _park_esmc(self, n_tokens: int) -> bool:
+        if self._memory_mode == MEMORY_BIG:
+            return n_tokens >= _ESMC_OFFLOAD_MIN_TOKENS
+        return self._offload_esmc
+
+    def _lm_hidden_states(
+        self,
+        lm_hidden_states: Tensor | None,
+        input_ids: Tensor | None,
+        asym_id: Tensor,
+        residue_index: Tensor,
+        mol_type: Tensor,
+        tok_mask: Tensor,
+        lm_mask_pct: float | None,
+    ) -> Tensor | None:
+        """The given LM hidden states, else ESM-C's on ``input_ids``, else ``None``."""
+        if lm_hidden_states is not None or input_ids is None or self.esmc is None:
+            return lm_hidden_states
+        return self._compute_lm_hidden_states(
+            input_ids,
+            asym_id,
+            residue_index,
+            mol_type,
+            tok_mask,
+            lm_mask_pct=(
+                lm_mask_pct if lm_mask_pct is not None else self.config.lm_mask_pct
+            ),
+        )
+
+    def _park_esmc_after_lm(self, n_tokens: int) -> None:
+        """Move ESM-C to the host once the forward is done with it."""
+        if not self._park_esmc(n_tokens) or self.esmc is None:
+            return
+        self.esmc.to("cpu")
+        self._esmc_parked = True
+        # Back to the driver, not the pool: cuSOLVER's handle allocates outside it.
+        torch.cuda.empty_cache()
+
+    def _msa_inputs(
+        self,
+        msa: Tensor | None,
+        msa_attention_mask: Tensor | None,
+        has_deletion: Tensor | None,
+        deletion_value: Tensor | None,
+        x_inputs: Tensor,
+        msa_max_depth: int | None,
+        msa_column_mask_rate: float | None,
+    ) -> dict | None:
+        """The MSA encoder's per-loop inputs, column-masked once; ``None`` without an MSA.
+
+        ``None`` depth or rate means the checkpoint's value.
+        """
+        if self.msa_encoder is None or msa is None:
+            return None
+        msa_cfg = self.config.msa_encoder
+        depth = msa_cfg.max_depth if msa_max_depth is None else msa_max_depth
+        rate = (
+            msa_cfg.column_mask_rate
+            if msa_column_mask_rate is None
+            else msa_column_mask_rate
+        )
+        return dict(
+            msa=msa,
+            msa_attention_mask=maybe_apply_msa_column_masking(
+                msa_attention_mask, rate=rate
+            ),
+            has_deletion=has_deletion,
+            deletion_value=deletion_value,
+            x_inputs=x_inputs,
+            max_depth=depth,
+            subsample_enabled=depth is not None,
+        )
+
     def _compute_lm_hidden_states(
         self,
         input_ids: Tensor,
@@ -716,10 +1172,9 @@ class EsmFold2Model(HubPreTrainedModel):
         lm_mask_pct: float = 0.0,
     ) -> Tensor:
         assert self.esmc is not None
-        # Restore ESM-C to the compute device if it was offloaded to CPU after a
-        # previous fold (see self._offload_esmc). No-op when already resident.
-        if self._offload_esmc:
+        if self._esmc_parked:
             self.esmc.to(self.device)
+            self._esmc_parked = False
         with torch.autocast(device_type="cuda", dtype=torch.bfloat16):
             return compute_lm_hidden_states(
                 self.esmc,
@@ -737,6 +1192,31 @@ class EsmFold2Model(HubPreTrainedModel):
         b = delta[:, None] * self.parcae_b_cont
         return a, b
 
+    def _inject_pair(
+        self, z: Tensor, z_inject_pair: Tensor, a: Tensor, b_mat: Tensor
+    ) -> Tensor:
+        if not _memory_big(self):
+            injected = self.parcae_input_norm(z_inject_pair)
+            return a * z + F.linear(injected.to(z.dtype), b_mat)
+        for lo, hi in row_bands(z.shape[1]):
+            injected = self.parcae_input_norm(z_inject_pair[:, lo:hi])
+            z[:, lo:hi] = a * z[:, lo:hi] + F.linear(injected.to(z.dtype), b_mat)
+        return z
+
+    def _distogram_logits(self, z: Tensor) -> Tensor:
+        if not (_memory_big(self) and z.is_cuda):
+            return self.distogram_head(z + z.transpose(-2, -3))
+        logits: Tensor | None = None
+        for lo, hi in row_bands(z.shape[1]):
+            band = self.distogram_head(z[:, lo:hi] + z[:, :, lo:hi].transpose(-2, -3))
+            if logits is None:
+                logits = torch.empty(
+                    (*z.shape[:2], *band.shape[2:]), dtype=band.dtype, pin_memory=True
+                )
+            logits[:, lo:hi].copy_(band)
+        assert logits is not None
+        return logits
+
     def _init_pair_state(self, ref: Tensor) -> Tensor:
         # trunc_normal_ by hand: torch after 2.11 switched it to rejection sampling,
         # which changes the draw for a given seed and so every seeded fold.
@@ -745,6 +1225,180 @@ class EsmFold2Model(HubPreTrainedModel):
         state = torch.empty_like(ref, dtype=torch.float32).uniform_(-bound, bound)
         state.erfinv_().mul_(std * math.sqrt(2.0)).clamp_(-3 * std, 3 * std)
         return state.to(dtype=ref.dtype)
+
+    def _init_pair_state_rows(
+        self, layout: rowpair.Layout, dtype: torch.dtype, device: torch.device
+    ) -> Tensor:
+        """This rank's rows of ``_init_pair_state``, from rows of the same draw."""
+        channels = self.config.pairwise_hidden_size
+        std = math.sqrt(2.0 / (5.0 * channels))
+        bound = math.erf(3.0 / math.sqrt(2.0))
+        return rowpair.uniform_rows(
+            layout,
+            channels,
+            -bound,
+            bound,
+            device,
+            transform=lambda t: (
+                t.erfinv_().mul_(std * math.sqrt(2.0)).clamp_(-3 * std, 3 * std)
+            ),
+            dtype=dtype,
+        )
+
+    def _lm_pair_rows(
+        self, lm_tokens: Tensor, layout: rowpair.Layout, p: float, dtype: torch.dtype
+    ) -> Tensor:
+        """This rank's rows of the LM pair, dropped out at ``p``, in ``dtype``."""
+        return rowpair.dropout_rows(
+            lambda g0, g1: self.language_model.pair_from_tokens(
+                lm_tokens, rows=(g0, g1)
+            ).float(),
+            layout,
+            p,
+            self.config.pairwise_hidden_size,
+            dtype,
+            lm_tokens.device,
+        )
+
+    def shards_pair_rows(self) -> bool:
+        """True when ``forward`` splits pair rows over the process group's ranks.
+
+        That is ``set_memory_mode("big", shard_rows=True)``. Inputs too small
+        to split are still folded whole on every rank.
+        """
+        return self._shard_rows
+
+    def _row_encoders(
+        self,
+        layout: rowpair.Layout,
+        x_inputs: Tensor,
+        residue_index: Tensor,
+        asym_id: Tensor,
+        sym_id: Tensor,
+        entity_id: Tensor,
+        token_index: Tensor,
+        token_bonds: Tensor,
+        use_amp: bool,
+    ) -> tuple[RowsFn, RowsFn, RowsFn]:
+        """``(rel_rows, bonds_rows, z_init_rows)``: local pair rows ``[lo, hi)``.
+
+        Each reader rebuilds the band it needs rather than holding the shard;
+        the bands run under the autocast ``forward`` builds them in.
+        """
+        r0 = layout.r0
+
+        def amp() -> torch.autocast:
+            return torch.amp.autocast("cuda", enabled=use_amp, dtype=torch.bfloat16)
+
+        def rel_rows(lo: int, hi: int) -> Tensor:
+            with amp():
+                return self.rel_pos(
+                    residue_index=residue_index,
+                    asym_id=asym_id,
+                    sym_id=sym_id,
+                    entity_id=entity_id,
+                    token_index=token_index,
+                    rows=(r0 + lo, r0 + hi),
+                )
+
+        def bonds_rows(lo: int, hi: int) -> Tensor:
+            with amp():
+                return self.token_bonds(token_bonds[:, r0 + lo : r0 + hi].float())
+
+        def z_init_rows(lo: int, hi: int) -> Tensor:
+            with amp():
+                z_init = self.z_init_1(x_inputs[:, r0 + lo : r0 + hi]).unsqueeze(
+                    2
+                ) + self.z_init_2(x_inputs).unsqueeze(1)
+                return z_init + rel_rows(lo, hi) + bonds_rows(lo, hi)
+
+        return rel_rows, bonds_rows, z_init_rows
+
+    def _check_row_sharding(
+        self, tok_mask: Tensor, include_embeddings: bool, *replicated: Tensor | None
+    ) -> None:
+        """Refuse what the row-sharded fold cannot do; prove the inputs match."""
+        if tok_mask.shape[0] != 1:
+            raise ValueError(
+                "ESMFold2: multi-GPU 'big' folds one input per call, "
+                f"got batch {tok_mask.shape[0]}."
+            )
+        if include_embeddings:
+            raise NotImplementedError(
+                "ESMFold2: include_embeddings needs the whole pair; "
+                "it is not available on several GPUs."
+            )
+        if getattr(self, "_cp_recycle_engine", None) is not None:
+            raise RuntimeError(
+                "ESMFold2: a Fold-CP wrapped model cannot also row-shard; "
+                "use one or the other."
+            )
+        for i, t in enumerate(replicated):
+            if t is not None:
+                rowpair.guard_replicated(t.contiguous(), f"input {i}")
+
+    def _distogram_logits_rows(
+        self, z: Tensor, layout: rowpair.Layout
+    ) -> Tensor | None:
+        """The whole distogram in rank 0's host memory; ``None`` on other ranks.
+
+        ``z^T`` arrives one band at a time, so only a band of it is on a device.
+        """
+        R = z.shape[1]
+        rows = rowpair.TRANSITION_ROWS
+        logits: Tensor | None = None
+        # Every rank joins every band exchange, so all walk the largest shard.
+        for lo in range(0, layout.Rmax, rows):
+            z_t = rowpair.transpose_band_rows(z, layout, lo, lo + rows)
+            if z_t is None:
+                continue
+            hi = lo + z_t.shape[1]
+            band = self.distogram_head(z[:, lo:hi].float() + z_t.float())
+            del z_t
+            if logits is None:
+                logits = band.new_empty((1, R, *band.shape[2:]))
+            logits[:, lo:hi] = band
+        assert logits is not None
+        return rowpair.gather_rows_to_rank0_host(logits, layout)
+
+    def _msa_step_inputs(
+        self, _msa_inputs: dict, tok_mask: Tensor
+    ) -> tuple[Tensor, Tensor, Tensor, Tensor]:
+        """``(msa_oh, msa_attn, has_deletion, deletion_value)`` of one loop step.
+
+        Fresh row subsample each iteration (column mask was applied once in
+        forward, before the loop).
+        """
+        msa_i, mask_i, hd_i, dv_i = maybe_subsample_msa(
+            _msa_inputs["msa"],
+            _msa_inputs["msa_attention_mask"],
+            _msa_inputs["has_deletion"],
+            _msa_inputs["deletion_value"],
+            max_depth=_msa_inputs["max_depth"],
+            enabled=_msa_inputs["subsample_enabled"],
+        )
+        B_msa, M, L_msa = msa_i.shape
+        msa_oh = F.one_hot(
+            msa_i.permute(0, 2, 1).long(), num_classes=NUM_RES_TYPES
+        ).float()
+        msa_attn = (
+            mask_i.permute(0, 2, 1).float()
+            if mask_i is not None
+            else tok_mask[:, :, None].expand(-1, -1, M).float()
+        )
+        # Bias-free MSAEncoder.embed requires zeroed padding.
+        msa_oh = msa_oh * msa_attn.unsqueeze(-1)
+        hd = (
+            hd_i.permute(0, 2, 1).float()
+            if hd_i is not None
+            else torch.zeros(B_msa, L_msa, M, device=msa_i.device)
+        )
+        dv = (
+            dv_i.permute(0, 2, 1).float()
+            if dv_i is not None
+            else torch.zeros(B_msa, L_msa, M, device=msa_i.device)
+        )
+        return msa_oh, msa_attn, hd, dv
 
     def _run_one_loop(
         self,
@@ -800,46 +1454,18 @@ class EsmFold2Model(HubPreTrainedModel):
 
             refined_lm_z: Tensor | None = None
             if lm_z_i is not None and self.lm_encoder is not None:
-                refined_lm_z = self.lm_encoder(
-                    lm_z_i.to(z_init.dtype), pair_attention_mask=pair_mask
-                )
+                lm_in = lm_z_i.to(z_init.dtype)
+                # The fp32 draw is dead once cast; holding it set the fold's peak.
+                lm_z_i = None
+                refined_lm_z = self.lm_encoder(lm_in, pair_attention_mask=pair_mask)
+                del lm_in
 
             z_inject_pair = z_init
             if lm_z_i is not None and self.lm_encoder is None:
                 z_inject_pair = z_inject_pair + lm_z_i.to(z_inject_pair.dtype)
 
             if self.msa_encoder is not None and _msa_inputs is not None:
-                # Fresh row subsample each iteration (column mask was applied
-                # once in forward, before this loop).
-                msa_i, mask_i, hd_i, dv_i = maybe_subsample_msa(
-                    _msa_inputs["msa"],
-                    _msa_inputs["msa_attention_mask"],
-                    _msa_inputs["has_deletion"],
-                    _msa_inputs["deletion_value"],
-                    max_depth=_msa_inputs["max_depth"],
-                    enabled=_msa_inputs["subsample_enabled"],
-                )
-                B_msa, M, L_msa = msa_i.shape
-                msa_oh = F.one_hot(
-                    msa_i.permute(0, 2, 1).long(), num_classes=NUM_RES_TYPES
-                ).float()
-                msa_attn = (
-                    mask_i.permute(0, 2, 1).float()
-                    if mask_i is not None
-                    else tok_mask[:, :, None].expand(-1, -1, M).float()
-                )
-                # Bias-free MSAEncoder.embed requires zeroed padding.
-                msa_oh = msa_oh * msa_attn.unsqueeze(-1)
-                hd = (
-                    hd_i.permute(0, 2, 1).float()
-                    if hd_i is not None
-                    else torch.zeros(B_msa, L_msa, M, device=msa_i.device)
-                )
-                dv = (
-                    dv_i.permute(0, 2, 1).float()
-                    if dv_i is not None
-                    else torch.zeros(B_msa, L_msa, M, device=msa_i.device)
-                )
+                msa_oh, msa_attn, hd, dv = self._msa_step_inputs(_msa_inputs, tok_mask)
                 msa_pair = self.msa_encoder(
                     x_pair=z_inject_pair,
                     x_inputs=_msa_inputs["x_inputs"],
@@ -857,11 +1483,309 @@ class EsmFold2Model(HubPreTrainedModel):
             if refined_lm_z is not None:
                 z_inject_pair = z_inject_pair + refined_lm_z.to(z_inject_pair.dtype)
 
-            injected_pair = self.parcae_input_norm(z_inject_pair)
-            z = a * z + F.linear(injected_pair.to(z.dtype), b_mat)
+            z = self._inject_pair(z, z_inject_pair, a, b_mat)
+            del z_inject_pair, refined_lm_z, lm_z_i
             z = self.folding_trunk(z, pair_attention_mask=pair_mask)
 
         return z
+
+    def _run_one_loop_rows(
+        self,
+        z: Tensor,
+        z_init_rows: RowsFn,
+        lm_tokens: Tensor | None,
+        _msa_inputs: dict | None,
+        pair_mask: Tensor,
+        a: Tensor,
+        b_mat: Tensor,
+        tok_mask: Tensor,
+        total_steps: int,
+        layout: rowpair.Layout,
+    ) -> Tensor:
+        """``_run_one_loop`` on this rank's rows, in the same order.
+
+        ``z`` and ``pair_mask`` are rows; ``lm_tokens`` is the ``[B, L, d_z]``
+        LM token state. Neither ``z_init`` nor the LM pair is held across the
+        loop: each step rebuilds them per band, and the inject reads each band
+        once, so the only pair shards alive are ``z`` and one step's LM rows.
+        """
+        lm_cfg = self.config.lm_encoder
+        per_loop_dropout = (
+            getattr(lm_cfg, "per_loop_lm_dropout", False)
+            and getattr(lm_cfg, "lm_dropout", 0.0) > 0.0
+        )
+        p = getattr(lm_cfg, "lm_dropout", 0.0) if per_loop_dropout else 0.0
+        R = z.shape[1]
+
+        def whole(rows_fn: RowsFn) -> Tensor:
+            bands = row_bands(R)
+            first = rows_fn(*bands[0])
+            out = first.new_empty((*first.shape[:1], R, *first.shape[2:]))
+            for lo, hi in bands:
+                out[:, lo:hi] = first if lo == 0 else rows_fn(lo, hi)
+            return out
+
+        for _ in range(total_steps):
+            lm_rows = (
+                None
+                if lm_tokens is None
+                else self._lm_pair_rows(lm_tokens, layout, p, z.dtype)
+            )
+            refined_lm_z: Tensor | None = None
+            if lm_rows is not None and self.lm_encoder is not None:
+                # The row trunk overwrites lm_rows: it becomes refined_lm_z.
+                refined_lm_z = self.lm_encoder(
+                    lm_rows, pair_attention_mask=pair_mask, inplace=True
+                )
+                lm_rows = None
+
+            def base_rows(lo: int, hi: int, lm: Tensor | None = lm_rows) -> Tensor:
+                band = z_init_rows(lo, hi)
+                if lm is not None:
+                    band = band + lm[:, lo:hi].to(band.dtype)
+                return band
+
+            msa_pair: Tensor | None = None
+            if self.msa_encoder is not None and _msa_inputs is not None:
+                msa_oh, msa_attn, hd, dv = self._msa_step_inputs(_msa_inputs, tok_mask)
+                x_pair = whole(base_rows)
+                msa_pair = self.msa_encoder(
+                    x_pair=x_pair,
+                    x_inputs=_msa_inputs["x_inputs"],
+                    msa_oh=msa_oh,
+                    has_deletion=hd,
+                    deletion_value=dv,
+                    msa_attention_mask=msa_attn,
+                ).to(x_pair.dtype)
+                del x_pair, msa_oh, msa_attn, hd, dv
+            overwrite = self.config.msa_encoder.overwrite
+
+            for lo, hi in row_bands(R):
+                if msa_pair is not None and overwrite:
+                    inject = msa_pair[:, lo:hi]
+                else:
+                    inject = base_rows(lo, hi)
+                    if msa_pair is not None:
+                        inject = inject + msa_pair[:, lo:hi]
+                if refined_lm_z is not None:
+                    inject = inject + refined_lm_z[:, lo:hi].to(inject.dtype)
+                injected = self.parcae_input_norm(inject)
+                z[:, lo:hi] = a * z[:, lo:hi] + F.linear(injected.to(z.dtype), b_mat)
+                del inject, injected
+            del refined_lm_z, msa_pair, lm_rows
+            z = self.folding_trunk(z, pair_attention_mask=pair_mask, inplace=True)
+
+        return z
+
+    def _forward_rows(
+        self,
+        layout: rowpair.Layout,
+        *,
+        x_inputs: Tensor,
+        use_amp: bool,
+        total_steps: int,
+        n_samples: int,
+        token_index: Tensor,
+        residue_index: Tensor,
+        asym_id: Tensor,
+        sym_id: Tensor,
+        entity_id: Tensor,
+        mol_type: Tensor,
+        token_bonds: Tensor,
+        tok_mask: Tensor,
+        atm_mask: Tensor,
+        disto_idx: Tensor,
+        atom_to_token: Tensor,
+        ref_pos: Tensor,
+        ref_charge: Tensor,
+        ref_element_oh: Tensor,
+        ref_atom_name_chars_oh: Tensor,
+        ref_space_uid: Tensor,
+        msa: Tensor | None,
+        has_deletion: Tensor | None,
+        deletion_value: Tensor | None,
+        msa_attention_mask: Tensor | None,
+        msa_max_depth: int | None,
+        msa_column_mask_rate: float | None,
+        input_ids: Tensor | None,
+        lm_hidden_states: Tensor | None,
+        lm_mask_pct: float | None,
+        num_sampling_steps: int | None,
+        noise_scale: float | None,
+        step_scale: float | None,
+        max_inference_sigma: float | None,
+    ) -> dict[str, Tensor]:
+        """``forward`` from the input embedding on, with pair rows split over ranks.
+
+        The statements and their random draws run in ``forward``'s order. No
+        ``N x N`` tensor is whole on a device; ``distogram_logits`` lands in rank
+        0's host memory and is absent on the other ranks.
+        """
+        # Kernels need not be deterministic; the replicated inputs must be.
+        rowpair.broadcast_(x_inputs)
+        rel_rows, bonds_rows, z_init_rows = self._row_encoders(
+            layout,
+            x_inputs,
+            residue_index,
+            asym_id,
+            sym_id,
+            entity_id,
+            token_index,
+            token_bonds,
+            use_amp,
+        )
+        with torch.amp.autocast("cuda", enabled=use_amp, dtype=torch.bfloat16):
+            lm_hidden_states = self._lm_hidden_states(
+                lm_hidden_states,
+                input_ids,
+                asym_id,
+                residue_index,
+                mol_type,
+                tok_mask,
+                lm_mask_pct,
+            )
+            lm_tokens: Tensor | None = None
+            if lm_hidden_states is not None:
+                lm_tokens = self.language_model.token_state(
+                    lm_hidden_states.detach()
+                ).contiguous()
+                rowpair.broadcast_(lm_tokens)
+            del lm_hidden_states
+            self._park_esmc_after_lm(tok_mask.shape[1])
+
+            pair_mask = (
+                rowpair.rows_of(tok_mask, layout)[:, :, None].float()
+                * tok_mask[:, None, :].float()
+            )
+            z = self._init_pair_state_rows(
+                layout, z_init_rows(0, 1).dtype, x_inputs.device
+            )
+            a, b = self._discretized_dynamics()
+            a = a.view(1, 1, 1, -1).to(device=z.device, dtype=z.dtype)
+            b_mat = b.to(device=z.device, dtype=z.dtype)
+
+            _msa_inputs = self._msa_inputs(
+                msa,
+                msa_attention_mask,
+                has_deletion,
+                deletion_value,
+                x_inputs,
+                msa_max_depth,
+                msa_column_mask_rate,
+            )
+
+            with rowpair.sharded(layout):
+                z = self._run_one_loop_rows(
+                    z,
+                    z_init_rows,
+                    lm_tokens,
+                    _msa_inputs,
+                    pair_mask,
+                    a,
+                    b_mat,
+                    tok_mask,
+                    total_steps,
+                    layout,
+                )
+                del lm_tokens, _msa_inputs, a, b_mat
+                for lo, hi in row_bands(z.shape[1]):
+                    z[:, lo:hi] = self.parcae_readout(z[:, lo:hi])
+                z = self.parcae_coda(z, pair_attention_mask=pair_mask, inplace=True)
+        # z stays in the trunk's dtype; each reader upcasts its band, which is exact.
+
+        distogram_logits = self._distogram_logits_rows(z, layout)
+
+        head = self.structure_head
+        N = layout.N
+        route = rowpair.sampler_route(
+            N * N * head.whole_sampler_bytes_per_pair(z.device), z.device
+        )
+        pair_conditioning: Tensor | None = None
+        bias_rows: list[Tensor] | None = None
+        if route == "whole":
+            pair_conditioning = rowpair.all_gather_rows(
+                head.pair_conditioning_rows(z, rel_rows), layout
+            )
+        else:
+            with rowpair.sharded(layout):
+                bias_rows = head.pair_bias_rows(z, rel_rows)
+        sampler_pair = pair_conditioning if bias_rows is None else bias_rows[0]
+        assert sampler_pair is not None
+        # The whole route runs the single-device DiT, so it must not see the layout.
+        with rowpair.sharded(layout) if bias_rows is not None else nullcontext():
+            structure_output = self.structure_head.sample(
+                z_trunk=sampler_pair,
+                s_inputs=x_inputs,
+                s_trunk=None,
+                relative_position_encoding=sampler_pair,
+                ref_pos=ref_pos,
+                ref_charge=ref_charge,
+                ref_mask=atm_mask,
+                ref_element=ref_element_oh,
+                ref_atom_name_chars=ref_atom_name_chars_oh,
+                ref_space_uid=ref_space_uid,
+                tok_idx=atom_to_token,
+                asym_id=asym_id,
+                residue_index=residue_index,
+                entity_id=entity_id,
+                token_index=token_index,
+                sym_id=sym_id,
+                token_attention_mask=tok_mask,
+                num_diffusion_samples=n_samples,
+                num_sampling_steps=num_sampling_steps,
+                noise_scale=noise_scale,
+                step_scale=step_scale,
+                max_inference_sigma=max_inference_sigma,
+                return_atom_repr=False,
+                pair_conditioning=pair_conditioning,
+                pair_bias_rows=bias_rows,
+                replica_sync=rowpair.sync_replicated,
+            )
+        del pair_conditioning, bias_rows, sampler_pair
+        sample_coords = structure_output["sample_atom_coords"]
+        assert sample_coords is not None
+        # Every rank sampled the same noise; rank 0's result is the one kept.
+        sample_coords = rowpair.broadcast_(sample_coords.contiguous())
+
+        with rowpair.sharded(layout):
+            single, scores, interface = self.confidence_head.scores_rows(
+                s_inputs=x_inputs.detach(),
+                z=z,
+                rel_rows=rel_rows,
+                bonds_rows=bonds_rows,
+                x_pred=sample_coords.detach(),
+                distogram_atom_idx=disto_idx,
+                token_attention_mask=tok_mask,
+                asym_id=asym_id,
+                mol_type=mol_type,
+                num_diffusion_samples=n_samples,
+                layout=layout,
+            )
+        # The pair rows are dead; the finish only reads per-token and small tensors.
+        del z
+        confidence_output = self.confidence_head._finish_scores(
+            single=single,
+            scores=scores,
+            x_pred=sample_coords.detach(),
+            distogram_atom_idx=disto_idx,
+            token_attention_mask=tok_mask,
+            atom_to_token=atom_to_token,
+            atom_attention_mask=atm_mask,
+            asym_id=asym_id,
+            mol_type=mol_type,
+            num_diffusion_samples=n_samples,
+            interface_per_token=interface,
+        )
+        output: dict[str, Tensor] = {"sample_atom_coords": sample_coords}
+        if distogram_logits is not None:
+            output["distogram_logits"] = distogram_logits
+        output.update(confidence_output)
+        output["atom_pad_mask"] = (
+            atm_mask.unsqueeze(0) if atm_mask.dim() == 1 else atm_mask
+        )
+        output["residue_index"] = residue_index
+        output["entity_id"] = entity_id
+        return output
 
     @torch.inference_mode()
     def forward(
@@ -924,6 +1848,25 @@ class EsmFold2Model(HubPreTrainedModel):
         atm_mask = atom_attention_mask
         disto_idx = distogram_atom_idx
 
+        layout: rowpair.Layout | None = None
+        if self.shards_pair_rows():
+            rowpair.require_process_group(self.device)
+            layout = rowpair.layout_for(tok_mask.shape[1])
+        if layout is not None:
+            self._check_row_sharding(
+                tok_mask,
+                include_embeddings,
+                token_index,
+                residue_index,
+                asym_id,
+                res_type,
+                ref_pos,
+                atom_to_token,
+                msa,
+                msa_attention_mask,
+            )
+            rowpair.sync_rng_state(ref_pos.device)
+
         n_loops: int = num_loops if num_loops is not None else self.config.num_loops
         n_samples: int = (
             num_diffusion_samples
@@ -984,6 +1927,45 @@ class EsmFold2Model(HubPreTrainedModel):
                 atom_to_token=atom_to_token,
             )
 
+        if layout is not None:
+            return self._forward_rows(
+                layout,
+                x_inputs=x_inputs,
+                use_amp=use_amp,
+                total_steps=total_steps,
+                n_samples=n_samples,
+                token_index=token_index,
+                residue_index=residue_index,
+                asym_id=asym_id,
+                sym_id=sym_id,
+                entity_id=entity_id,
+                mol_type=mol_type,
+                token_bonds=token_bonds,
+                tok_mask=tok_mask,
+                atm_mask=atm_mask,
+                disto_idx=disto_idx,
+                atom_to_token=atom_to_token,
+                ref_pos=ref_pos,
+                ref_charge=ref_charge,
+                ref_element_oh=ref_element_oh,
+                ref_atom_name_chars_oh=ref_atom_name_chars_oh,
+                ref_space_uid=ref_space_uid,
+                msa=msa,
+                has_deletion=has_deletion,
+                deletion_value=deletion_value,
+                msa_attention_mask=msa_attention_mask,
+                msa_max_depth=msa_max_depth,
+                msa_column_mask_rate=msa_column_mask_rate,
+                input_ids=input_ids,
+                lm_hidden_states=lm_hidden_states,
+                lm_mask_pct=lm_mask_pct,
+                num_sampling_steps=num_sampling_steps,
+                noise_scale=noise_scale,
+                step_scale=step_scale,
+                max_inference_sigma=max_inference_sigma,
+            )
+
+        with torch.amp.autocast("cuda", enabled=use_amp, dtype=torch.bfloat16):
             # CP (sharded pair-init): build z_init / rel_pos / token_bonds directly
             # as 2-D-sharded DTensors so the full L×L pair is never resident on any
             # rank (the init-phase peak that made CP OOM at short L). Installed with
@@ -1020,23 +2002,15 @@ class EsmFold2Model(HubPreTrainedModel):
                 z_init = z_init + relative_position_encoding + token_bonds_encoding
                 _pi_n_orig = z_init.shape[1]
 
-            if (
-                lm_hidden_states is None
-                and input_ids is not None
-                and self.esmc is not None
-            ):
-                lm_hidden_states = self._compute_lm_hidden_states(
-                    input_ids,
-                    asym_id,
-                    residue_index,
-                    mol_type,
-                    tok_mask,
-                    lm_mask_pct=(
-                        lm_mask_pct
-                        if lm_mask_pct is not None
-                        else self.config.lm_mask_pct
-                    ),
-                )
+            lm_hidden_states = self._lm_hidden_states(
+                lm_hidden_states,
+                input_ids,
+                asym_id,
+                residue_index,
+                mol_type,
+                tok_mask,
+                lm_mask_pct,
+            )
             lm_z: Tensor | None = None
             if lm_hidden_states is not None:
                 # CP (#14): when a distributed LM->pair builder is installed, emit
@@ -1056,13 +2030,8 @@ class EsmFold2Model(HubPreTrainedModel):
                 else:
                     lm_z = self.language_model(lm_hidden_states.detach())
             del lm_hidden_states
-            # ESM-C is done for this forward — offload to free its ~6 GB (fp8) for the
-            # trunk/diffusion. Return the freed blocks to the driver (not just the
-            # caching pool) so cuSOLVER's out-of-pool cudaMalloc — for its handle in
-            # the diffusion rigid-align SVD — can succeed near the OOM boundary.
-            if self._offload_esmc and self.esmc is not None:
-                self.esmc.to("cpu")
-                torch.cuda.empty_cache()
+            # ESM-C is done for this forward: free its ~6 GB (fp8) for the trunk and diffusion.
+            self._park_esmc_after_lm(tok_mask.shape[1])
 
             # Pair attention mask: sharded block under CP (outer product of the
             # sliced row/col token-mask — never the full L×L), else the serial
@@ -1086,28 +2055,15 @@ class EsmFold2Model(HubPreTrainedModel):
             # Inference-time MSA diversity: column mask is applied once here
             # (shared across recycling loops); row subsampling is deferred to
             # per-iter inside _run_one_loop (fresh subset per loop).
-            _msa_inputs: dict | None = None
-            if self.msa_encoder is not None and msa is not None:
-                # ``None`` means "use the checkpoint's value".
-                msa_cfg = self.config.msa_encoder
-                depth = msa_cfg.max_depth if msa_max_depth is None else msa_max_depth
-                rate = (
-                    msa_cfg.column_mask_rate
-                    if msa_column_mask_rate is None
-                    else msa_column_mask_rate
-                )
-                msa_attention_mask = maybe_apply_msa_column_masking(
-                    msa_attention_mask, rate=rate
-                )
-                _msa_inputs = dict(
-                    msa=msa,
-                    msa_attention_mask=msa_attention_mask,
-                    has_deletion=has_deletion,
-                    deletion_value=deletion_value,
-                    x_inputs=x_inputs,
-                    max_depth=depth,
-                    subsample_enabled=depth is not None,
-                )
+            _msa_inputs = self._msa_inputs(
+                msa,
+                msa_attention_mask,
+                has_deletion,
+                deletion_value,
+                x_inputs,
+                msa_max_depth,
+                msa_column_mask_rate,
+            )
 
             # CP tail (#7): when a recycle engine is installed, keep the pair
             # SHARDED through the recycle loop + parcae so the full L×L pair is
@@ -1178,7 +2134,7 @@ class EsmFold2Model(HubPreTrainedModel):
         else:
             if _z_dt is not None:
                 z = _z_dt.full_tensor()[:, :_n_orig, :_n_orig, :].float()
-            distogram_logits = self.distogram_head(z + z.transpose(-2, -3))  # ty:ignore[unresolved-attribute]
+            distogram_logits = self._distogram_logits(z)  # ty:ignore[invalid-argument-type]
             if _z_dt is not None:
                 del z  # free the full pair before the (sharded) structure phase
 
@@ -1349,6 +2305,19 @@ class MSAEncoderBlock(nn.Module):
             )
         return fused_pair.to(orig_dtype)
 
+    def _triangle_updates_rows(
+        self, pair: Tensor, pair_attention_mask: Tensor, layout: rowpair.Layout
+    ) -> Tensor:
+        """Both triangle updates on this rank's rows, in ``_triangle_updates``' dtypes."""
+        orig_dtype = pair.dtype
+        if self.tri_mul_out.fast_backend_requested() and pair.is_cuda:
+            pair = _to_fused_kernel_dtype(pair)
+        pair = pair.contiguous()
+        mask = pair_attention_mask.to(torch.float32)
+        for tri in (self.tri_mul_out, self.tri_mul_in):
+            tri.residual_update_rows_(pair, mask, layout)
+        return pair.to(orig_dtype)
+
     def forward(
         self,
         m: Tensor,
@@ -1356,12 +2325,39 @@ class MSAEncoderBlock(nn.Module):
         msa_attention_mask: Tensor,
         pair_attention_mask: Tensor,
     ) -> tuple[Tensor, Tensor]:
+        layout = rowpair.current_layout()
+        if layout is not None:
+            return self._forward_rows(
+                m, pair, msa_attention_mask, pair_attention_mask, layout
+            )
         pair = pair + self.outer_product_mean(m, msa_attention_mask)
         if not self.is_final_block:
             m = m + self.msa_pair_weighted_averaging(m, pair, pair_attention_mask)
             m = m + self.msa_transition(m)
         pair = self._triangle_updates(pair, pair_attention_mask)
         pair = pair + self.pair_transition(pair)
+        return m, pair
+
+    def _forward_rows(
+        self,
+        m: Tensor,
+        pair: Tensor,
+        msa_attention_mask: Tensor,
+        pair_attention_mask: Tensor,
+        layout: rowpair.Layout,
+    ) -> tuple[Tensor, Tensor]:
+        """``pair`` and its mask are this rank's rows; ``m`` is replicated."""
+        rows = (layout.r0, layout.r1)
+        pair = pair + self.outer_product_mean(m, msa_attention_mask, rows=rows)
+        if not self.is_final_block:
+            m_rows = self.msa_pair_weighted_averaging(
+                m, pair, pair_attention_mask, rows=rows
+            )
+            m = m + rowpair.all_gather_rows(m_rows, layout, dim=1)
+            del m_rows
+            m = m + self.msa_transition(m)
+        pair = self._triangle_updates_rows(pair, pair_attention_mask, layout)
+        pair = rowpair.row_blocks_(self.pair_transition, pair, add=True)
         return m, pair
 
 
@@ -1418,7 +2414,9 @@ class MSAEncoder(nn.Module):
         )
         m = self.embed(m_feat) + self.project_inputs(x_inputs).unsqueeze(2)
         tok_mask = msa_attention_mask[:, :, 0].bool()
-        pair_attention_mask = tok_mask.unsqueeze(2) & tok_mask.unsqueeze(1)
+        layout = rowpair.current_layout()
+        tok_rows = tok_mask if layout is None else rowpair.rows_of(tok_mask, layout)
+        pair_attention_mask = tok_rows.unsqueeze(2) & tok_mask.unsqueeze(1)
         for block in self.blocks:
             m, x_pair = block(m, x_pair, msa_attention_mask, pair_attention_mask)
         return x_pair
