@@ -543,13 +543,8 @@ def assert_backend_dispatched(model, backend):
 
     if backend == "fused":
         assert _layers.TRITON_KERNELS_AVAILABLE
-        for module in transitions:
-            assert module._fused_swiglu is not None
         for block in pair_blocks:
             assert block.row_drop._use_fused_kernels
-    else:
-        for module in transitions:
-            assert module._fused_swiglu is None
 
 
 def assert_chunking_dispatched(model, chunk_size):

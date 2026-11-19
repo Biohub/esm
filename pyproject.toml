@@ -1,6 +1,6 @@
 [project]
 name = "esm"
-version = "3.4.2"
+version = "3.5.0"
 description = "EvolutionaryScale open model repository"
 readme = "README.md"
 requires-python = ">=3.12"
@@ -91,6 +91,7 @@ platforms = ["linux-64", "osx-arm64"]
 LD_PRELOAD = "$CONDA_PREFIX/lib/libstdc++.so.6${LD_PRELOAD:+:$LD_PRELOAD}"
 
 [tool.pixi.dependencies]
+python-dateutil = "<3"
 matplotlib-base = "*"
 filelock = "*"
 pandas = "*"
@@ -143,8 +144,16 @@ cov-test = "pytest -v --junitxml=pytest.xml --cov=esm"
 
 # PyPI rejects URL requirements, so pip users get this command from a warning in
 # esm/models/esmc/kernels.py instead. The wheel is cp312-only.
+# The wheel only loads on torch 2.11 but its metadata says plain `torch`, so pin
+# torch here. Bump the pin and the wheel URL together.
 [tool.pixi.feature.py312.target.linux-64.pypi-dependencies]
+torch = "==2.11.*"
 flash_attn = { url = "https://github.com/evolutionaryscale/wheels/releases/download/py312-pt211-cu13-sm80-90/flash_attn-2.7.4.post1-cp312-cp312-linux_x86_64.whl" }
+
+# opt_core: the "fast" / "big" kernels (sm_90a cubins, loaded at run time).
+[tool.pixi.target.linux-64.pypi-dependencies]
+opt-core = { url = "https://github.com/evolutionaryscale/wheels/releases/download/opt-core/v0.5.228.0/opt_core-0.5.228.0-py3-none-any.whl" }
+cuda-bindings = ">=13.3,<14"
 
 [tool.pixi.environments]
 default = {features = ["py312"], solve-group = "default"}

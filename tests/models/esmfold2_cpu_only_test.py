@@ -28,7 +28,7 @@ from esm.models.esmfold2 import layers
 assert layers.TRITON_KERNELS_AVAILABLE is False, "Triton claimed to be usable"
 assert layers._fused_pair_bias is None
 assert layers._fused_trimul_with_residual is None
-assert layers._FusedLNLinearSwiGLU is None
+assert layers._FusedLNLinearSwiGLUFunction is None
 assert layers._FusedDropoutResidual is None
 
 # The public surface has to come with it, not just the leaf module.

@@ -70,3 +70,19 @@ def test_sap_sidechain_neighborhoods_and_aggregation(
     protein_score = sap_chain.sap_score(aggregation="protein")
     assert protein_score == pytest.approx(atom_scores[atom_scores > 0].sum())
     assert protein_score == pytest.approx(6 * ala_score)
+
+
+def test_sap8_signed_neighbors_before_positive_sum(
+    sap_chain: ProteinChain, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    arr = sap_chain.atom_array_no_insertions
+    sasa = np.zeros(len(arr))
+    sasa[(arr.res_name == "ALA") & (arr.atom_name == "CB")] = 32.39045
+    sasa[(arr.res_name == "ASP") & (arr.atom_name == "CB")] = 55.1045
+    monkeypatch.setattr(bs, "sasa", lambda _: sasa.copy())
+    # Two signed sidechain sources at x=0 and x=10; include the radius boundary.
+    x = arr.coord[:, 0]
+    expected = (np.abs(x) <= 8) * 0.058 - (np.abs(x - 10) <= 8) * 0.236
+    np.testing.assert_allclose(sap_chain.sap_score(sap_radius=8), expected)
+    assert sap_chain.sap_score("protein", sap_radius=8) == pytest.approx(6 * 0.058)
+    assert sap_chain.sap_score("protein") == pytest.approx(6 * 0.058)

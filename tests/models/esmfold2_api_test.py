@@ -462,7 +462,24 @@ def on_an_accelerator(monkeypatch, tiny_esmfold2):
 def test_standalone_lm_pass_offloads_the_backbone_again(
     tiny_esmfold2, recorded_lm_pass, on_an_accelerator
 ):
-    """Resident on the model device for the pass, back on CPU after it."""
+    """A parked backbone is on the model device for the pass, back on CPU after it."""
+    esmc = _PlacementRecorder()
+    tiny_esmfold2.esmc = esmc
+    tiny_esmfold2._offload_esmc = True
+    tiny_esmfold2._esmc_parked = True
+
+    tiny_esmfold2.compute_lm_hidden_states(**_dummy_lm_inputs())
+
+    (call,) = recorded_lm_pass
+    assert call["moves"] == [on_an_accelerator]
+    assert esmc.moves == [on_an_accelerator, torch.device("cpu")]
+    assert tiny_esmfold2._esmc_parked
+
+
+def test_standalone_lm_pass_parks_a_resident_backbone_after_it(
+    tiny_esmfold2, recorded_lm_pass, on_an_accelerator
+):
+    """The first pass finds the backbone on the device and parks it, as forward does."""
     esmc = _PlacementRecorder()
     tiny_esmfold2.esmc = esmc
     tiny_esmfold2._offload_esmc = True
@@ -470,8 +487,9 @@ def test_standalone_lm_pass_offloads_the_backbone_again(
     tiny_esmfold2.compute_lm_hidden_states(**_dummy_lm_inputs())
 
     (call,) = recorded_lm_pass
-    assert call["moves"] == [on_an_accelerator]
-    assert esmc.moves == [on_an_accelerator, torch.device("cpu")]
+    assert call["moves"] == []
+    assert esmc.moves == [torch.device("cpu")]
+    assert tiny_esmfold2._esmc_parked
 
 
 def test_standalone_lm_pass_offloads_even_when_the_pass_fails(
@@ -486,6 +504,7 @@ def test_standalone_lm_pass_offloads_even_when_the_pass_fails(
     esmc = _PlacementRecorder()
     tiny_esmfold2.esmc = esmc
     tiny_esmfold2._offload_esmc = True
+    tiny_esmfold2._esmc_parked = True
 
     with pytest.raises(RuntimeError, match="blew up"):
         tiny_esmfold2.compute_lm_hidden_states(**_dummy_lm_inputs())
