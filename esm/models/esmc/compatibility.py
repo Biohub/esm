@@ -39,6 +39,7 @@ from esm.sdk.api import (
     LogitsOutput,
 )
 from esm.utils.constants.models import ESMC_6B, ESMC_300M, ESMC_600M
+from esm.utils.device import DeviceLike, get_default_model_dtype, resolve_device
 from esm.utils.sampling import _BatchedESMProteinTensor
 
 _DEPRECATION_MESSAGE = (
@@ -156,18 +157,20 @@ class ESMC(nn.Module, ESMCInferenceClient):
     def from_pretrained(
         cls,
         model_name: str = ESMC_600M,
-        device: torch.device | str | None = None,
+        device: DeviceLike = None,
         use_flash_attn: bool = True,
     ) -> "ESMC":
-        if device is None:
-            device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-        device = torch.device(device)
+        device = resolve_device(device if device is not None else "auto")
+        model_dtype = get_default_model_dtype(device)
         model = EsmcForMaskedLM.from_pretrained(
             _legacy_name_to_repo(model_name),
             device=device,
-            # The old loader cast to bf16 whenever it left the CPU.
-            dtype=torch.bfloat16 if device.type != "cpu" else None,
-            attn_implementation="flash_attention_2" if use_flash_attn else "sdpa",
+            dtype=model_dtype if model_dtype != torch.float32 else None,
+            attn_implementation=(
+                "flash_attention_2"
+                if (use_flash_attn and device.type == "cuda")
+                else "sdpa"
+            ),
         )
         return cls(model=model)
 
