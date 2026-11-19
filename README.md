@@ -232,6 +232,8 @@ The model predicts high-resolution, all-atom 3D protein structures directly from
 
 Codebase, model weights, and model variants for ESMFold2 are available through [Hugging Face](https://huggingface.co/biohub/ESMFold2)
 
+The plain-named [`ESMFold2-Experimental`](https://huggingface.co/biohub/ESMFold2-Experimental) and [`ESMFold2-Experimental-Fast`](https://huggingface.co/biohub/ESMFold2-Experimental-Fast) checkpoints are the paper's cutoff-2021 models. Both use a PDB release-date cutoff of 2021-09-30. Their cutoff-2025 counterparts are [`ESMFold2-Experimental-Cutoff2025`](https://huggingface.co/biohub/ESMFold2-Experimental-Cutoff2025) and [`ESMFold2-Experimental-Fast-Cutoff2025`](https://huggingface.co/biohub/ESMFold2-Experimental-Fast-Cutoff2025). The unqualified checkpoint names therefore refer to the cutoff-2021 models.
+
 ### Running ESMFold2 Through Hugging Face
 <a name="running-esmfold2-through-hugging-face"></a>
 
