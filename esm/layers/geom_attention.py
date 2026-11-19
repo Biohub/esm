@@ -63,7 +63,8 @@ class GeometricReasoningOriginalImpl(nn.Module):
         )
 
         ns = self.s_norm(s)
-        vec_rot, vec_dist = self.proj(ns).split(
+        vec = self.proj(ns).float()
+        vec_rot, vec_dist = vec.split(
             [
                 self.v_heads * 2 * 3 + self.v_heads * 3 * self.num_vector_messages,
                 self.v_heads * 2 * 3,
@@ -144,6 +145,6 @@ class GeometricReasoningOriginalImpl(nn.Module):
         )
         if self.mask_and_zero_frameless:
             attn_out = attn_out.masked_fill(~affine_mask[..., None], 0.0)
-        s = self.out_proj(attn_out)
+        s = self.out_proj(attn_out.to(s.dtype))
 
         return s
