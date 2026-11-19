@@ -5,12 +5,41 @@ import torch
 import torch.nn.functional as F
 from torch import nn
 
+from esm.layers import rotary
 from esm.layers.rotary import RotaryEmbedding, TritonRotaryEmbedding
+from esm.utils.device import is_cuda_available
 
 try:
     from flash_attn import flash_attn_varlen_qkvpacked_func
 except (ImportError, RuntimeError):
     flash_attn_varlen_qkvpacked_func = None  # ty:ignore[invalid-assignment]
+
+
+def _eager_scaled_dot_product_attention(
+    query_BHLD: torch.Tensor,
+    key_BHLD: torch.Tensor,
+    value_BHLD: torch.Tensor,
+    mask_BHLL: torch.Tensor | None,
+) -> tuple[torch.Tensor, torch.Tensor]:
+    scale = query_BHLD.shape[-1] ** -0.5
+    attn_scores = torch.einsum("bhld,bhsd->bhls", query_BHLD, key_BHLD) * scale
+    if mask_BHLL is not None:
+        attn_scores = attn_scores.masked_fill(~mask_BHLL, float("-inf"))
+    attn_weights = torch.softmax(attn_scores, dim=-1)
+    context_BHLD = torch.einsum("bhls,bhsd->bhld", attn_weights, value_BHLD)
+    return context_BHLD, attn_weights
+
+
+def _triton_rotary_available() -> bool:
+    return is_cuda_available() and rotary.apply_triton_rotary is not None
+
+
+def _flash_attention_available(x: torch.Tensor, rotary_module: nn.Module) -> bool:
+    return (
+        flash_attn_varlen_qkvpacked_func is not None
+        and x.is_cuda
+        and isinstance(rotary_module, TritonRotaryEmbedding)
+    )
 
 
 class MultiHeadAttention(nn.Module):
@@ -72,13 +101,10 @@ class MultiHeadAttention(nn.Module):
             mask_BHLL = None
 
         if output_attentions:
-            scale = self.d_head**-0.5
-            attn_scores = torch.einsum("bhld,bhsd->bhls", query_BHLD, key_BHLD) * scale
-            if mask_BHLL is not None:
-                attn_scores = attn_scores.masked_fill(~mask_BHLL, float("-inf"))
-            attn_weights = torch.softmax(attn_scores, dim=-1)
-            context_BHLD = torch.einsum("bhls,bhsd->bhld", attn_weights, value_BHLD)
-        else:
+            context_BHLD, attn_weights = _eager_scaled_dot_product_attention(
+                query_BHLD, key_BHLD, value_BHLD, mask_BHLL
+            )
+        elif query_BHLD.is_cuda:
             attn_weights = None
             if mask_BHLL is None:
                 # Shortcut, if we don't use attention biases then torch
@@ -90,6 +116,11 @@ class MultiHeadAttention(nn.Module):
                 context_BHLD = F.scaled_dot_product_attention(
                     query_BHLD, key_BHLD, value_BHLD, mask_BHLL
                 )
+        else:
+            attn_weights = None
+            context_BHLD, _ = _eager_scaled_dot_product_attention(
+                query_BHLD, key_BHLD, value_BHLD, mask_BHLL
+            )
 
         context_BLD = einops.rearrange(context_BHLD, "b h s d -> b s (h d)")
 
@@ -104,12 +135,17 @@ class FlashMultiHeadAttention(MultiHeadAttention):
             d_model=d_model, n_heads=n_heads, bias=bias, qk_layernorm=qk_layernorm
         )
 
-        # Flash attention rotary.
-        self.rotary = TritonRotaryEmbedding(d_model // n_heads)
+        if _triton_rotary_available():
+            self.rotary = TritonRotaryEmbedding(d_model // n_heads)
+        else:
+            self.rotary = RotaryEmbedding(d_model // n_heads)
 
     def forward(
         self, x, seq_id, output_attentions: bool = False
     ) -> tuple[torch.Tensor, torch.Tensor | None]:
+        if not _flash_attention_available(x, self.rotary):
+            return super().forward(x, seq_id, output_attentions=output_attentions)
+
         if output_attentions:
             raise ValueError(
                 "FlashMultiHeadAttention does not support output_attentions=True. "
