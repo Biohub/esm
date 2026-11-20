@@ -8,7 +8,8 @@ own input whole, as in any data-parallel script.
 ## Install
 
 "big" on one GPU needs only `esm`. On several GPUs it also needs
-`opt_core`, which provides the GPU-to-GPU data movement:
+`opt_core`, which provides GPU-to-GPU communication. The 3,350-token example
+also uses `opt_core` for its H100 triangle multiplication kernels.
 
 ```bash
 pip install esm
@@ -36,21 +37,25 @@ sharded = int(os.environ.get("WORLD_SIZE", "1")) > 1
 if sharded:
     dist.init_process_group("nccl")
 
-model = EsmFold2Model.from_pretrained("biohub/ESMFold2").cuda().eval()
+model = EsmFold2Model.from_pretrained("biohub/ESMFold2-Fast").cuda().eval()
 model.set_kernel_backend("fast")
 model.set_memory_mode("big", shard_rows=sharded)
+model.set_chunk_size(None)
 
 spi = StructurePredictionInput(
-    sequences=[ProteinInput(id="A", sequence="MQIFVKTLTGKT" * 300)]
+    sequences=[ProteinInput(id="A", sequence=("MQIFVKTLTGKT" * 280)[:3350])]
 )
-result = ESMFold2InputBuilder().fold(model, spi, num_diffusion_samples=5, seed=0)
+result = ESMFold2InputBuilder().fold(
+    model, spi, num_loops=10, num_sampling_steps=100, num_diffusion_samples=1, seed=0
+)
 
 if int(os.environ.get("RANK", "0")) == 0:
-    print(result[0].ptm)
+    print(result.ptm)
 ```
 
 ```bash
 export PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True
+export ESMFOLD2_BF16_DIT_GEMM=1
 python fold_big.py                          # one GPU
 torchrun --nproc-per-node=2 fold_big.py     # two GPUs; any number works
 ```
