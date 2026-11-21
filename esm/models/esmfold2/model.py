@@ -757,6 +757,8 @@ class EsmFold2Model(HubPreTrainedModel):
       default to ``config.structure_head``; the sigma cap truncates the schedule.
     * ``msa_max_depth`` / ``msa_column_mask_rate``: inference-time MSA diversity,
       defaulting to ``config.msa_encoder`` when ``None``.
+    * ``lm_hidden_states``: precomputed ESMC states used instead of the ESMC
+      pass. With neither these nor ``esmc`` the LM pathway is skipped.
 
     Unknown keywords raise ``TypeError``; only the inference-irrelevant keys the
     featurizer emits (``_IGNORED_FEATURE_KEYS``) are accepted and dropped.
@@ -1161,6 +1163,36 @@ class EsmFold2Model(HubPreTrainedModel):
             max_depth=depth,
             subsample_enabled=depth is not None,
         )
+
+    def compute_lm_hidden_states(
+        self,
+        input_ids: Tensor,
+        asym_id: Tensor,
+        residue_index: Tensor,
+        mol_type: Tensor,
+        token_attention_mask: Tensor,
+        lm_mask_pct: float | None = None,
+    ) -> Tensor:
+        """ESMC hidden states as ``forward`` computes them, for ``lm_hidden_states``.
+
+        As after ``forward``, the backbone is parked on the host afterwards when
+        offloading applies.
+        """
+        if self.esmc is None:
+            raise ValueError("compute_lm_hidden_states() needs an ESMC backbone.")
+        if lm_mask_pct is None:
+            lm_mask_pct = self.config.lm_mask_pct
+        try:
+            return self._compute_lm_hidden_states(
+                input_ids,
+                asym_id,
+                residue_index,
+                mol_type,
+                token_attention_mask,
+                lm_mask_pct=lm_mask_pct,
+            )
+        finally:
+            self._park_esmc_after_lm(token_attention_mask.shape[1])
 
     def _compute_lm_hidden_states(
         self,
